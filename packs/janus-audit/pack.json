@@ -1,0 +1,19 @@
+{
+  "addonType": "security",
+  "cloudTypes": ["all"],
+  "displayName": "Janus Audit - File Access Auditing",
+  "kubeManifestType": "helm",
+  "layer": "addon",
+  "name": "janus-audit",
+  "version": "2.0.0",
+  "constraints": {
+    "minKubeVersion": "1.28.0"
+  },
+  "annotations": {
+    "category": "Security",
+    "subcategory": "Audit Logging",
+    "description": "Real-time file access auditing and enforcement for Kubernetes using fanotify"
+  },
+  "supportedOS": ["linux"],
+  "supportedArchitectures": ["amd64", "arm64"]
+}

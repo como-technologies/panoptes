@@ -1,0 +1,9 @@
+apiVersion: argus.como-technologies.io/v1alpha1
+kind: ArgusWatcher
+metadata:
+  labels:
+    app.kubernetes.io/name: argus-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: arguswatcher-sample
+spec:
+  # TODO(user): Add fields here

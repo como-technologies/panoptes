@@ -1,0 +1,29 @@
+# Default preset - Standard deployment with all components
+# Use this for typical production deployments
+
+components:
+  argus:
+    enabled: true
+  janus:
+    enabled: true
+  dashboard:
+    enabled: true
+
+observability:
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+  grafana:
+    dashboards:
+      enabled: true
+
+alerting:
+  enabled: true
+  rules:
+    criticalFileModified:
+      enabled: true
+    highEventRate:
+      enabled: true
+    unauthorizedAccess:
+      enabled: true

@@ -1,0 +1,321 @@
+// Copyright 2026 Como Technologies, LTD
+// Licensed under the Apache License, Version 2.0
+
+syntax = "proto3";
+
+package janus.v1;
+
+option go_package = "github.com/como-technologies/panoptes/operators/janus-operator/pkg/proto/janus/v1;janusv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// JanusdService provides file access auditing and control capabilities
+// using fanotify to monitor and control file access in containers.
+service JanusdService {
+  // CreateGuard establishes a new file access guard for the specified configuration.
+  rpc CreateGuard(CreateGuardRequest) returns (CreateGuardResponse);
+
+  // DestroyGuard removes an existing file access guard.
+  rpc DestroyGuard(DestroyGuardRequest) returns (google.protobuf.Empty);
+
+  // GetGuardState retrieves the current state of all guards on this node.
+  rpc GetGuardState(GetGuardStateRequest) returns (stream GuardState);
+
+  // StreamAccessEvents provides a real-time stream of file access events.
+  rpc StreamAccessEvents(StreamAccessEventsRequest) returns (stream AccessEvent);
+
+  // GetMetrics retrieves current metrics for monitoring purposes.
+  rpc GetMetrics(GetMetricsRequest) returns (MetricsResponse);
+}
+
+// CreateGuardRequest contains configuration for creating a new guard.
+message CreateGuardRequest {
+  // guard_name is the name of the JanusGuard resource.
+  string guard_name = 1;
+
+  // namespace is the Kubernetes namespace of the JanusGuard.
+  string namespace = 2;
+
+  // node_name is the name of the Kubernetes node.
+  string node_name = 3;
+
+  // pod_name is the name of the pod being guarded.
+  string pod_name = 4;
+
+  // container_ids is the list of container IDs to guard.
+  repeated string container_ids = 5;
+
+  // pids is the list of process IDs to guard (derived from containers).
+  repeated int32 pids = 6;
+
+  // subjects defines what paths and access rules to enforce.
+  repeated GuardSubject subjects = 7;
+
+  // log_format is an optional custom log format template.
+  string log_format = 8;
+
+  // paused indicates the guard should not actively control access.
+  // When true, no fanotify guards will be created but the configuration
+  // is stored for auto-recreation when unpaused.
+  bool paused = 9;
+
+  // enforcing controls whether access denials are enforced.
+  // When true: blocked access is denied (FAN_DENY)
+  // When false (default): audit mode - log but allow all access (dry-run)
+  // This allows testing access policies before enforcement.
+  bool enforcing = 10;
+}
+
+// GuardSubject defines file access control rules.
+message GuardSubject {
+  // allow is the list of paths to explicitly allow access to.
+  repeated string allow = 1;
+
+  // deny is the list of paths to explicitly deny access to.
+  repeated string deny = 2;
+
+  // events is the list of fanotify event types to monitor.
+  repeated FanotifyEvent events = 3;
+
+  // only_dir restricts monitoring to directories only.
+  bool only_dir = 4;
+
+  // auto_allow_owner automatically allows access for the process owner.
+  bool auto_allow_owner = 5;
+
+  // audit enables kernel audit log integration.
+  bool audit = 6;
+
+  // default_response is the action when no rule matches.
+  AccessResponse default_response = 7;
+
+  // tags are custom key-value metadata for this guard subject.
+  map<string, string> tags = 8;
+}
+
+// FanotifyEvent represents supported fanotify event types.
+enum FanotifyEvent {
+  FANOTIFY_EVENT_UNSPECIFIED = 0;
+  FANOTIFY_EVENT_ACCESS = 1;      // File was accessed
+  FANOTIFY_EVENT_OPEN = 2;        // File was opened
+  FANOTIFY_EVENT_OPEN_EXEC = 3;   // File was opened for execution
+  FANOTIFY_EVENT_CLOSE_WRITE = 4; // File opened for writing was closed
+  FANOTIFY_EVENT_CLOSE = 5;       // File was closed
+  FANOTIFY_EVENT_ALL = 99;
+}
+
+// AccessResponse defines the action to take for file access.
+enum AccessResponse {
+  ACCESS_RESPONSE_UNSPECIFIED = 0;
+  ACCESS_RESPONSE_ALLOW = 1;      // Allow the access
+  ACCESS_RESPONSE_DENY = 2;       // Deny the access
+  ACCESS_RESPONSE_AUDIT = 3;      // Allow but audit
+}
+
+// CreateGuardResponse contains the result of a guard creation.
+message CreateGuardResponse {
+  // guard_id is the unique identifier for this guard.
+  string guard_id = 1;
+
+  // node_name is the node where the guard was created.
+  string node_name = 2;
+
+  // pod_name is the pod being guarded.
+  string pod_name = 3;
+
+  // guarded_paths is the number of paths being guarded.
+  int32 guarded_paths = 4;
+
+  // process_eventfds are the event file descriptors for process tracking.
+  repeated int32 process_eventfds = 5;
+
+  // paused indicates if the guard is currently paused.
+  bool paused = 6;
+
+  // enforcing indicates if the guard is actively enforcing (vs audit mode).
+  bool enforcing = 7;
+}
+
+// DestroyGuardRequest identifies a guard to remove.
+message DestroyGuardRequest {
+  // guard_name is the name of the JanusGuard resource.
+  string guard_name = 1;
+
+  // namespace is the Kubernetes namespace.
+  string namespace = 2;
+
+  // pod_name is the pod to stop guarding.
+  string pod_name = 3;
+}
+
+// GetGuardStateRequest filters which guard states to retrieve.
+message GetGuardStateRequest {
+  // guard_name filters by JanusGuard name (empty = all).
+  string guard_name = 1;
+
+  // namespace filters by namespace (empty = all).
+  string namespace = 2;
+}
+
+// GuardState represents the current state of a guard.
+message GuardState {
+  // guard_name is the name of the JanusGuard resource.
+  string guard_name = 1;
+
+  // namespace is the Kubernetes namespace.
+  string namespace = 2;
+
+  // node_name is the node running the guard.
+  string node_name = 3;
+
+  // pod_name is the pod being guarded.
+  string pod_name = 4;
+
+  // pids is the list of guarded process IDs.
+  repeated int32 pids = 5;
+
+  // process_eventfds are the event file descriptors for process tracking.
+  repeated int32 process_eventfds = 6;
+
+  // created_at is when the guard was established.
+  google.protobuf.Timestamp created_at = 7;
+
+  // subjects is the configured guard subjects (for config comparison).
+  repeated GuardSubject subjects = 8;
+
+  // log_format is the configured log format template.
+  string log_format = 9;
+
+  // paused indicates whether the guard is currently paused.
+  bool paused = 10;
+
+  // enforcing indicates whether the guard is enforcing (vs audit mode).
+  bool enforcing = 11;
+
+  // guarded_paths is the number of paths being guarded.
+  int32 guarded_paths = 12;
+}
+
+// StreamAccessEventsRequest filters the access event stream.
+message StreamAccessEventsRequest {
+  // guard_name filters by JanusGuard name (empty = all).
+  string guard_name = 1;
+
+  // namespace filters by namespace (empty = all).
+  string namespace = 2;
+
+  // event_types filters by event types (empty = all).
+  repeated FanotifyEvent event_types = 3;
+
+  // include_allowed includes allowed access events (default: denied only).
+  bool include_allowed = 4;
+}
+
+// AccessEvent represents a file access event.
+message AccessEvent {
+  // timestamp is when the event occurred.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // guard_name is the name of the JanusGuard that detected this.
+  string guard_name = 2;
+
+  // namespace is the Kubernetes namespace.
+  string namespace = 3;
+
+  // node_name is the node where the event occurred.
+  string node_name = 4;
+
+  // pod_name is the pod where the event occurred.
+  string pod_name = 5;
+
+  // container_id is the container where the event occurred.
+  string container_id = 6;
+
+  // event_type is the type of access event.
+  FanotifyEvent event_type = 7;
+
+  // path is the file path that was accessed.
+  string path = 8;
+
+  // response is the action taken (allowed/denied/audited).
+  AccessResponse response = 9;
+
+  // process_info contains information about the accessing process.
+  ProcessInfo process_info = 10;
+
+  // is_directory indicates if the path is a directory.
+  bool is_directory = 11;
+
+  // tags are custom metadata from the guard subject.
+  map<string, string> tags = 12;
+
+  // audit_logged indicates if this event was written to kernel audit log.
+  bool audit_logged = 13;
+}
+
+// ProcessInfo contains information about a process.
+message ProcessInfo {
+  // pid is the process ID.
+  int32 pid = 1;
+
+  // tid is the thread ID.
+  int32 tid = 2;
+
+  // uid is the user ID of the process.
+  int32 uid = 3;
+
+  // gid is the group ID of the process.
+  int32 gid = 4;
+
+  // comm is the command name (truncated to 16 chars).
+  string comm = 5;
+
+  // exe is the executable path.
+  string exe = 6;
+}
+
+// GetMetricsRequest specifies what metrics to retrieve.
+message GetMetricsRequest {
+  // guard_name filters by JanusGuard name (empty = all).
+  string guard_name = 1;
+}
+
+// MetricsResponse contains daemon metrics.
+message MetricsResponse {
+  // active_guards is the number of active guards.
+  int32 active_guards = 1;
+
+  // total_events_processed is the total number of access events processed.
+  int64 total_events_processed = 2;
+
+  // total_denied is the total number of denied accesses.
+  int64 total_denied = 3;
+
+  // total_allowed is the total number of allowed accesses.
+  int64 total_allowed = 4;
+
+  // guard_metrics contains per-guard metrics.
+  repeated GuardMetrics guard_metrics = 5;
+}
+
+// GuardMetrics contains metrics for a specific guard.
+message GuardMetrics {
+  // guard_name is the name of the JanusGuard.
+  string guard_name = 1;
+
+  // namespace is the Kubernetes namespace.
+  string namespace = 2;
+
+  // denied_count is the number of denied accesses.
+  int64 denied_count = 3;
+
+  // allowed_count is the number of allowed accesses.
+  int64 allowed_count = 4;
+
+  // audited_count is the number of audited accesses.
+  int64 audited_count = 5;
+
+  // event_counts contains counts by event type.
+  map<string, int64> event_counts = 6;
+}

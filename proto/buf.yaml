@@ -1,0 +1,18 @@
+# buf.yaml - Configuration for buf proto toolchain
+# https://buf.build/docs/configuration/v2/buf-yaml
+version: v2
+modules:
+  - path: .
+    name: buf.build/como-technologies/panoptes
+lint:
+  use:
+    - STANDARD
+  except:
+    - PACKAGE_VERSION_SUFFIX
+    - RPC_REQUEST_RESPONSE_UNIQUE    # Allow google.protobuf.Empty for multiple RPCs
+    - RPC_RESPONSE_STANDARD_NAME     # Allow non-standard response type names (e.g., FileEvent vs StreamEventsResponse)
+  ignore:
+    - grpc/health/v1                 # Standard gRPC health proto doesn't follow buf naming conventions
+breaking:
+  use:
+    - FILE

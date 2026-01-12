@@ -1,0 +1,147 @@
+# Panoptes Security Suite - Values
+# Copyright 2026 Como Technologies, LTD
+# Licensed under the Apache License, Version 2.0
+
+pack:
+  namespace: panoptes-system
+
+# Global cluster identification (for multi-cluster deployments)
+global:
+  cluster:
+    name: ""           # e.g., "prod-east-1"
+    environment: ""    # e.g., "production"
+    region: ""         # e.g., "us-east-1"
+
+# Enable/disable components
+components:
+  argus:
+    enabled: true
+  janus:
+    enabled: true
+  dashboard:
+    enabled: true
+
+# Argus FIM configuration
+argus:
+  controller:
+    image:
+      repository: gcr.io/spectro-images/argus-controller
+      tag: "2.0.0"
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+  daemon:
+    image:
+      repository: gcr.io/spectro-images/argusd
+      tag: "2.0.0"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+    # Node selector for daemon pods
+    nodeSelector: {}
+    tolerations:
+      - operator: Exists
+        effect: NoSchedule
+
+# Janus Audit configuration
+janus:
+  controller:
+    image:
+      repository: gcr.io/spectro-images/janus-controller
+      tag: "2.0.0"
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+  daemon:
+    image:
+      repository: gcr.io/spectro-images/janusd
+      tag: "2.0.0"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+    nodeSelector: {}
+    tolerations:
+      - operator: Exists
+        effect: NoSchedule
+
+# Panoptes Eye Dashboard
+dashboard:
+  image:
+    repository: gcr.io/spectro-images/panoptes-eye
+    tag: "1.0.0"
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 3000
+  ingress:
+    enabled: false
+    className: nginx
+    host: panoptes.example.com
+    tls:
+      enabled: false
+      secretName: panoptes-tls
+
+# Observability integration
+observability:
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+  opentelemetry:
+    enabled: false
+    endpoint: "otel-collector.monitoring:4317"
+    protocol: grpc  # grpc or http
+  grafana:
+    dashboards:
+      enabled: true
+      namespace: monitoring
+
+# Alerting configuration
+alerting:
+  enabled: true
+  rules:
+    criticalFileModified:
+      enabled: true
+      severity: critical
+    highEventRate:
+      enabled: true
+      threshold: 100  # events per 5 minutes
+      severity: warning
+    unauthorizedAccess:
+      enabled: true
+      severity: critical

@@ -1,0 +1,19 @@
+{
+  "addonType": "security",
+  "cloudTypes": ["all"],
+  "displayName": "Argus FIM - File Integrity Monitoring",
+  "kubeManifestType": "helm",
+  "layer": "addon",
+  "name": "argus-fim",
+  "version": "2.0.0",
+  "constraints": {
+    "minKubeVersion": "1.28.0"
+  },
+  "annotations": {
+    "category": "Security",
+    "subcategory": "File Integrity Monitoring",
+    "description": "Real-time file integrity monitoring for Kubernetes using inotify"
+  },
+  "supportedOS": ["linux"],
+  "supportedArchitectures": ["amd64", "arm64"]
+}

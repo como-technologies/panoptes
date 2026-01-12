@@ -1,0 +1,9 @@
+apiVersion: janus.como-technologies.io/v1alpha1
+kind: JanusGuard
+metadata:
+  labels:
+    app.kubernetes.io/name: janus-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: janusguard-sample
+spec:
+  # TODO(user): Add fields here

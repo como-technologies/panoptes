@@ -1,0 +1,55 @@
+# kind cluster configuration for Panoptes local development (WSL2)
+# Simplified configuration for Windows Subsystem for Linux 2
+#
+# Key differences from pure Linux version:
+# - Pinned to stable K8s 1.30.0 (avoids bleeding-edge compatibility issues)
+# - No /proc mount (causes issues in WSL2)
+# - No kubeadm patches (deprecated in newer K8s versions)
+# - No containerd registry patches (simplified)
+#
+# WSL2 Known Issues:
+# - Cgroups: https://kind.sigs.k8s.io/docs/user/known-issues/#failure-to-create-cluster-on-wsl2
+# - Fix: https://github.com/spurin/wsl-cgroupsv2
+#
+# Usage: kind create cluster --name panoptes-dev --config hack/kind-config-wsl.yaml
+#
+# Copyright 2026 Como Technologies, LTD
+# Licensed under Apache License 2.0
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+
+name: panoptes-dev
+
+# Multi-node cluster for realistic local testing
+nodes:
+  - role: control-plane
+    # Pin to stable K8s 1.30.0 (avoid bleeding-edge versions that may fail on WSL2)
+    image: kindest/node:v1.30.0@sha256:047357ac0cfea04663786a612ba1eaba9702bef25227a794b52890dd8bcd692e
+    # Port mappings for local access (only on control-plane node)
+    extraPortMappings:
+      # Panoptes Eye UI
+      - containerPort: 30080
+        hostPort: 3000
+        protocol: TCP
+      # Prometheus metrics (Argus)
+      - containerPort: 30081
+        hostPort: 8080
+        protocol: TCP
+      # Prometheus metrics (Janus)
+      - containerPort: 30082
+        hostPort: 8081
+        protocol: TCP
+  - role: worker
+    image: kindest/node:v1.30.0@sha256:047357ac0cfea04663786a612ba1eaba9702bef25227a794b52890dd8bcd692e
+  - role: worker
+    image: kindest/node:v1.30.0@sha256:047357ac0cfea04663786a612ba1eaba9702bef25227a794b52890dd8bcd692e
+
+# Networking configuration
+networking:
+  # Use default CNI
+  disableDefaultCNI: false
+  # Pod subnet (default)
+  podSubnet: "10.244.0.0/16"
+  # Service subnet (default)
+  serviceSubnet: "10.96.0.0/12"

@@ -1,0 +1,16 @@
+# Minimal JanusGuard example
+apiVersion: janus.como-technologies.io/v1
+kind: JanusGuard
+metadata:
+  name: basic-guard
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: myapp
+  subjects:
+    - deny:
+        - /etc/shadow
+      events:
+        - open
+      defaultResponse: audit

@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+/* Dark mode class-based switching */
+@variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Argus-eye custom color palette */
+  --color-mint: #c6f7e2;
+  --color-mint-dark: #27ab83;
+  --color-mint-light: #effcf6;
+  --color-cyan: #c1fef6;
+  --color-cyan-dark: #0a6c74;
+  --color-navy: #243b53;
+
+  /* Semantic colors using CSS variables */
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  /* Border radius */
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  /* Fonts */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-ubuntu-mono), "Ubuntu Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+@layer base {
+  :root {
+    /* Argus-eye inspired palette */
+    --background: 0 0% 100%;
+    --foreground: 213 41% 23%; /* navy #243b53 */
+    --card: 0 0% 100%;
+    --card-foreground: 213 41% 23%;
+    --primary: 162 61% 41%; /* mint-dark #27ab83 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 152 67% 95%; /* mint-light #effcf6 */
+    --secondary-foreground: 213 41% 23%;
+    --muted: 210 22% 92%; /* light gray-blue */
+    --muted-foreground: 213 20% 45%;
+    --accent: 152 82% 87%; /* mint #c6f7e2 */
+    --accent-foreground: 213 41% 23%;
+    --destructive: 356 75% 53%; /* #e12d39 */
+    --destructive-foreground: 0 0% 100%;
+    --border: 210 22% 87%; /* #d9e2ec */
+    --input: 210 22% 87%;
+    --ring: 162 61% 41%;
+    --radius: 0.6rem;
+  }
+
+  .dark {
+    --background: 213 41% 10%;
+    --foreground: 210 40% 94%;
+    --card: 213 41% 14%;
+    --card-foreground: 210 40% 94%;
+    --primary: 152 82% 87%; /* mint #c6f7e2 */
+    --primary-foreground: 213 41% 10%;
+    --secondary: 213 30% 20%;
+    --secondary-foreground: 210 40% 94%;
+    --muted: 213 30% 18%;
+    --muted-foreground: 210 20% 65%;
+    --accent: 162 61% 41%; /* mint-dark #27ab83 */
+    --accent-foreground: 0 0% 100%;
+    --destructive: 356 65% 45%;
+    --destructive-foreground: 210 40% 94%;
+    --border: 213 30% 22%;
+    --input: 213 30% 22%;
+    --ring: 152 82% 87%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

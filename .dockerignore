@@ -1,0 +1,45 @@
+# Build artifacts
+**/build/
+**/bin/
+**/obj/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Documentation (not needed in images)
+docs/
+*.md
+!README.md
+
+# Development files
+.claude/
+.devcontainer/
+.github/
+
+# Test artifacts
+**/testdata/
+**/*_test.go
+**/*_test.cc
+
+# Go
+vendor/
+
+# Node (for UI)
+**/node_modules/
+**/dist/
+
+# Python
+**/__pycache__/
+*.pyc
+
+# OS files
+.DS_Store
+Thumbs.db

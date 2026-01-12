@@ -1,0 +1,19 @@
+{
+  "addonType": "security",
+  "cloudTypes": ["all"],
+  "displayName": "Panoptes Security Suite",
+  "kubeManifestType": "helm",
+  "layer": "addon",
+  "name": "panoptes",
+  "version": "2.0.0",
+  "constraints": {
+    "minKubeVersion": "1.28.0"
+  },
+  "annotations": {
+    "category": "Security",
+    "subcategory": "File Integrity & Access Auditing",
+    "description": "All-seeing Kubernetes security: Argus (FIM) + Janus (Audit) + Panoptes Eye (Dashboard)"
+  },
+  "supportedOS": ["linux"],
+  "supportedArchitectures": ["amd64", "arm64"]
+}

@@ -1,0 +1,83 @@
+# Argus FIM - File Integrity Monitoring
+# Standalone pack for Argus deployment without Janus or Dashboard
+
+pack:
+  namespace: argus-system
+
+controller:
+  image:
+    repository: gcr.io/spectro-images/argus-controller
+    tag: "2.0.0"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+daemon:
+  image:
+    repository: gcr.io/spectro-images/argusd
+    tag: "2.0.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  # Node selector for daemon pods
+  nodeSelector: {}
+  # Tolerations for daemon pods (e.g., to run on control plane nodes)
+  tolerations:
+    - operator: Exists
+      effect: NoSchedule
+
+# Container runtime detection
+containerRuntime:
+  # auto, containerd, or cri-o
+  detection: auto
+
+# Observability configuration
+observability:
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+      namespace: ""  # Defaults to release namespace
+  opentelemetry:
+    enabled: false
+    endpoint: ""
+  grafana:
+    dashboards:
+      enabled: true
+      namespace: ""  # Defaults to release namespace
+
+# Alerting rules
+alerting:
+  enabled: true
+  rules:
+    criticalFileModified:
+      enabled: true
+      severity: critical
+    highEventRate:
+      enabled: true
+      threshold: 100
+      severity: warning
+
+# Global labels added to all resources
+global:
+  labels: {}
+  # Cluster identification for multi-cluster deployments
+  cluster:
+    name: ""
+    environment: ""
+    region: ""

@@ -1,0 +1,66 @@
+# Example JanusGuard for file access control and auditing
+apiVersion: janus.como-technologies.io/v1
+kind: JanusGuard
+metadata:
+  name: sensitive-data-guard
+  namespace: default
+  labels:
+    app.kubernetes.io/name: janus-operator
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  # Guard all pods with label app=api-server
+  selector:
+    matchLabels:
+      app: api-server
+
+  subjects:
+    # Protect sensitive configuration files
+    - deny:
+        - /etc/shadow
+        - /etc/sudoers
+        - /root/.ssh
+      allow:
+        - /etc/passwd
+        - /etc/group
+      events:
+        - open
+        - access
+      defaultResponse: deny
+      audit: true
+      tags:
+        severity: critical
+        compliance: pci-dss
+        category: system-credentials
+
+    # Audit all executable access
+    - allow:
+        - /usr/bin
+        - /usr/local/bin
+        - /app/bin
+      deny:
+        - /usr/bin/curl
+        - /usr/bin/wget
+        - /usr/bin/nc
+      events:
+        - execute
+      defaultResponse: audit
+      tags:
+        severity: high
+        category: executable-access
+
+    # Protect secrets mounted as volumes
+    - deny:
+        - /var/run/secrets
+      events:
+        - all
+      autoAllowOwner: true
+      defaultResponse: deny
+      audit: true
+      tags:
+        severity: critical
+        compliance: soc2
+        category: kubernetes-secrets
+
+  containerRuntime: auto
+  enforcing: true
+  paused: false

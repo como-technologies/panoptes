@@ -1,0 +1,82 @@
+
+================================================================================
+  Panoptes Security Suite - Installation Complete
+================================================================================
+
+  The all-seeing Kubernetes security monitoring suite has been deployed.
+
+  COMPONENTS INSTALLED:
+  {{- if .Values.components.argus.enabled }}
+  - Argus (File Integrity Monitoring)
+    - Controller: argus-controller
+    - Daemon: argusd (DaemonSet on all nodes)
+  {{- end }}
+  {{- if .Values.components.janus.enabled }}
+  - Janus (File Access Auditing)
+    - Controller: janus-controller
+    - Daemon: janusd (DaemonSet on all nodes)
+  {{- end }}
+  {{- if .Values.components.dashboard.enabled }}
+  - Panoptes Eye (Dashboard)
+    - UI available at: http://panoptes-eye.{{ .Release.Namespace }}.svc.cluster.local
+  {{- end }}
+
+  QUICK START:
+
+  1. Create an ArgusWatcher to monitor file changes:
+
+     kubectl apply -f - <<EOF
+     apiVersion: argus.como-technologies.io/v1
+     kind: ArgusWatcher
+     metadata:
+       name: critical-files
+       namespace: default
+     spec:
+       selector:
+         matchLabels:
+           app: my-app
+       subjects:
+         - paths:
+             - /etc/passwd
+             - /etc/shadow
+           events:
+             - modify
+             - delete
+           recursive: false
+     EOF
+
+  2. Create a JanusGuard to audit file access:
+
+     kubectl apply -f - <<EOF
+     apiVersion: janus.como-technologies.io/v1
+     kind: JanusGuard
+     metadata:
+       name: sensitive-files
+       namespace: default
+     spec:
+       selector:
+         matchLabels:
+           app: my-app
+       subjects:
+         - deny:
+             - /etc/shadow
+           events:
+             - access
+             - open
+           audit: true
+     EOF
+
+  {{- if .Values.components.dashboard.enabled }}
+  3. Access the dashboard:
+     {{- if .Values.dashboard.ingress.enabled }}
+     Visit: https://{{ .Values.dashboard.ingress.host }}
+     {{- else }}
+     kubectl port-forward svc/panoptes-eye -n {{ .Release.Namespace }} 3000:80
+     Visit: http://localhost:3000
+     {{- end }}
+  {{- end }}
+
+  DOCUMENTATION:
+  https://github.com/como-technologies/panoptes
+
+================================================================================

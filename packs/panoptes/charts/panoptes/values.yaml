@@ -1,0 +1,141 @@
+# Default values for panoptes.
+# This is a YAML-formatted file.
+
+# Global cluster identification
+global:
+  cluster:
+    name: ""
+    environment: ""
+    region: ""
+
+# Component toggles
+components:
+  argus:
+    enabled: true
+  janus:
+    enabled: true
+  dashboard:
+    enabled: true
+
+# Argus configuration
+argus:
+  controller:
+    image:
+      repository: gcr.io/spectro-images/argus-controller
+      tag: "2.0.0"
+      pullPolicy: IfNotPresent
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+  daemon:
+    image:
+      repository: gcr.io/spectro-images/argusd
+      tag: "2.0.0"
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+    nodeSelector: {}
+    tolerations:
+      - operator: Exists
+        effect: NoSchedule
+
+# Janus configuration
+janus:
+  controller:
+    image:
+      repository: gcr.io/spectro-images/janus-controller
+      tag: "2.0.0"
+      pullPolicy: IfNotPresent
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+  daemon:
+    image:
+      repository: gcr.io/spectro-images/janusd
+      tag: "2.0.0"
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+    nodeSelector: {}
+    tolerations:
+      - operator: Exists
+        effect: NoSchedule
+
+# Dashboard configuration
+dashboard:
+  image:
+    repository: gcr.io/spectro-images/panoptes-eye
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 3000
+  ingress:
+    enabled: false
+    className: nginx
+    host: panoptes.example.com
+    tls:
+      enabled: false
+      secretName: panoptes-tls
+
+# Observability
+observability:
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+  opentelemetry:
+    enabled: false
+    endpoint: ""
+  grafana:
+    dashboards:
+      enabled: true
+      namespace: monitoring
+
+# Alerting
+alerting:
+  enabled: true
+  rules:
+    criticalFileModified:
+      enabled: true
+    highEventRate:
+      enabled: true
+      threshold: 100
+    unauthorizedAccess:
+      enabled: true

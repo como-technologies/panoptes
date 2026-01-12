@@ -1,0 +1,85 @@
+# GitHub Actions workflow for proto linting and generation
+name: Proto CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'proto/**'
+      - '.github/workflows/proto.yaml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'proto/**'
+      - '.github/workflows/proto.yaml'
+
+jobs:
+  lint:
+    name: Lint Proto Files
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: proto
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          version: latest
+
+      - name: Lint
+        run: buf lint
+
+      - name: Format check
+        run: buf format --diff --exit-code
+
+  breaking:
+    name: Breaking Change Detection
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    defaults:
+      run:
+        working-directory: proto
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          version: latest
+
+      - name: Check for breaking changes
+        uses: bufbuild/buf-breaking-action@v1
+        with:
+          input: proto
+          against: 'https://github.com/${{ github.repository }}.git#branch=main,subdir=proto'
+
+  generate:
+    name: Generate Code
+    runs-on: ubuntu-latest
+    needs: lint
+    defaults:
+      run:
+        working-directory: proto
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          version: latest
+
+      - name: Generate
+        run: buf generate
+
+      - name: Check for uncommitted changes
+        run: |
+          if [ -n "$(git status --porcelain ../gen)" ]; then
+            echo "Generated code is out of date. Please run 'buf generate' and commit the changes."
+            git diff ../gen
+            exit 1
+          fi

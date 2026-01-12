@@ -1,0 +1,63 @@
+# Example ArgusWatcher for monitoring critical system files
+apiVersion: argus.como-technologies.io/v1
+kind: ArgusWatcher
+metadata:
+  name: critical-files-watcher
+  namespace: default
+  labels:
+    app.kubernetes.io/name: argus-operator
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  # Watch all pods with label app=nginx
+  selector:
+    matchLabels:
+      app: nginx
+
+  subjects:
+    # Monitor system configuration files
+    - paths:
+        - /etc/passwd
+        - /etc/shadow
+        - /etc/group
+        - /etc/sudoers
+      events:
+        - modify
+        - delete
+        - attrib
+      tags:
+        severity: critical
+        compliance: pci-dss
+        category: system-files
+
+    # Monitor application configuration
+    - paths:
+        - /etc/nginx
+        - /app/config
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 3
+      ignore:
+        - "*.tmp"
+        - "*.bak"
+        - "*~"
+      tags:
+        severity: high
+        category: app-config
+
+    # Monitor SSL certificates
+    - paths:
+        - /etc/ssl/certs
+        - /etc/ssl/private
+      events:
+        - all
+      recursive: true
+      tags:
+        severity: critical
+        compliance: soc2
+        category: certificates
+
+  containerRuntime: auto
+  paused: false

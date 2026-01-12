@@ -1,0 +1,76 @@
+# Compliance preset - PCI-DSS, SOC2, HIPAA ready configuration
+# Enhanced logging and auditing for compliance requirements
+
+components:
+  argus:
+    enabled: true
+  janus:
+    enabled: true
+  dashboard:
+    enabled: true
+
+# Enhanced resource limits for compliance workloads
+argus:
+  controller:
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+  daemon:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+janus:
+  controller:
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+  daemon:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+# Full observability stack for audit trails
+observability:
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 15s  # More frequent scraping
+  opentelemetry:
+    enabled: true
+    endpoint: "otel-collector.monitoring:4317"
+  grafana:
+    dashboards:
+      enabled: true
+
+# All alerting rules enabled with lower thresholds
+alerting:
+  enabled: true
+  rules:
+    criticalFileModified:
+      enabled: true
+      severity: critical
+    highEventRate:
+      enabled: true
+      threshold: 50  # Lower threshold for compliance
+      severity: warning
+    unauthorizedAccess:
+      enabled: true
+      severity: critical

@@ -1,0 +1,18 @@
+apiVersion: v2
+name: panoptes
+description: Panoptes Security Suite - All-seeing Kubernetes file integrity and access monitoring
+type: application
+version: 2.0.0
+appVersion: "2.0.0"
+keywords:
+  - security
+  - file-integrity
+  - monitoring
+  - audit
+  - kubernetes
+home: https://github.com/como-technologies/panoptes
+maintainers:
+  - name: Como Technologies
+    email: security@comotech.io
+annotations:
+  category: Security

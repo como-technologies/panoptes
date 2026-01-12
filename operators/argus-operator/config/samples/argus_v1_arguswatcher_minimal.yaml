@@ -1,0 +1,16 @@
+# Minimal ArgusWatcher example
+apiVersion: argus.como-technologies.io/v1
+kind: ArgusWatcher
+metadata:
+  name: basic-watcher
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: myapp
+  subjects:
+    - paths:
+        - /app/data
+      events:
+        - modify
+        - delete

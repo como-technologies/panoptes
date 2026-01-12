@@ -1,0 +1,93 @@
+# Janus Audit - File Access Auditing
+# Standalone pack for Janus deployment without Argus or Dashboard
+
+pack:
+  namespace: janus-system
+
+controller:
+  image:
+    repository: gcr.io/spectro-images/janus-controller
+    tag: "2.0.0"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+daemon:
+  image:
+    repository: gcr.io/spectro-images/janusd
+    tag: "2.0.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  # Node selector for daemon pods
+  nodeSelector: {}
+  # Tolerations for daemon pods (e.g., to run on control plane nodes)
+  tolerations:
+    - operator: Exists
+      effect: NoSchedule
+
+# Container runtime detection
+containerRuntime:
+  # auto, containerd, or cri-o
+  detection: auto
+
+# Enforcement mode (global default, can be overridden per JanusGuard)
+enforcement:
+  # true = block denied access, false = audit-only (dry-run)
+  enabled: true
+
+# Kernel audit integration
+audit:
+  # Write to kernel audit log (/var/log/audit/audit.log)
+  kernelAudit: true
+
+# Observability configuration
+observability:
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+      namespace: ""  # Defaults to release namespace
+  opentelemetry:
+    enabled: false
+    endpoint: ""
+  grafana:
+    dashboards:
+      enabled: true
+      namespace: ""  # Defaults to release namespace
+
+# Alerting rules
+alerting:
+  enabled: true
+  rules:
+    unauthorizedAccess:
+      enabled: true
+      severity: critical
+    highDenialRate:
+      enabled: true
+      threshold: 10
+      severity: warning
+
+# Global labels added to all resources
+global:
+  labels: {}
+  # Cluster identification for multi-cluster deployments
+  cluster:
+    name: ""
+    environment: ""
+    region: ""
