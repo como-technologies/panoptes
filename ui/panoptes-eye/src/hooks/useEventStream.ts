@@ -31,7 +31,10 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
   // This prevents SSR/hydration issues
   const handleEvent = useCallback(
     (event: StreamEvent) => {
-      const { incrementArgus, incrementJanus, addAlert } = useEventStats.getState();
+      const { incrementArgus, incrementJanus, addAlert, addEvent } = useEventStats.getState();
+
+      // Store the event in global store (for EventsPage to consume)
+      addEvent(event);
 
       // Update Zustand store with event counts
       if (event.source === 'argus') {

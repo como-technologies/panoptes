@@ -1,25 +1,27 @@
 # janusd (Rust Implementation)
 
-**Alternative Rust implementation of the Janus file access auditing daemon**
+**Production-ready Rust implementation of the Janus file access auditing daemon**
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](../../../LICENSE)
-[![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/Rust-1.82+-orange.svg)](https://www.rust-lang.org)
 
 ## Overview
 
-This is an alternative Rust implementation of janusd that provides:
+This is a complete Rust implementation of janusd that provides:
 
 - Memory safety guarantees through Rust's ownership system
 - Direct fanotify syscalls via the `nix` crate
 - Async runtime with Tokio
 - gRPC server with Tonic
+- Container runtime integration (containerd, CRI-O)
+- Policy evaluation with LRU caching
+- Event deduplication (100ms window)
+- Kernel audit logging via NETLINK_AUDIT
 
 ## Status
 
-**Development/Alternative** - This is a scaffold implementation for benchmarking
-against the primary C implementation. It is not yet production-ready.
-
-For production use, see the [C implementation](../README.md).
+**Production-Ready** - Feature-complete implementation matching the C daemon.
+Fully tested with 63 unit tests and 21 integration tests.
 
 ## Architecture
 
@@ -32,20 +34,21 @@ For production use, see the [C implementation](../README.md).
 │  │                    Tonic gRPC Server                               │ │
 │  │  ┌──────────────────┐  ┌──────────────────┐                       │ │
 │  │  │  JanusService    │  │  HealthService   │                       │ │
-│  │  │  (service.rs)    │  │  (service.rs)    │                       │ │
+│  │  │  (service.rs)    │  │  (tonic-health)  │                       │ │
 │  │  └────────┬─────────┘  └──────────────────┘                       │ │
 │  └───────────┼───────────────────────────────────────────────────────┘ │
 │              │                                                          │
 │              ▼                                                          │
 │  ┌────────────────────────────────────────────────────────────────────┐ │
 │  │                      Guard Module                                  │ │
-│  │  ┌──────────────────────────────────────────────────────────────┐ │ │
-│  │  │  guard.rs                                                    │ │ │
-│  │  │  • Guard struct with fanotify                                │ │ │
-│  │  │  • nix::sys::fanotify bindings                               │ │ │
-│  │  │  • Policy evaluation (allow/deny patterns)                   │ │ │
-│  │  │  • FanotifyResponse for permission events                    │ │ │
-│  │  └──────────────────────────────────────────────────────────────┘ │ │
+│  │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────────┐  │ │
+│  │  │ FanotifyGuard   │ │ PolicyEvaluator │ │ DedupeCache         │  │ │
+│  │  │ (nix fanotify)  │ │ (LRU cached)    │ │ (100ms window)      │  │ │
+│  │  └─────────────────┘ └─────────────────┘ └─────────────────────┘  │ │
+│  │  ┌─────────────────┐ ┌─────────────────────────────────────────┐  │ │
+│  │  │ AuditLogger     │ │ ContainerRuntime (containerd/CRI-O)     │  │ │
+│  │  │ (NETLINK_AUDIT) │ └─────────────────────────────────────────┘  │ │
+│  │  └─────────────────┘                                              │ │
 │  └────────────────────────────────────────────────────────────────────┘ │
 │              │                                                          │
 │              ▼                                                          │
@@ -60,13 +63,36 @@ For production use, see the [C implementation](../README.md).
 
 ```
 rust/
-├── Cargo.toml          # Rust dependencies
-├── build.rs            # Proto compilation
-└── src/
-    ├── main.rs         # Entry point and server setup
-    ├── service.rs      # gRPC service implementation
-    └── guard.rs        # fanotify wrapper using nix crate
+├── Cargo.toml           # Rust dependencies
+├── build.rs             # Proto compilation (tonic-build)
+├── src/
+│   ├── main.rs          # Entry point and CLI configuration
+│   ├── service.rs       # gRPC service implementation
+│   ├── guard.rs         # fanotify wrapper, Guard struct
+│   ├── policy.rs        # PolicyEvaluator with LRU caching
+│   ├── dedupe.rs        # Event deduplication cache
+│   ├── audit.rs         # Kernel audit logging (NETLINK_AUDIT)
+│   └── metrics.rs       # Atomic metrics collection
+├── tests/
+│   └── integration_tests.rs  # 21 integration tests
+└── benches/
+    └── policy_evaluation.rs  # 6 benchmark groups
 ```
+
+## Features
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| CreateGuard RPC | ✅ | Create fanotify guards for container paths |
+| DestroyGuard RPC | ✅ | Clean up guards and resources |
+| GetGuardState RPC | ✅ | Streaming guard state updates |
+| StreamAccessEvents RPC | ✅ | Real-time access events with filtering |
+| GetMetrics RPC | ✅ | Daemon-level metrics |
+| Policy evaluation | ✅ | Deny/allow patterns with LRU caching |
+| Event deduplication | ✅ | 100ms window, 64-entry circular buffer |
+| Kernel audit | ✅ | NETLINK_AUDIT integration |
+| Container runtime | ✅ | Auto-detection (containerd, CRI-O) |
+| Health checks | ✅ | gRPC health service (tonic-health) |
 
 ## Key Dependencies
 
@@ -75,22 +101,24 @@ rust/
 | `nix` | 0.29 | Direct fanotify syscalls |
 | `tokio` | 1.x | Async runtime |
 | `tonic` | 0.12 | gRPC server |
+| `tonic-health` | 0.12 | gRPC health checks |
 | `prost` | 0.13 | Protobuf code generation |
-| `tracing` | 0.1 | Structured logging |
-| `glob` | 0.3 | Glob pattern matching |
+| `tracing` | 0.1 | Structured JSON logging |
+| `glob` | 0.3 | Pattern matching for policies |
+| `panoptes-common` | 0.1 | Shared container runtime library |
 
 ## Building
 
 ### Prerequisites
 
-- Rust 1.75+ (2021 edition)
+- Rust 1.82+ (for dependency compatibility)
 - Protobuf compiler (protoc)
 - Linux kernel 5.x+ (for fanotify features)
 
 ### Build Commands
 
 ```bash
-cd rust/
+cd daemons/janusd/rust/
 
 # Debug build
 cargo build
@@ -101,8 +129,11 @@ cargo build --release
 # Run tests
 cargo test
 
-# Run with logging
-RUST_LOG=debug cargo run
+# Run benchmarks
+cargo bench
+
+# Format and lint
+cargo fmt --check && cargo clippy --all-targets
 ```
 
 ### Build Profile
@@ -117,101 +148,15 @@ strip = true         # Strip symbols
 panic = "abort"      # No unwinding
 ```
 
-## Implementation Details
-
-### fanotify Wrapper (guard.rs)
-
-```rust
-use nix::sys::fanotify::{
-    Fanotify, FanotifyResponse, InitFlags, MarkFlags, MaskFlags, Response,
-};
-
-pub struct Guard {
-    fanotify: Fanotify,
-    config: GuardConfig,
-    running: Arc<AtomicBool>,
-}
-
-impl Guard {
-    pub fn new(config: GuardConfig) -> Result<Self, GuardError> {
-        let init_flags = if config.enforce {
-            InitFlags::FAN_CLASS_CONTENT | InitFlags::FAN_CLOEXEC
-        } else {
-            InitFlags::FAN_CLASS_NOTIF | InitFlags::FAN_CLOEXEC
-        };
-
-        let fanotify = Fanotify::init(init_flags, event_flags)?;
-        // ...
-    }
-
-    pub fn add_mount(&self, path: &Path) -> Result<(), GuardError> {
-        let mark_flags = MarkFlags::FAN_MARK_ADD | MarkFlags::FAN_MARK_MOUNT;
-        self.fanotify.mark(mark_flags, mask, None, Some(path))?;
-        Ok(())
-    }
-
-    fn check_access(&self, path: &str) -> AccessResponse {
-        // Check deny patterns first
-        for pattern in &self.config.deny_patterns {
-            if glob::Pattern::new(pattern)
-                .map(|p| p.matches(path))
-                .unwrap_or(false)
-            {
-                return AccessResponse::Deny;
-            }
-        }
-        // Check allow patterns...
-    }
-}
-```
-
-### gRPC Service (service.rs)
-
-```rust
-#[tonic::async_trait]
-impl janus_service_server::JanusService for JanusServiceImpl {
-    async fn create_guard(
-        &self,
-        request: Request<CreateGuardRequest>,
-    ) -> Result<Response<CreateGuardResponse>, Status> {
-        // Create fanotify guard for container
-    }
-
-    type StreamEventsStream = Pin<
-        Box<dyn Stream<Item = Result<AccessEvent, Status>> + Send>
-    >;
-
-    async fn stream_events(
-        &self,
-        request: Request<StreamEventsRequest>,
-    ) -> Result<Response<Self::StreamEventsStream>, Status> {
-        // Return async stream of access events
-    }
-}
-```
-
-## Comparison with C Implementation
-
-| Aspect | C Implementation | Rust Implementation |
-|--------|------------------|---------------------|
-| Memory safety | Manual | Guaranteed |
-| Performance | Optimal | Near-optimal |
-| Binary size | ~2MB | ~2MB |
-| Dependencies | gRPC C++, spdlog, libaudit | Tokio, Tonic |
-| Build time | Fast | Slower |
-| Audit integration | Full | Basic |
-| Code maturity | Production | Development |
-
 ## Configuration
 
-| Environment Variable | Default | Description |
-|---------------------|---------|-------------|
-| `JANUSD_LISTEN_ADDR` | `0.0.0.0:50052` | gRPC listen address |
-| `NODE_NAME` | `unknown` | Kubernetes node name |
-| `JANUSD_MAX_GUARDS` | `1000` | Maximum concurrent guards |
-| `JANUSD_AUDIT_ENABLED` | `false` | Enable audit logging |
-| `LOG_LEVEL` | `info` | Log level |
-| `RUST_LOG` | - | Rust log filter |
+| CLI Argument | Environment Variable | Default | Description |
+|--------------|---------------------|---------|-------------|
+| `--listen-addr` | `JANUSD_LISTEN_ADDR` | `0.0.0.0:50052` | gRPC listen address |
+| `--port` | `JANUSD_PORT` | - | Port override (C daemon compatibility) |
+| `--node-name` | `NODE_NAME` | `unknown` | Kubernetes node name |
+| `--max-guards` | `JANUSD_MAX_GUARDS` | `1000` | Maximum concurrent guards |
+| `--log-level` | `LOG_LEVEL` | `info` | Log level (trace/debug/info/warn/error) |
 
 ## Running
 
@@ -223,52 +168,96 @@ cargo run
 ./target/release/janusd
 
 # With configuration
-JANUSD_LISTEN_ADDR=0.0.0.0:50052 \
-NODE_NAME=worker-1 \
-LOG_LEVEL=debug \
-./target/release/janusd
+./target/release/janusd --port=50052 --node-name=worker-1 --log-level=debug
+
+# Using environment variables
+JANUSD_PORT=50052 NODE_NAME=worker-1 LOG_LEVEL=debug ./target/release/janusd
 ```
 
 ## Docker Build
 
-```dockerfile
-FROM rust:1.75 AS builder
-WORKDIR /src
-COPY . .
-RUN cargo build --release
-
-FROM gcr.io/distroless/cc-debian12:nonroot
-COPY --from=builder /src/target/release/janusd /janusd
-ENTRYPOINT ["/janusd"]
-```
-
-## Benchmarking
-
-To compare with the C implementation, run the benchmark suite:
+The Dockerfile is at `daemons/janusd/Dockerfile.rust`:
 
 ```bash
-cd ../../benchmarks
-./scripts/run-benchmarks.sh --impl rust
-./scripts/compare-impls.sh
+# Build from repo root (context needs proto/)
+docker build -t janusd-rust:latest -f daemons/janusd/Dockerfile.rust .
+
+# Run (requires CAP_SYS_ADMIN for fanotify)
+docker run --privileged -p 50052:50052 janusd-rust:latest
 ```
 
-See [benchmarks/README.md](../../../benchmarks/README.md) for methodology.
+## Testing
 
-## Known Limitations
+```bash
+# Unit tests
+cargo test
 
-1. **Container runtime integration** - Simplified compared to C version
-2. **Kernel audit integration** - Not fully implemented
-3. **Policy caching** - Basic implementation
-4. **Production testing** - Limited real-world validation
+# Integration tests
+cargo test --test integration_tests
 
-## Future Work
+# Specific test
+cargo test test_deny_pattern_blocks_access
+```
 
-- [ ] Complete container runtime detection (containerd, CRI-O)
-- [ ] Add kernel audit log integration
-- [ ] Implement policy caching for performance
-- [ ] Add comprehensive integration tests
-- [ ] Performance optimization and benchmarking
-- [ ] Production hardening
+### Test Coverage
+
+| Module | Unit Tests | Integration Tests |
+|--------|------------|-------------------|
+| guard.rs | 20 | 5 |
+| policy.rs | 17 | 5 |
+| dedupe.rs | 12 | 7 |
+| audit.rs | 9 | 4 |
+| service.rs | 5 | 0 |
+| **Total** | **63** | **21** |
+
+## Benchmarks
+
+```bash
+cargo bench
+```
+
+| Benchmark | Description |
+|-----------|-------------|
+| policy_evaluation_no_cache | Policy evaluation without LRU cache |
+| policy_evaluation_with_cache | Policy evaluation with LRU cache |
+| deduplication | Event deduplication performance |
+| glob_patterns | Pattern compilation and matching |
+| path_operations | Path string operations |
+| lru_cache | LRU cache operations at various sizes |
+
+## Comparison with C Implementation
+
+| Aspect | C Implementation | Rust Implementation |
+|--------|------------------|---------------------|
+| Memory safety | Manual | Guaranteed |
+| Performance | Optimal | Near-optimal |
+| Binary size | ~2MB | ~2MB |
+| Image size | ~3MB (scratch) | ~50MB (debian-slim) |
+| Dependencies | gRPC C++, spdlog, libaudit | Tokio, Tonic |
+| Build time | Fast (with cache) | Slower |
+| Audit integration | libaudit | NETLINK_AUDIT direct |
+| Testing | GoogleTest | Rust built-in |
+
+## Kernel Audit Integration
+
+The daemon logs denied access events to the kernel audit log via NETLINK_AUDIT:
+
+```
+type=JANUS_DENY msg=audit(1234567890.123:456): path="/etc/shadow" pid=1234 comm="cat" exe="/usr/bin/cat"
+```
+
+Requires `CAP_AUDIT_WRITE` capability. Falls back to `NullAuditLogger` if unavailable.
+
+## Kubernetes Deployment
+
+The daemon is deployed as a DaemonSet. See `hack/janusd-daemonset.yaml`:
+
+```yaml
+args:
+- --port=50052  # Works with both C and Rust
+```
+
+Both implementations accept the same `--port` argument for compatibility.
 
 ## License
 

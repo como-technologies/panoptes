@@ -5,10 +5,17 @@ FROM golang:1.24 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
+# Install buf for proto generation
+RUN curl -sSL "https://github.com/bufbuild/buf/releases/latest/download/buf-Linux-x86_64" -o /usr/local/bin/buf && chmod +x /usr/local/bin/buf
+
 WORKDIR /workspace
 
-# Copy the shared gen/go module first (required by replace directive in go.mod)
-COPY gen/go gen/go
+# Copy proto definitions and generate Go code
+COPY proto proto
+RUN cd proto && buf generate && \
+    cd ../gen/go && \
+    go mod init github.com/como-technologies/panoptes/gen/go && \
+    go mod tidy
 
 # Copy the operator's Go Modules manifests
 COPY operators/argus-operator/go.mod operators/argus-operator/go.mod
@@ -28,6 +35,8 @@ COPY operators/argus-operator operators/argus-operator
 # the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
 WORKDIR /workspace/operators/argus-operator
+# Reconcile dependencies between generated proto and operator
+RUN go mod tidy
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
 
 # Use distroless as minimal base image to package the manager binary

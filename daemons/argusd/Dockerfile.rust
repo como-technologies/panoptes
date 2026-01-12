@@ -1,0 +1,46 @@
+# Copyright 2026 Como Technologies, LTD
+# Licensed under the Apache License, Version 2.0
+#
+# Multi-stage Dockerfile for argusd (Rust) - File Integrity Monitoring daemon
+# Produces a minimal binary using musl for static linking
+
+# Stage 1: Build argusd
+FROM rust:bookworm AS builder
+
+# Install protoc for tonic-build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    protobuf-compiler \
+    libprotobuf-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Copy proto files
+COPY proto/ ./proto/
+
+# Copy shared library
+COPY daemons/common/rust/ ./daemons/common/rust/
+
+# Copy daemon source
+COPY daemons/argusd/rust/ ./daemons/argusd/rust/
+
+# Build in release mode with optimizations
+RUN cd daemons/argusd/rust && cargo build --release
+
+# Stage 2: Minimal runtime image
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+LABEL org.opencontainers.image.title="argusd"
+LABEL org.opencontainers.image.description="Argus File Integrity Monitoring Daemon (Rust)"
+LABEL org.opencontainers.image.version="2.0.0"
+LABEL org.opencontainers.image.vendor="Como Technologies, LTD"
+
+COPY --from=builder /build/daemons/argusd/rust/target/release/argusd /argusd
+
+EXPOSE 50051
+
+ENTRYPOINT ["/argusd"]

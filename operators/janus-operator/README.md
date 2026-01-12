@@ -39,9 +39,9 @@ functionality.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                         Janus Architecture                               │
+│                         Janus Architecture                              │
 ├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
+│                                                                         │
 │  ┌────────────────────┐         ┌────────────────────────────────────┐  │
 │  │   JanusGuard CR    │────────▶│         Janus Operator             │  │
 │  │                    │         │  ┌──────────────────────────────┐  │  │
@@ -52,32 +52,32 @@ functionality.
 │  │       deny: [...]  │         │  │  • Update status             │  │  │
 │  │   enforcing: true  │         │  └──────────────────────────────┘  │  │
 │  └────────────────────┘         └───────────────┬────────────────────┘  │
-│                                                 │ gRPC                   │
-│                                                 ▼                        │
+│                                                 │ gRPC                  │
+│                                                 ▼                       │
 │  ┌──────────────────────────────────────────────────────────────────┐   │
-│  │                    janusd DaemonSet                               │   │
+│  │                    janusd DaemonSet                              │   │
 │  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐              │   │
 │  │  │ janusd  │  │ janusd  │  │ janusd  │  │ janusd  │   (per node) │   │
 │  │  │ Node 1  │  │ Node 2  │  │ Node 3  │  │ Node N  │              │   │
 │  │  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘              │   │
-│  │       │            │            │            │                    │   │
-│  │       └────────────┴────────────┴────────────┘                    │   │
-│  │                         │                                         │   │
+│  │       │            │            │            │                   │   │
+│  │       └────────────┴────────────┴────────────┘                   │   │
+│  │                         │                                        │   │
 │  │         fanotify_mark() with FAN_ACCESS_PERM / FAN_OPEN_PERM     │   │
-│  │                         ▼                                         │   │
+│  │                         ▼                                        │   │
 │  │  ┌──────────────────────────────────────────────────────────┐    │   │
-│  │  │              Linux Kernel (fanotify subsystem)            │    │   │
+│  │  │              Linux Kernel (fanotify subsystem)           │    │   │
 │  │  │  • FAN_ACCESS_PERM - permission request for read         │    │   │
 │  │  │  • FAN_OPEN_PERM - permission request for open           │    │   │
-│  │  │  • Response: FAN_ALLOW or FAN_DENY                        │    │   │
+│  │  │  • Response: FAN_ALLOW or FAN_DENY                       │    │   │
 │  │  └──────────────────────────────────────────────────────────┘    │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
-│                                                                          │
+│                                                                         │
 │  ┌──────────────────────────────────────────────────────────────────┐   │
-│  │                    Kernel Audit Subsystem                         │   │
+│  │                    Kernel Audit Subsystem                        │   │
 │  │  • Audit log entries for access events                           │   │
-│  │  • Integration with auditd                                        │   │
-│  │  • SIEM-ready log format                                          │   │
+│  │  • Integration with auditd                                       │   │
+│  │  • SIEM-ready log format                                         │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────┘
 ```

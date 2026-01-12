@@ -243,16 +243,46 @@ Docker and rkt support has been removed (deprecated in Kubernetes).
 
 ## Docker Image
 
+### Switching Between C and Rust Implementations
+
+The daemon has two Docker build configurations:
+
+| Implementation | Dockerfile | Description |
+|----------------|------------|-------------|
+| **C/C++** | `Dockerfile.c` | Primary production version, fully static binary |
+| **Rust** | `Dockerfile.rust` | Alternative implementation with memory safety |
+
+The `Dockerfile` is a symlink that points to the active implementation (defaults to Rust).
+
+**To switch implementations:**
+
+```bash
+cd daemons/argusd
+
+# Use Rust implementation (default)
+ln -sf Dockerfile.rust Dockerfile
+
+# Use C implementation
+ln -sf Dockerfile.c Dockerfile
+```
+
+**Rebuild after switching:**
+
+```bash
+# From repository root (build context needs proto/ and daemons/common/)
+docker build -t argusd:2.0.0 -f daemons/argusd/Dockerfile .
+```
+
 ### Multi-stage Build
 
 The Dockerfile uses a multi-stage build:
 
-1. **Builder stage**: Ubuntu 24.04 with build tools
-2. **Runtime stage**: Distroless base for minimal attack surface
+1. **Builder stage**: Ubuntu 24.04 with build tools (C) or Rust 1.75 (Rust)
+2. **Runtime stage**: Minimal image for minimal attack surface
 
 ```bash
-# Build image
-docker build -t argusd:2.0.0 .
+# Build image (from repo root)
+docker build -t argusd:2.0.0 -f daemons/argusd/Dockerfile .
 
 # Run (requires privileged for inotify)
 docker run --privileged -p 50051:50051 argusd:2.0.0

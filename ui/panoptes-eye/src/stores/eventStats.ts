@@ -12,6 +12,18 @@ export interface Alert {
   timestamp: string;
 }
 
+export interface StreamEvent {
+  id: string;
+  timestamp: string;
+  source: 'argus' | 'janus';
+  eventType: string;
+  path: string;
+  podName: string;
+  action: 'allowed' | 'denied' | 'audit' | 'detected';
+  nodeName: string;
+  namespace?: string;
+}
+
 interface EventStatsState {
   // Counts
   argusEvents: number;
@@ -20,6 +32,9 @@ interface EventStatsState {
   allowedEvents: number;
   auditEvents: number;
 
+  // Events
+  recentEvents: StreamEvent[];
+
   // Alerts
   alerts: Alert[];
 }
@@ -27,6 +42,8 @@ interface EventStatsState {
 interface EventStatsActions {
   incrementArgus: () => void;
   incrementJanus: (action: 'allowed' | 'denied' | 'audit') => void;
+  addEvent: (event: StreamEvent) => void;
+  clearEvents: () => void;
   addAlert: (alert: Omit<Alert, 'id' | 'timestamp'>) => void;
   dismissAlert: (id: string) => void;
   clearAlerts: () => void;
@@ -36,6 +53,7 @@ interface EventStatsActions {
 type EventStatsStore = EventStatsState & EventStatsActions;
 
 const MAX_ALERTS = 100;
+const MAX_EVENTS = 500;
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -49,6 +67,7 @@ export const useEventStats = create<EventStatsStore>()((set) => ({
   deniedEvents: 0,
   allowedEvents: 0,
   auditEvents: 0,
+  recentEvents: [],
   alerts: [],
 
   incrementArgus: () => {
@@ -69,6 +88,20 @@ export const useEventStats = create<EventStatsStore>()((set) => ({
       }
       return updates;
     });
+  },
+
+  addEvent: (event) => {
+    set((state) => {
+      const events = [event, ...state.recentEvents];
+      if (events.length > MAX_EVENTS) {
+        events.splice(MAX_EVENTS);
+      }
+      return { recentEvents: events };
+    });
+  },
+
+  clearEvents: () => {
+    set({ recentEvents: [] });
   },
 
   addAlert: (alert) => {
@@ -104,6 +137,7 @@ export const useEventStats = create<EventStatsStore>()((set) => ({
       deniedEvents: 0,
       allowedEvents: 0,
       auditEvents: 0,
+      recentEvents: [],
       alerts: [],
     });
   },
@@ -203,4 +237,23 @@ export function useAlerts(): AlertsData {
   }, []);
 
   return alertsData;
+}
+
+// SSR-safe hook for recent events
+export function useRecentEvents(): StreamEvent[] {
+  const [events, setEvents] = useState<StreamEvent[]>([]);
+
+  useEffect(() => {
+    // Get initial state on mount
+    setEvents(useEventStats.getState().recentEvents);
+
+    // Subscribe to changes
+    const unsubscribe = useEventStats.subscribe((state) => {
+      setEvents(state.recentEvents);
+    });
+
+    return unsubscribe;
+  }, []);
+
+  return events;
 }

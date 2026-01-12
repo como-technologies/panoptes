@@ -1,0 +1,39 @@
+[package]
+name = "panoptes-common"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Shared utilities for Panoptes daemons - container runtime detection and process info resolution"
+repository = "https://github.com/panoptes-project/panoptes"
+keywords = ["kubernetes", "containers", "security", "fim"]
+categories = ["os::linux-apis"]
+
+[dependencies]
+# Error handling
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
+
+# Time handling for glog format
+chrono = "0.4"
+
+# Async runtime
+tokio = { version = "1", features = ["fs", "sync", "rt", "macros", "rt-multi-thread"] }
+tokio-stream = "0.1"
+
+# gRPC support (optional, for grpc helpers)
+tonic = { version = "0.12", optional = true }
+
+# Security
+caps = "0.5"
+
+[dev-dependencies]
+tempfile = "3.10"
+tokio-test = "0.4"
+
+[features]
+default = []
+# Enable mock implementations for testing
+mock = []
+# Enable gRPC streaming helpers (requires tonic)
+grpc = ["tonic"]

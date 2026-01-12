@@ -478,6 +478,9 @@ func (r *ArgusWatcherReconciler) watchConfigMatches(watcher *argusv1.ArgusWatche
 }
 
 // setCondition sets a condition on the ArgusWatcher status.
+// Note: We do NOT set LastTransitionTime explicitly - meta.SetStatusCondition()
+// will preserve the existing timestamp if the condition status hasn't changed,
+// preventing unnecessary reconciliation loops.
 func (r *ArgusWatcherReconciler) setCondition(watcher *argusv1.ArgusWatcher, conditionType string, status metav1.ConditionStatus, reason, message string) {
 	meta.SetStatusCondition(&watcher.Status.Conditions, metav1.Condition{
 		Type:               conditionType,
@@ -485,7 +488,6 @@ func (r *ArgusWatcherReconciler) setCondition(watcher *argusv1.ArgusWatcher, con
 		ObservedGeneration: watcher.Generation,
 		Reason:             reason,
 		Message:            message,
-		LastTransitionTime: metav1.Now(),
 	})
 
 	// Update condition metric

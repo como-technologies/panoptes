@@ -23,6 +23,12 @@ generate: lint
 	@echo "Generating Go code from protos..."
 	@mkdir -p $(GEN_DIR)/go
 	buf generate
+	@# Create go.mod for the generated module if it doesn't exist
+	@if [ ! -f $(GEN_DIR)/go/go.mod ]; then \
+		echo "Initializing go.mod for generated code..."; \
+		cd $(GEN_DIR)/go && go mod init github.com/como-technologies/panoptes/gen/go; \
+	fi
+	@cd $(GEN_DIR)/go && go mod tidy
 
 # Lint proto files
 lint:

@@ -1,7 +1,8 @@
 # Panoptes Benchmark Suite
 # Copyright 2026 Como Technologies, LTD
 
-.PHONY: all build bench compare report clean help
+.PHONY: all build bench compare report clean help \
+       build-containers bench-containers compare-containers image-sizes
 
 # Configuration
 SCENARIO ?= all
@@ -25,12 +26,22 @@ help:
 	@echo ""
 	@echo "Usage: make <target> [OPTION=value]"
 	@echo ""
-	@echo "Targets:"
+	@echo "Local Binary Targets:"
 	@echo "  build      Build all components (daemons + event generator)"
-	@echo "  bench      Run benchmarks"
+	@echo "  bench      Run benchmarks against local binaries"
 	@echo "  compare    Generate comparison between C and Rust implementations"
 	@echo "  report     Generate HTML report from results"
-	@echo "  clean      Clean build artifacts and results"
+	@echo ""
+	@echo "Container Targets:"
+	@echo "  build-containers      Build all Docker images"
+	@echo "  bench-containers      Run benchmarks in containers"
+	@echo "  compare-containers    Compare containerized implementations"
+	@echo "  image-sizes           Show Docker image sizes"
+	@echo "  containers-all        Full container workflow (build + bench + compare)"
+	@echo ""
+	@echo "Cleanup Targets:"
+	@echo "  clean                 Clean build artifacts and results"
+	@echo "  clean-containers      Remove Docker images and volumes"
 	@echo ""
 	@echo "Options:"
 	@echo "  SCENARIO   Scenario to run (high-event-rate, deep-recursion, large-file-count, mixed-workload, all)"
@@ -41,7 +52,9 @@ help:
 	@echo "Examples:"
 	@echo "  make bench SCENARIO=high-event-rate IMPL=c DURATION=600"
 	@echo "  make compare"
-	@echo "  make report"
+	@echo "  make build-containers"
+	@echo "  make bench-containers SCENARIO=high-event-rate DURATION=60"
+	@echo "  make containers-all"
 
 # Build all components
 build: build-daemons build-event-generator
@@ -105,6 +118,61 @@ report:
 		echo "Python3 not found. Install it to generate reports."; \
 	fi
 
+# ============================================
+# Container-based benchmarks
+# ============================================
+
+# Build all container images (daemons + event generator)
+build-containers: build-event-generator-container
+	@echo "Building daemon container images..."
+	./scripts/build-containers.sh
+
+# Build specific container image
+build-container-%:
+	@echo "Building $* container..."
+	./scripts/build-containers.sh $*
+
+# Run container benchmarks
+bench-containers:
+	@echo "Running container benchmarks..."
+	./scripts/run-container-bench.sh \
+		--scenario $(SCENARIO) \
+		--impl $(IMPL) \
+		--duration $(DURATION)
+
+# Quick container benchmark (shorter duration)
+bench-containers-quick:
+	$(MAKE) bench-containers DURATION=30
+
+# Compare container implementations
+compare-containers:
+	@echo "Generating container comparison..."
+	./scripts/compare-impls.sh $(OUTPUT_DIR) --container
+
+# Report image sizes
+image-sizes:
+	@echo "Docker Image Sizes:"
+	@echo "==================="
+	@docker images --format "table {{.Repository}}:{{.Tag}}\t{{.Size}}" | grep panoptes || echo "No panoptes images found"
+	@echo ""
+	@if [ -f $(OUTPUT_DIR)/image-sizes.json ]; then \
+		echo "Detailed sizes in: $(OUTPUT_DIR)/image-sizes.json"; \
+		cat $(OUTPUT_DIR)/image-sizes.json; \
+	fi
+
+# Build event generator container (used for container benchmarks)
+build-event-generator-container:
+	@echo "Building event generator container..."
+	docker build -t panoptes/event-generator:latest -f Dockerfile.event-generator .
+
+# Full container workflow
+containers-all: build-containers bench-containers compare-containers
+	@echo "Container benchmark workflow complete!"
+
+# ============================================
+# Cleanup
+# ============================================
+
 # Clean
 clean:
 	rm -f $(EVENT_GEN)
@@ -115,3 +183,8 @@ clean-all: clean
 	cd ../daemons/janusd/c && rm -rf build
 	cd ../daemons/argusd/rust && cargo clean
 	cd ../daemons/janusd/rust && cargo clean
+
+clean-containers:
+	@echo "Cleaning container images..."
+	docker rmi panoptes/argusd:c panoptes/argusd:rust panoptes/janusd:c panoptes/janusd:rust panoptes/event-generator:latest 2>/dev/null || true
+	docker volume rm panoptes_bench-data 2>/dev/null || true

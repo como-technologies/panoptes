@@ -460,6 +460,9 @@ func (r *JanusGuardReconciler) guardConfigMatches(guard *janusv1.JanusGuard, act
 }
 
 // setCondition sets a condition on the JanusGuard status.
+// Note: We do NOT set LastTransitionTime explicitly - meta.SetStatusCondition()
+// will preserve the existing timestamp if the condition status hasn't changed,
+// preventing unnecessary reconciliation loops.
 func (r *JanusGuardReconciler) setCondition(guard *janusv1.JanusGuard, conditionType string, status metav1.ConditionStatus, reason, message string) {
 	meta.SetStatusCondition(&guard.Status.Conditions, metav1.Condition{
 		Type:               conditionType,
@@ -467,7 +470,6 @@ func (r *JanusGuardReconciler) setCondition(guard *janusv1.JanusGuard, condition
 		ObservedGeneration: guard.Generation,
 		Reason:             reason,
 		Message:            message,
-		LastTransitionTime: metav1.Now(),
 	})
 
 	var value float64

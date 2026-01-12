@@ -296,7 +296,7 @@ spec:
   selector:
     matchLabels:
       app: test-app
-  enforcing: false
+  enforcing: true
   subjects:
     - deny:
         - /etc/shadow

@@ -1,24 +1,13 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState } from 'react';
 import { Activity, Pause, Play, Trash2, Filter, Download, AlertCircle, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useEventStats, useEventCounts } from '@/stores/eventStats';
+import { useEventStats, useEventCounts, useRecentEvents, type StreamEvent } from '@/stores/eventStats';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { SearchInput } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/select';
-
-interface StreamEvent {
-  id: string;
-  timestamp: string;
-  source: 'argus' | 'janus';
-  eventType: string;
-  path: string;
-  podName: string;
-  action: 'allowed' | 'denied' | 'audit';
-  nodeName: string;
-}
 
 const EVENT_TYPE_OPTIONS = [
   { value: 'access', label: 'Access' },
@@ -41,74 +30,29 @@ const ACTION_OPTIONS = [
 ];
 
 export default function EventsPage() {
-  const [events, setEvents] = useState<StreamEvent[]>([]);
+  // Get events from global store (populated by EventStreamSubscriber in providers.tsx)
+  const allEvents = useRecentEvents();
   const [isPaused, setIsPaused] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
   const [search, setSearch] = useState('');
   const [eventTypes, setEventTypes] = useState<string[]>([]);
   const [sources, setSources] = useState<string[]>([]);
   const [actions, setActions] = useState<string[]>([]);
   const [showFilters, setShowFilters] = useState(false);
 
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const pausedRef = useRef(isPaused);
-  const maxEvents = 500;
-
   // Access event stats from Zustand store (SSR-safe)
   const eventCounts = useEventCounts();
-  const resetStats = useEventStats.getState().resetStats;
+  const { resetStats, clearEvents } = useEventStats.getState();
 
-  useEffect(() => {
-    pausedRef.current = isPaused;
-  }, [isPaused]);
+  // When paused, freeze the displayed events
+  const [pausedEvents, setPausedEvents] = useState<StreamEvent[]>([]);
+  const events = isPaused ? pausedEvents : allEvents;
 
-  const connect = useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
+  const handlePauseToggle = () => {
+    if (!isPaused) {
+      // Pausing: capture current events
+      setPausedEvents(allEvents);
     }
-
-    const es = new EventSource('/api/events/stream');
-    eventSourceRef.current = es;
-
-    es.onopen = () => {
-      setIsConnected(true);
-    };
-
-    es.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'connected') {
-          setIsConnected(true);
-        } else if (data.type === 'event' && !pausedRef.current) {
-          setEvents((prev) => {
-            const newEvents = [data.data, ...prev];
-            return newEvents.slice(0, maxEvents);
-          });
-        }
-      } catch (err) {
-        console.error('Failed to parse event:', err);
-      }
-    };
-
-    es.onerror = () => {
-      setIsConnected(false);
-      es.close();
-      // Attempt to reconnect after a delay
-      setTimeout(connect, 5000);
-    };
-  }, []);
-
-  useEffect(() => {
-    connect();
-    return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
-    };
-  }, [connect]);
-
-  const clearEvents = () => {
-    setEvents([]);
+    setIsPaused(!isPaused);
   };
 
   const exportEvents = () => {
@@ -177,9 +121,6 @@ export default function EventsPage() {
           <Button variant="ghost" size="sm" onClick={resetStats} title="Reset session counts">
             <RotateCcw className="h-4 w-4" />
           </Button>
-          <Badge variant={isConnected ? 'active' : 'error'}>
-            {isConnected ? 'Connected' : 'Disconnected'}
-          </Badge>
         </div>
       </div>
 
@@ -208,7 +149,7 @@ export default function EventsPage() {
         <Button
           variant={isPaused ? 'primary' : 'outline'}
           size="sm"
-          onClick={() => setIsPaused(!isPaused)}
+          onClick={handlePauseToggle}
         >
           {isPaused ? (
             <>
