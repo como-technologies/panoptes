@@ -374,15 +374,12 @@ unauthorized).
 ```
 panoptes/
 ├── operators/
-│   ├── argus-operator/     # Argus Kubernetes operator
-│   └── janus-operator/     # Janus Kubernetes operator
+│   ├── argus-operator/     # Argus Kubernetes operator (Go)
+│   └── janus-operator/     # Janus Kubernetes operator (Go)
 ├── daemons/
-│   ├── argusd/             # Argus node daemon
-│   │   ├── c/              # C implementation (primary)
-│   │   └── rust/           # Rust implementation (alternative)
-│   └── janusd/             # Janus node daemon
-│       ├── c/              # C implementation (primary)
-│       └── rust/           # Rust implementation (alternative)
+│   ├── argusd/             # Argus FIM daemon (Rust)
+│   ├── janusd/             # Janus audit daemon (Rust)
+│   └── common/             # Shared daemon utilities (Rust)
 ├── proto/
 │   ├── argus/v1/           # Argus gRPC definitions
 │   └── janus/v1/           # Janus gRPC definitions
@@ -390,7 +387,6 @@ panoptes/
 │   ├── argus-fim/          # Spectro Cloud pack
 │   └── janus-audit/        # Spectro Cloud pack
 ├── charts/                 # Helm charts
-├── benchmarks/             # Performance benchmarks
 └── docs/                   # Documentation
 ```
 
@@ -405,18 +401,10 @@ make docker-build IMG=your-registry/argus-operator:tag
 make docker-push IMG=your-registry/argus-operator:tag
 ```
 
-### Daemons (C-based)
+### Daemons (Rust)
 
 ```bash
-cd daemons/argusd/c
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-```
-
-### Daemons (Rust-based)
-
-```bash
-cd daemons/argusd/rust
+cd daemons/argusd
 cargo build --release
 ```
 

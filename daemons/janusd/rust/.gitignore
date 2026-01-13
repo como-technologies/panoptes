@@ -1,8 +1,0 @@
-# Rust build artifacts
-/target/
-**/*.rs.bk
-*.pdb
-
-# Cargo.lock is typically committed for binaries
-# Uncomment if you want to ignore it:
-# Cargo.lock

@@ -82,29 +82,29 @@ build_images() {
     log_info "Building janus-operator..."
     docker build -t "localhost/janus-operator:${IMAGE_TAG}" -f operators/janus-operator/Dockerfile .
 
-    # Build daemons using unified Dockerfile.rust with FEATURES build arg
+    # Build daemons using unified Dockerfile with FEATURES build arg
     # All variants use FROM scratch with musl static linking (~5-8 MB)
     case "${IMAGE_VARIANT}" in
         slim)
             log_info "Building argusd (slim: ~5-6 MB, FROM scratch, traditional mode only)..."
-            docker build --build-arg FEATURES= -t "localhost/argusd:slim" -f daemons/argusd/Dockerfile.rust .
+            docker build --build-arg FEATURES= -t "localhost/argusd:slim" -f daemons/argusd/Dockerfile .
 
             log_info "Building janusd (slim: ~5-6 MB, FROM scratch, traditional mode only)..."
-            docker build --build-arg FEATURES= -t "localhost/janusd:slim" -f daemons/janusd/Dockerfile.rust .
+            docker build --build-arg FEATURES= -t "localhost/janusd:slim" -f daemons/janusd/Dockerfile .
             ;;
         ebpf)
             log_info "Building argusd (eBPF: ~6-8 MB, FROM scratch, eBPF + inotify)..."
-            docker build --build-arg FEATURES=ebpf -t "localhost/argusd:ebpf" -f daemons/argusd/Dockerfile.rust .
+            docker build --build-arg FEATURES=ebpf -t "localhost/argusd:ebpf" -f daemons/argusd/Dockerfile .
 
             log_info "Building janusd (eBPF: ~6-8 MB, FROM scratch, eBPF + fanotify)..."
-            docker build --build-arg FEATURES=ebpf -t "localhost/janusd:ebpf" -f daemons/janusd/Dockerfile.rust .
+            docker build --build-arg FEATURES=ebpf -t "localhost/janusd:ebpf" -f daemons/janusd/Dockerfile .
             ;;
         full|*)
             log_info "Building argusd (full: ~6-8 MB, FROM scratch, eBPF + inotify with auto-detection)..."
-            docker build --build-arg FEATURES=ebpf -t "localhost/argusd:${IMAGE_TAG}" -f daemons/argusd/Dockerfile.rust .
+            docker build --build-arg FEATURES=ebpf -t "localhost/argusd:${IMAGE_TAG}" -f daemons/argusd/Dockerfile .
 
             log_info "Building janusd (full: ~6-8 MB, FROM scratch, eBPF + fanotify with auto-detection)..."
-            docker build --build-arg FEATURES=ebpf -t "localhost/janusd:${IMAGE_TAG}" -f daemons/janusd/Dockerfile.rust .
+            docker build --build-arg FEATURES=ebpf -t "localhost/janusd:${IMAGE_TAG}" -f daemons/janusd/Dockerfile .
             ;;
     esac
 
@@ -143,29 +143,29 @@ build_images_fast() {
     log_info "Building janus-operator..."
     docker build -t "localhost/janus-operator:${IMAGE_TAG}" -f operators/janus-operator/Dockerfile .
 
-    # Build daemons using unified Dockerfile.rust with FEATURES build arg
+    # Build daemons using unified Dockerfile with FEATURES build arg
     # All variants use FROM scratch with musl static linking (~5-8 MB)
     case "${IMAGE_VARIANT}" in
         slim)
             log_info "Building argusd (slim: ~5-6 MB, FROM scratch, traditional mode only)..."
-            docker build --build-arg FEATURES= -t "localhost/argusd:slim" -f daemons/argusd/Dockerfile.rust .
+            docker build --build-arg FEATURES= -t "localhost/argusd:slim" -f daemons/argusd/Dockerfile .
 
             log_info "Building janusd (slim: ~5-6 MB, FROM scratch, traditional mode only)..."
-            docker build --build-arg FEATURES= -t "localhost/janusd:slim" -f daemons/janusd/Dockerfile.rust .
+            docker build --build-arg FEATURES= -t "localhost/janusd:slim" -f daemons/janusd/Dockerfile .
             ;;
         ebpf)
             log_info "Building argusd (eBPF: ~6-8 MB, FROM scratch, eBPF + inotify)..."
-            docker build --build-arg FEATURES=ebpf -t "localhost/argusd:ebpf" -f daemons/argusd/Dockerfile.rust .
+            docker build --build-arg FEATURES=ebpf -t "localhost/argusd:ebpf" -f daemons/argusd/Dockerfile .
 
             log_info "Building janusd (eBPF: ~6-8 MB, FROM scratch, eBPF + fanotify)..."
-            docker build --build-arg FEATURES=ebpf -t "localhost/janusd:ebpf" -f daemons/janusd/Dockerfile.rust .
+            docker build --build-arg FEATURES=ebpf -t "localhost/janusd:ebpf" -f daemons/janusd/Dockerfile .
             ;;
         full|*)
             log_info "Building argusd (full: ~6-8 MB, FROM scratch, eBPF + inotify with auto-detection)..."
-            docker build --build-arg FEATURES=ebpf -t "localhost/argusd:${IMAGE_TAG}" -f daemons/argusd/Dockerfile.rust .
+            docker build --build-arg FEATURES=ebpf -t "localhost/argusd:${IMAGE_TAG}" -f daemons/argusd/Dockerfile .
 
             log_info "Building janusd (full: ~6-8 MB, FROM scratch, eBPF + fanotify with auto-detection)..."
-            docker build --build-arg FEATURES=ebpf -t "localhost/janusd:${IMAGE_TAG}" -f daemons/janusd/Dockerfile.rust .
+            docker build --build-arg FEATURES=ebpf -t "localhost/janusd:${IMAGE_TAG}" -f daemons/janusd/Dockerfile .
             ;;
     esac
 

@@ -1,0 +1,37 @@
+[package]
+name = "argusd-ebpf"
+version = "0.1.0"
+edition = "2021"
+description = "Argus eBPF programs for file integrity monitoring"
+license = "Apache-2.0"
+
+[dependencies]
+# Shared eBPF kernel code (maps, filtering, helpers)
+panoptes-ebpf-kernel = { path = "../../common/src/ebpf/kernel" }
+
+# Shared types (no "user" feature for kernel context - requires no_std)
+panoptes-ebpf-types = { path = "../../common/src/ebpf/types" }
+
+# Aya eBPF runtime
+aya-ebpf = "0.1"
+aya-log-ebpf = "0.1"
+
+[[bin]]
+name = "argusd-ebpf"
+path = "src/main.rs"
+
+[profile.dev]
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+lto = true
+panic = "abort"
+incremental = false
+codegen-units = 1
+rpath = false
+
+[profile.release]
+lto = true
+panic = "abort"
+codegen-units = 1

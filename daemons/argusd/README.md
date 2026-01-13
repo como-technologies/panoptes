@@ -1,377 +1,327 @@
-# argusd - Argus File Integrity Monitoring Daemon
+# argusd (Rust Implementation)
 
-**Node-level daemon for real-time file system monitoring using Linux inotify**
+**Production-ready Rust implementation of the Argus file integrity monitoring daemon**
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](../../LICENSE)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](../../../LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-1.82+-orange.svg)](https://www.rust-lang.org)
 
 ## Overview
 
-argusd is the node-level daemon component of the Argus file integrity monitoring system.
-It runs as a DaemonSet on each Kubernetes node and provides:
+This is a complete Rust implementation of argusd that provides:
 
-- Direct inotify kernel interface for file system events
-- gRPC API for receiving watch requests from the Argus operator
-- Container runtime integration (containerd, CRI-O) for pod filesystem access
-- Structured event logging with customizable formats
+- Memory safety guarantees through Rust's ownership system
+- Direct inotify syscalls via the `nix` crate
+- Async runtime with Tokio
+- gRPC server with Tonic
+- Container runtime integration (containerd, CRI-O)
+- Move event pairing with cookie-based tracking
+- Glob pattern filtering for ignore paths
+- Metrics collection with atomic operations
 
-### Original Implementation
+## Status
 
-The original argusd was created by [ClusterGarage](https://clustergarage.io/argus/) circa 2018.
-This modernized version updates the build system and adds support for modern container runtimes.
-
-## Implementations
-
-argusd has two implementations:
-
-| Implementation | Location | Status | Description |
-|---------------|----------|--------|-------------|
-| **C/C++** | `c/` | Primary | C core with C++ gRPC wrapper |
-| **Rust** | `rust/` | Alternative | Pure Rust with nix/tonic |
-
-The C implementation is the primary production version. The Rust implementation provides
-an alternative with memory safety guarantees. See [rust/README.md](rust/README.md) for
-the Rust version.
+**Production-Ready** - Feature-complete implementation matching the C daemon.
+Fully tested with 54 unit tests and 12 integration tests.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                          argusd Architecture                             │
+│                      argusd (Rust) Architecture                          │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
 │  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                         gRPC Server (C++)                          │ │
-│  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐ │ │
-│  │  │  ArgusService    │  │  HealthService   │  │  EventStream     │ │ │
-│  │  │  • CreateWatch   │  │  • Check         │  │  • StreamEvents  │ │ │
-│  │  │  • DestroyWatch  │  │  • Watch         │  │                  │ │ │
-│  │  │  • ListWatches   │  │                  │  │                  │ │ │
-│  │  └────────┬─────────┘  └──────────────────┘  └────────┬─────────┘ │ │
-│  │           │                                           │           │ │
-│  └───────────┼───────────────────────────────────────────┼───────────┘ │
-│              │                                           │             │
-│              ▼                                           ▼             │
+│  │                    Tonic gRPC Server                               │ │
+│  │  ┌──────────────────┐  ┌──────────────────┐                       │ │
+│  │  │  ArgusService    │  │  HealthService   │                       │ │
+│  │  │  (service.rs)    │  │  (tonic-health)  │                       │ │
+│  │  └────────┬─────────┘  └──────────────────┘                       │ │
+│  └───────────┼───────────────────────────────────────────────────────┘ │
+│              │                                                          │
+│              ▼                                                          │
 │  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                    Core C Libraries                                │ │
-│  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐ │ │
-│  │  │   argusnotify    │  │    argustree     │  │    arguscache    │ │ │
-│  │  │  • inotify_init  │  │  • Recursive     │  │  • Event         │ │ │
-│  │  │  • add_watch     │  │    directory     │  │    deduplication │ │ │
-│  │  │  • read_events   │  │    tracking      │  │  • Batching      │ │ │
-│  │  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘ │ │
-│  │           │                     │                     │           │ │
-│  └───────────┼─────────────────────┼─────────────────────┼───────────┘ │
-│              │                     │                     │             │
-│              └─────────────────────┼─────────────────────┘             │
-│                                    │                                   │
-│                                    ▼                                   │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                  Container Runtime Integration                     │ │
-│  │  ┌──────────────────────────────────────────────────────────────┐ │ │
-│  │  │  container_runtime.c                                         │ │ │
-│  │  │  • detect_runtime() - containerd vs CRI-O                    │ │ │
-│  │  │  • get_container_pid() - Find container init PID             │ │ │
-│  │  │  • get_container_rootfs() - /proc/{pid}/root path            │ │ │
-│  │  └──────────────────────────────────────────────────────────────┘ │ │
+│  │                      Watcher Module                                │ │
+│  │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────────┐  │ │
+│  │  │ InotifyInstance │ │ MovePairTracker │ │ ContainerRuntime    │  │ │
+│  │  │ (nix inotify)   │ │ (cookie-based)  │ │ (containerd/CRI-O)  │  │ │
+│  │  └─────────────────┘ └─────────────────┘ └─────────────────────┘  │ │
 │  └────────────────────────────────────────────────────────────────────┘ │
-│                                    │                                   │
-│                                    ▼                                   │
+│              │                                                          │
+│              ▼                                                          │
 │  ┌────────────────────────────────────────────────────────────────────┐ │
 │  │                      Linux Kernel                                  │ │
-│  │  ┌──────────────────────────────────────────────────────────────┐ │ │
-│  │  │  inotify subsystem                                           │ │ │
-│  │  │  • IN_ACCESS, IN_MODIFY, IN_CREATE, IN_DELETE                │ │ │
-│  │  │  • IN_ATTRIB, IN_CLOSE_WRITE, IN_CLOSE_NOWRITE              │ │ │
-│  │  │  • IN_MOVED_FROM, IN_MOVED_TO, IN_OPEN                       │ │ │
-│  │  └──────────────────────────────────────────────────────────────┘ │ │
+│  │  inotify_init1() → inotify_add_watch() → read()                   │ │
 │  └────────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-## C Implementation
-
-### Directory Structure
+## Project Structure
 
 ```
-c/
-├── CMakeLists.txt           # Modern CMake 3.20+ build
-├── include/
-│   ├── argusnotify.h        # inotify wrapper API
-│   ├── argustree.h          # Recursive directory tracking
-│   ├── arguscache.h         # Event caching and deduplication
-│   └── container_runtime.h  # Container PID/rootfs lookup
-├── lib/
-│   ├── argusnotify.c        # Core inotify implementation
-│   ├── argustree.c          # Directory tree management
-│   ├── arguscache.c         # Event cache implementation
-│   └── container_runtime.c  # containerd/CRI-O integration
-└── src/
-    ├── main.cc              # C++ entry point
-    ├── argusd_impl.cc       # gRPC service implementation
-    ├── argusd_impl.h
-    ├── health_impl.cc       # Health check service
-    └── health_impl.h
+rust/
+├── Cargo.toml           # Rust dependencies and workspace
+├── build.rs             # Proto compilation (tonic-build)
+├── src/
+│   ├── main.rs          # Entry point and CLI configuration
+│   ├── service.rs       # gRPC service implementation
+│   ├── notify.rs        # inotify wrapper, Watcher, MovePairTracker
+│   ├── metrics.rs       # Atomic metrics collection
+│   └── ebpf/            # eBPF userspace integration (feature-gated)
+│       ├── mod.rs       # Re-exports from panoptes-common
+│       └── events.rs    # EbpfFileEvent → proto conversion
+├── ebpf/                # eBPF kernel programs (BPF target)
+│   ├── Cargo.toml
+│   └── src/main.rs      # LSM hooks (inode_create, inode_unlink, etc.)
+├── tests/
+│   └── integration_tests.rs  # 12 integration tests
+└── benches/
+    └── event_processing.rs   # 5 benchmark groups
 ```
 
-### What's Original vs Updated
+## Features
 
-**Original ClusterGarage code (preserved):**
-- `lib/argusnotify.c` - Core inotify wrapper (direct kernel syscalls)
-- `lib/argustree.c` - Recursive directory watch management
-- `lib/arguscache.c` - Event caching logic
-- Core C APIs in `include/*.h`
+| Feature | Status | Description |
+|---------|--------|-------------|
+| CreateWatch RPC | ✅ | Create inotify watches for container paths |
+| DestroyWatch RPC | ✅ | Clean up watches and resources |
+| GetWatchState RPC | ✅ | Streaming watch state updates with readiness |
+| StreamEvents RPC | ✅ | Real-time file events with filtering |
+| GetMetrics RPC | ✅ | Daemon-level metrics |
+| Move event pairing | ✅ | Cookie-based pairing with 2ms timeout |
+| Cache consistency | ✅ | Stale watch cleanup on reconnect |
+| Overflow recovery | ✅ | Reinit with config preservation |
+| Container runtime | ✅ | Auto-detection (containerd, CRI-O) |
+| Glob filtering | ✅ | Ignore patterns like `*.tmp`, `node_modules/**` |
+| Health checks | ✅ | gRPC health service (tonic-health) |
+| Synchronous init | ✅ | Watches ready before RPC returns |
+| **eBPF FIM** | ✅ | Process attribution via LSM hooks (optional feature) |
 
-**Modernized/Updated:**
-- `CMakeLists.txt` - New CMake 3.20+ build (was Makefile)
-- `lib/container_runtime.c` - New: containerd/CRI-O support (was Docker/rkt)
-- `src/*.cc` - Updated gRPC 1.60+ wrapper
-- Build uses C17 standard and C++20 for gRPC wrapper
-- spdlog for structured JSON logging (was custom logging)
+## Key Dependencies
 
-### Building
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| `nix` | 0.29 | Direct inotify syscalls |
+| `tokio` | 1.x | Async runtime |
+| `tonic` | 0.12 | gRPC server |
+| `tonic-health` | 0.12 | gRPC health checks |
+| `prost` | 0.13 | Protobuf code generation |
+| `tracing` | 0.1 | Structured JSON logging |
+| `glob` | 0.3 | Pattern matching for ignore paths |
+| `panoptes-common` | 0.1 | Shared utilities (container runtime, eBPF loader) |
+| `panoptes-ebpf-types` | 0.1 | Shared eBPF types (no_std, via panoptes-common) |
+| `aya-ebpf` | 0.1 | eBPF kernel program runtime (BPF target) |
 
-#### Prerequisites
+## Building
 
-- CMake 3.20+
-- GCC 11+ or Clang 14+
-- gRPC 1.60+ and Protobuf
-- spdlog 1.12+
+### Prerequisites
 
-#### Build Commands
+- Rust 1.82+ (for dependency compatibility)
+- Protobuf compiler (protoc)
+
+### Build Commands
 
 ```bash
-cd c/
+cd daemons/argusd/rust/
 
-# Configure
-cmake -B build \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_C_STANDARD=17 \
-  -DCMAKE_CXX_STANDARD=20
+# Debug build
+cargo build
 
-# Build
-cmake --build build -j$(nproc)
+# Release build (optimized)
+cargo build --release
 
-# The binary is at build/argusd
+# Run tests
+cargo test
+
+# Run benchmarks
+cargo bench
+
+# Format and lint
+cargo fmt --check && cargo clippy --all-targets
 ```
 
-#### Build Options
+### Build Profile
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `CMAKE_BUILD_TYPE` | Debug | Release, Debug, RelWithDebInfo |
-| `ENABLE_ASAN` | OFF | Enable AddressSanitizer |
-| `ENABLE_TSAN` | OFF | Enable ThreadSanitizer |
+The `Cargo.toml` includes an optimized release profile:
 
-### gRPC API
-
-argusd exposes a gRPC API on port 50051 (configurable):
-
-```protobuf
-service ArgusService {
-  // Create a new file watch
-  rpc CreateWatch(CreateWatchRequest) returns (CreateWatchResponse);
-
-  // Destroy an existing watch
-  rpc DestroyWatch(DestroyWatchRequest) returns (DestroyWatchResponse);
-
-  // List all active watches
-  rpc ListWatches(ListWatchesRequest) returns (ListWatchesResponse);
-
-  // Stream file events
-  rpc StreamEvents(StreamEventsRequest) returns (stream FileEvent);
-}
-
-service HealthService {
-  rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
-  rpc Watch(HealthCheckRequest) returns (stream HealthCheckResponse);
-}
+```toml
+[profile.release]
+lto = true           # Link-time optimization
+codegen-units = 1    # Better optimization
+strip = true         # Strip symbols
+panic = "abort"      # No unwinding
 ```
 
-See [proto/argus/v1/README.md](../../proto/argus/v1/README.md) for full API documentation.
+## Configuration
 
-### Configuration
+| CLI Argument | Environment Variable | Default | Description |
+|--------------|---------------------|---------|-------------|
+| `--listen-addr` | `ARGUSD_LISTEN_ADDR` | `0.0.0.0:50051` | gRPC listen address |
+| `--port` | `ARGUSD_PORT` | - | Port override (C daemon compatibility) |
+| `--node-name` | `NODE_NAME` | `unknown` | Kubernetes node name |
+| `--max-watches` | `ARGUSD_MAX_WATCHES` | `10000` | Maximum inotify watches |
+| `--log-level` | `LOG_LEVEL` | `info` | Log level (trace/debug/info/warn/error) |
 
-| Environment Variable | Default | Description |
-|---------------------|---------|-------------|
-| `ARGUSD_LISTEN_ADDR` | `0.0.0.0:50051` | gRPC listen address |
-| `ARGUSD_MAX_WATCHES` | `10000` | Maximum inotify watches |
-| `ARGUSD_CACHE_SIZE` | `1000` | Event cache size |
-| `ARGUSD_LOG_LEVEL` | `info` | Log level (trace, debug, info, warn, error) |
-| `ARGUSD_LOG_FORMAT` | `json` | Log format (json, text) |
-| `NODE_NAME` | `unknown` | Kubernetes node name |
+## Running
 
-### Required Capabilities
+```bash
+# Development
+cargo run
 
-argusd requires elevated capabilities to access container filesystems:
+# Production
+./target/release/argusd
+
+# With configuration
+./target/release/argusd --port=50051 --node-name=worker-1 --log-level=debug
+
+# Using environment variables
+ARGUSD_PORT=50051 NODE_NAME=worker-1 LOG_LEVEL=debug ./target/release/argusd
+```
+
+## Docker Build
+
+The Dockerfile is at `daemons/argusd/Dockerfile.rust`:
+
+```bash
+# Build from repo root (context needs proto/)
+docker build -t argusd-rust:latest -f daemons/argusd/Dockerfile.rust .
+
+# Run
+docker run --privileged -p 50051:50051 argusd-rust:latest
+```
+
+## Testing
+
+```bash
+# Unit tests
+cargo test
+
+# Integration tests (requires inotify)
+cargo test --test integration_tests
+
+# Specific test
+cargo test test_file_creation_detection
+```
+
+### Test Coverage
+
+| Module | Unit Tests | Integration Tests |
+|--------|------------|-------------------|
+| notify.rs | 35 | 6 |
+| service.rs | 12 | 3 |
+| metrics.rs | 7 | 1 |
+| **Total** | **54** | **12** |
+
+## Benchmarks
+
+```bash
+cargo bench
+```
+
+| Benchmark | Description |
+|-----------|-------------|
+| glob_matching | Pattern matching performance |
+| event_filtering | Vec vs HashSet contains |
+| move_pair_tracking | Cookie-based move pairing |
+| metrics_collection | Atomic counter operations |
+| path_processing | Path manipulation operations |
+
+## Comparison with C Implementation
+
+| Aspect | C Implementation | Rust Implementation |
+|--------|------------------|---------------------|
+| Memory safety | Manual | Guaranteed |
+| Performance | Optimal | Near-optimal |
+| Binary size | ~2MB | ~2MB |
+| Image size | ~3MB (scratch) | ~50MB (debian-slim) |
+| Dependencies | gRPC C++, spdlog | Tokio, Tonic |
+| Build time | Fast (with cache) | Slower |
+| Testing | GoogleTest | Rust built-in |
+
+## eBPF-Based File Integrity Monitoring
+
+For comprehensive eBPF documentation including architecture, kernel requirements, and troubleshooting, see **[`daemons/common/EBPF.md`](../../common/EBPF.md)**.
+
+### Argus-Specific LSM Hooks
+
+| Hook | Event | Description |
+|------|-------|-------------|
+| `security_inode_create` | Create | File or directory created |
+| `security_inode_unlink` | Delete | File deleted |
+| `security_inode_rename` | Rename | File renamed or moved |
+| `security_file_open` | OpenWrite | File opened for writing |
+
+### Building with eBPF
+
+```bash
+cd daemons/argusd/rust
+
+# Build with eBPF feature
+cargo build --release --features ebpf
+
+# Build kernel programs
+cd ebpf && cargo build --target bpfel-unknown-none
+```
+
+### Project Structure (eBPF)
+
+```
+daemons/argusd/rust/
+├── ebpf/                          # eBPF kernel programs (argusd-ebpf crate)
+│   ├── Cargo.toml                 # Uses bpfel-unknown-none target
+│   └── src/main.rs                # LSM hook implementations
+│
+└── src/ebpf/                      # Userspace integration
+    ├── mod.rs                     # Re-exports from panoptes-common
+    └── events.rs                  # EbpfFileEvent → argus.v2.FileEvent
+```
+
+Shared types and loader are in `panoptes-common` with the `ebpf` feature.
+
+---
+
+## Security Considerations
+
+### Compliance Implications
+
+For compliance frameworks that require knowing WHO accessed files (PCI-DSS 10.2.1, HIPAA,
+SOC2), enable the eBPF feature or **use JanusGuard** for those paths.
+
+| Use Case | Recommended Tool | Why |
+|----------|------------------|-----|
+| File integrity monitoring (detect changes) | ArgusWatcher | Detects modifications |
+| FIM with process attribution | ArgusWatcher + eBPF | Full audit trail |
+| Access auditing (who read the file) | JanusGuard | Captures process info |
+| Access control (block unauthorized access) | JanusGuard | Can deny access |
+| Configuration drift detection | ArgusWatcher | Detects config changes |
+| Sensitive file protection | JanusGuard | Real-time blocking |
+
+### Security Capabilities
+
+Argus requires the following Linux capabilities:
+
+| Capability | Purpose | Required |
+|------------|---------|----------|
+| `SYS_PTRACE` | Access container filesystems via `/proc/{pid}/root` | Yes |
+| `DAC_READ_SEARCH` | Bypass file read permission checks | Yes |
+| `BPF` | Load eBPF programs (with `ebpf` feature) | For eBPF |
+| `PERFMON` | Attach to LSM hooks (with `ebpf` feature) | For eBPF |
+
+**Note:** The DaemonSet uses `privileged: true` which includes all capabilities.
+For production, consider using specific capabilities instead.
+
+## Kubernetes Deployment
+
+The daemon is deployed as a DaemonSet. See `hack/argusd-daemonset.yaml`:
 
 ```yaml
-securityContext:
-  capabilities:
-    add:
-      - SYS_ADMIN      # inotify on container mounts
-      - SYS_PTRACE     # Access /proc/{pid}/root
-      - DAC_READ_SEARCH # Traverse container filesystems
+args:
+- --port=50051  # Works with both C and Rust
 ```
 
-### Container Runtime Support
-
-argusd automatically detects and supports:
-
-| Runtime | Socket Path | PID Location |
-|---------|-------------|--------------|
-| containerd | `/run/containerd/containerd.sock` | `/run/containerd/io.containerd.runtime.v2.task/k8s.io/{id}/init.pid` |
-| CRI-O | `/var/run/crio/crio.sock` | `/var/run/crio/crio/{id}/pidfile` |
-
-Docker and rkt support has been removed (deprecated in Kubernetes).
-
-### Event Types
-
-| Event | inotify Flag | Description |
-|-------|--------------|-------------|
-| `access` | IN_ACCESS | File was accessed (read) |
-| `attrib` | IN_ATTRIB | Metadata changed |
-| `closewrite` | IN_CLOSE_WRITE | File closed after writing |
-| `closenowrite` | IN_CLOSE_NOWRITE | File closed without writing |
-| `create` | IN_CREATE | File/directory created |
-| `delete` | IN_DELETE | File/directory deleted |
-| `deleteself` | IN_DELETE_SELF | Watched item deleted |
-| `modify` | IN_MODIFY | File was modified |
-| `moveself` | IN_MOVE_SELF | Watched item moved |
-| `movedfrom` | IN_MOVED_FROM | File moved out |
-| `movedto` | IN_MOVED_TO | File moved in |
-| `open` | IN_OPEN | File was opened |
-
-## Docker Image
-
-### Switching Between C and Rust Implementations
-
-The daemon has two Docker build configurations:
-
-| Implementation | Dockerfile | Description |
-|----------------|------------|-------------|
-| **C/C++** | `Dockerfile.c` | Primary production version, fully static binary |
-| **Rust** | `Dockerfile.rust` | Alternative implementation with memory safety |
-
-The `Dockerfile` is a symlink that points to the active implementation (defaults to Rust).
-
-**To switch implementations:**
-
-```bash
-cd daemons/argusd
-
-# Use Rust implementation (default)
-ln -sf Dockerfile.rust Dockerfile
-
-# Use C implementation
-ln -sf Dockerfile.c Dockerfile
-```
-
-**Rebuild after switching:**
-
-```bash
-# From repository root (build context needs proto/ and daemons/common/)
-docker build -t argusd:2.0.0 -f daemons/argusd/Dockerfile .
-```
-
-### Multi-stage Build
-
-The Dockerfile uses a multi-stage build:
-
-1. **Builder stage**: Ubuntu 24.04 with build tools (C) or Rust 1.75 (Rust)
-2. **Runtime stage**: Minimal image for minimal attack surface
-
-```bash
-# Build image (from repo root)
-docker build -t argusd:2.0.0 -f daemons/argusd/Dockerfile .
-
-# Run (requires privileged for inotify)
-docker run --privileged -p 50051:50051 argusd:2.0.0
-```
-
-### Image Details
-
-| Property | Value |
-|----------|-------|
-| Base | `gcr.io/distroless/cc-debian12:nonroot` |
-| User | nonroot (65532) |
-| Size | ~15MB |
-| Entrypoint | `/argusd` |
-
-## Monitoring
-
-### Health Checks
-
-```bash
-# gRPC health check
-grpcurl -plaintext localhost:50051 grpc.health.v1.Health/Check
-
-# Kubernetes probes
-livenessProbe:
-  grpc:
-    port: 50051
-readinessProbe:
-  grpc:
-    port: 50051
-```
-
-### Metrics
-
-argusd exposes Prometheus metrics on `/metrics`:
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `argusd_watches_total` | Gauge | Current active watches |
-| `argusd_events_total` | Counter | Total events by type |
-| `argusd_event_latency_seconds` | Histogram | Event processing latency |
-| `argusd_grpc_requests_total` | Counter | gRPC requests by method |
-
-### Logging
-
-Structured JSON logs:
-
-```json
-{
-  "timestamp": "2026-01-10T10:30:00.123Z",
-  "level": "info",
-  "event": "file_modified",
-  "path": "/etc/passwd",
-  "watch_id": 42,
-  "pod": "my-app-abc123",
-  "container": "main"
-}
-```
-
-## Troubleshooting
-
-### Maximum watches exceeded
-
-```
-inotify_add_watch: No space left on device
-```
-
-Increase the system limit:
-```bash
-echo 524288 | sudo tee /proc/sys/fs/inotify/max_user_watches
-# Make persistent
-echo "fs.inotify.max_user_watches=524288" | sudo tee -a /etc/sysctl.conf
-```
-
-### Permission denied accessing container filesystem
-
-Ensure the daemon has required capabilities and is running with `hostPID: true`.
-
-### Events not being received
-
-1. Check if the container runtime socket exists
-2. Verify the container PID can be resolved
-3. Check kernel inotify subsystem: `cat /proc/sys/fs/inotify/max_user_watches`
+Both implementations accept the same `--port` argument for compatibility.
 
 ## License
 
 Copyright 2026 Como Technologies, LTD
 
-Licensed under the Apache License, Version 2.0. See [LICENSE](../../LICENSE) for details.
-
-## Acknowledgments
-
-Based on the original [argusd](https://github.com/clustergarage/argusd) by ClusterGarage.
+Licensed under the Apache License, Version 2.0. See [LICENSE](../../../LICENSE) for details.

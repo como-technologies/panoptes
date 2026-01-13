@@ -79,10 +79,10 @@ eBPF mode provides significant advantages over traditional kernel APIs:
 
 ## Shared Infrastructure
 
-All eBPF code is consolidated under `daemons/common/rust/src/ebpf/`:
+All eBPF code is consolidated under `daemons/common/src/ebpf/`:
 
 ```
-daemons/common/rust/
+daemons/common/
 ├── Cargo.toml                       # panoptes-common (userspace, std)
 └── src/
     ├── ebpf/                        # ALL eBPF-related code
@@ -105,10 +105,10 @@ daemons/common/rust/
     │           └── helpers.rs       # populate_process_info(), submit_event()
     └── ...
 
-daemons/argusd/rust/ebpf/            # argusd-ebpf crate (kernel programs)
+daemons/argusd/ebpf/                 # argusd-ebpf crate (kernel programs)
 └── src/main.rs                      # LSM hooks for FIM (uses ebpf/kernel)
 
-daemons/janusd/rust/ebpf/            # janusd-ebpf crate (kernel programs)
+daemons/janusd/ebpf/                 # janusd-ebpf crate (kernel programs)
 └── src/main.rs                      # LSM hooks for auditing (uses ebpf/kernel)
 ```
 
@@ -281,11 +281,11 @@ EBPF_MODE=true ./hack/local-wsl-deploy.sh all
 
 ```bash
 # Traditional mode (default)
-docker build -f daemons/argusd/Dockerfile.rust .
+docker build -f daemons/argusd/Dockerfile .
 
 # eBPF mode
-docker build --build-arg ENABLE_EBPF=true \
-    -f daemons/argusd/Dockerfile.rust .
+docker build --build-arg FEATURES=ebpf \
+    -f daemons/argusd/Dockerfile .
 ```
 
 ### Kubernetes DaemonSet Configuration
@@ -333,22 +333,22 @@ ls /sys/kernel/btf/vmlinux
 
 ```bash
 # Build shared types
-cd daemons/common/ebpf-types && cargo build
+cd daemons/common/src/ebpf/types && cargo build
 
 # Build panoptes-common with eBPF
-cd daemons/common/rust && cargo build --features ebpf
+cd daemons/common && cargo build --features ebpf
 
 # Build argusd with eBPF
-cd daemons/argusd/rust && cargo build --features ebpf
+cd daemons/argusd && cargo build --features ebpf
 
 # Build argusd kernel programs
-cd daemons/argusd/rust/ebpf && cargo build --target bpfel-unknown-none
+cd daemons/argusd/ebpf && cargo build --target bpfel-unknown-none
 
 # Build janusd with eBPF
-cd daemons/janusd/rust && cargo build --features ebpf
+cd daemons/janusd && cargo build --features ebpf
 
 # Build janusd kernel programs
-cd daemons/janusd/rust/ebpf && cargo build --target bpfel-unknown-none
+cd daemons/janusd/ebpf && cargo build --target bpfel-unknown-none
 ```
 
 ## Debugging
