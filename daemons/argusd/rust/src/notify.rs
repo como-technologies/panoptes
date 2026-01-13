@@ -182,6 +182,23 @@ impl EventType {
         }
     }
 
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "access" => EventType::Access,
+            "attrib" => EventType::Attrib,
+            "closewrite" | "close_write" => EventType::CloseWrite,
+            "closenowrite" | "close_nowrite" => EventType::CloseNoWrite,
+            "create" => EventType::Create,
+            "delete" => EventType::Delete,
+            "deleteself" | "delete_self" => EventType::DeleteSelf,
+            "modify" => EventType::Modify,
+            "moveself" | "move_self" => EventType::MoveSelf,
+            "movedfrom" | "moved_from" => EventType::MovedFrom,
+            "movedto" | "moved_to" => EventType::MovedTo,
+            "open" => EventType::Open,
+            _ => EventType::Unknown,
+        }
+    }
 }
 
 /// A file system event detected by inotify.

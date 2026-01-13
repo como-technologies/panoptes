@@ -5,7 +5,7 @@
 
 use aya::{
     maps::{HashMap, RingBuf},
-    programs::Lsm,
+    programs::{Lsm, TracePoint},
     Ebpf, EbpfLoader as AyaEbpfLoader, Btf,
 };
 use aya_log::EbpfLogger;
@@ -13,7 +13,7 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::{info, warn, error, debug};
 
-use panoptes_ebpf_types::FileEvent;
+use panoptes_ebpf_types::{FileEvent, ProcessCacheEntry};
 
 /// Errors from eBPF operations
 #[derive(Error, Debug)]
@@ -545,6 +545,105 @@ impl EbpfLoader {
 
         debug!(path = path, "Removed path from kernel DENY_PATHS");
         Ok(())
+    }
+
+    // ========================================================================
+    // Process Cache: Exec-Time Process Context
+    // ========================================================================
+    //
+    // The PROCESS_CACHE map stores process context (exe, cmdline, cwd, ppid)
+    // captured at exec time. The exec/exit tracepoints maintain this cache.
+    // Userspace queries this map to enrich file events with process info.
+    // ========================================================================
+
+    /// Attach process tracking tracepoints (sched_process_exec, sched_process_exit).
+    ///
+    /// These tracepoints maintain the PROCESS_CACHE map with process context
+    /// captured at exec time. Must be called after loading the eBPF bytecode
+    /// that includes the `define_process_tracepoints!()` macro.
+    ///
+    /// # Errors
+    ///
+    /// Returns `EbpfError::Attach` if the tracepoints are not found in the
+    /// bytecode or fail to attach.
+    pub fn attach_process_tracepoints(&mut self) -> Result<(), EbpfError> {
+        // Attach sched_process_exec
+        if let Some(prog) = self.ebpf.program_mut("sched_process_exec") {
+            let prog: &mut TracePoint = prog
+                .try_into()
+                .map_err(|e| EbpfError::Attach(format!("sched_process_exec is not a tracepoint: {}", e)))?;
+
+            prog.load()
+                .map_err(|e| EbpfError::Attach(format!("Failed to load sched_process_exec: {}", e)))?;
+
+            prog.attach("sched", "sched_process_exec")
+                .map_err(|e| EbpfError::Attach(format!("Failed to attach sched_process_exec: {}", e)))?;
+
+            debug!("Attached sched_process_exec tracepoint");
+        } else {
+            debug!("sched_process_exec not found in bytecode (process cache disabled)");
+        }
+
+        // Attach sched_process_exit
+        if let Some(prog) = self.ebpf.program_mut("sched_process_exit") {
+            let prog: &mut TracePoint = prog
+                .try_into()
+                .map_err(|e| EbpfError::Attach(format!("sched_process_exit is not a tracepoint: {}", e)))?;
+
+            prog.load()
+                .map_err(|e| EbpfError::Attach(format!("Failed to load sched_process_exit: {}", e)))?;
+
+            prog.attach("sched", "sched_process_exit")
+                .map_err(|e| EbpfError::Attach(format!("Failed to attach sched_process_exit: {}", e)))?;
+
+            debug!("Attached sched_process_exit tracepoint");
+        } else {
+            debug!("sched_process_exit not found in bytecode (process cache cleanup disabled)");
+        }
+
+        info!("Process tracking tracepoints attached");
+        Ok(())
+    }
+
+    /// Get cached process info for a given thread group ID.
+    ///
+    /// Looks up the PROCESS_CACHE map for exec-time process context including
+    /// exe, cmdline, cwd, and ppid.
+    ///
+    /// # Arguments
+    ///
+    /// * `tgid` - Thread group ID (same as pid for single-threaded processes)
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(ProcessCacheEntry)` if the process is in the cache,
+    /// `None` if not found (e.g., process exited or was never cached).
+    ///
+    /// # Errors
+    ///
+    /// Returns `EbpfError::Map` if the PROCESS_CACHE map is not found.
+    pub fn get_cached_process(&self, tgid: u32) -> Result<Option<ProcessCacheEntry>, EbpfError> {
+        let map: HashMap<_, u32, ProcessCacheEntry> = self
+            .ebpf
+            .map("PROCESS_CACHE")
+            .ok_or_else(|| EbpfError::Map("PROCESS_CACHE map not found".into()))?
+            .try_into()
+            .map_err(|e: aya::maps::MapError| {
+                EbpfError::Map(format!("PROCESS_CACHE is not a HashMap: {}", e))
+            })?;
+
+        match map.get(&tgid, 0) {
+            Ok(entry) => Ok(Some(entry)),
+            Err(aya::maps::MapError::KeyNotFound) => Ok(None),
+            Err(e) => Err(EbpfError::Map(format!("Failed to lookup process {}: {}", tgid, e))),
+        }
+    }
+
+    /// Check if process cache is available.
+    ///
+    /// Returns true if the PROCESS_CACHE map exists in the loaded eBPF program.
+    pub fn has_process_cache(&self) -> bool {
+        self.ebpf.map("PROCESS_CACHE").is_some()
     }
 }
 

@@ -45,6 +45,9 @@
 
 #![no_std]
 
+#[cfg(feature = "user")]
+extern crate alloc;
+
 /// Maximum path length in bytes (limited by eBPF stack)
 pub const MAX_PATH_LEN: usize = 256;
 
@@ -53,6 +56,15 @@ pub const MAX_COMM_LEN: usize = 16;
 
 /// Maximum container ID length (64 hex chars for SHA256)
 pub const MAX_CONTAINER_ID_LEN: usize = 64;
+
+/// Maximum executable path length for process cache
+pub const MAX_EXE_LEN: usize = 128;
+
+/// Maximum command line length for process cache (space-separated args)
+pub const MAX_CMDLINE_LEN: usize = 128;
+
+/// Maximum current working directory length for process cache
+pub const MAX_CWD_LEN: usize = 128;
 
 /// File event types shared between Argus (FIM) and Janus (access audit).
 ///
@@ -252,6 +264,159 @@ impl core::fmt::Debug for FileEvent {
     }
 }
 
+/// Process cache entry captured at exec time.
+///
+/// This struct stores process context that is expensive to compute at event
+/// time but remains stable for the lifetime of the process. It is populated
+/// when a process calls execve and removed when the process exits.
+///
+/// # Memory Layout
+///
+/// Total size: ~424 bytes (fits in eBPF stack with per-CPU scratch array)
+/// - Fixed-size arrays for eBPF compatibility (no heap allocation)
+/// - All strings are null-terminated and may be truncated
+///
+/// # Cache Strategy
+///
+/// - Populated by `sched_process_exec` tracepoint
+/// - Removed by `sched_process_exit` tracepoint (thread group leader only)
+/// - LRU eviction handles overflow (16K entries max)
+/// - Lookup by `tgid` (thread group ID) for multi-threaded processes
+///
+/// # Usage
+///
+/// ```text
+/// Process exec ──► sched_process_exec ──► PROCESS_CACHE[tgid] = entry
+///                                                │
+/// File event   ──► LSM hook ◄─────────────lookup─┘
+///                     │
+///                     ▼
+///                FileEvent + ProcessCacheEntry fields
+/// ```
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ProcessCacheEntry {
+    /// Thread group ID (cache key, same as pid for single-threaded)
+    pub tgid: u32,
+
+    /// Parent process thread group ID
+    pub ppid: u32,
+
+    /// User ID at exec time
+    pub uid: u32,
+
+    /// Group ID at exec time
+    pub gid: u32,
+
+    /// Timestamp when process executed (bpf_ktime_get_ns)
+    pub exec_timestamp_ns: u64,
+
+    /// Executable path (from bprm->filename, null-terminated)
+    pub exe: [u8; MAX_EXE_LEN],
+
+    /// Command line arguments (space-separated, null-terminated)
+    /// Note: Individual args are joined with spaces, truncated to fit
+    pub cmdline: [u8; MAX_CMDLINE_LEN],
+
+    /// Current working directory (from task->fs->pwd, null-terminated)
+    pub cwd: [u8; MAX_CWD_LEN],
+
+    /// Command name (same as comm, 16 chars max)
+    pub comm: [u8; MAX_COMM_LEN],
+
+    /// Padding for 8-byte alignment
+    pub _pad: [u8; 4],
+}
+
+impl ProcessCacheEntry {
+    /// Get the executable path as a string slice
+    pub fn exe_str(&self) -> &str {
+        let len = self.exe.iter().position(|&b| b == 0).unwrap_or(MAX_EXE_LEN);
+        core::str::from_utf8(&self.exe[..len]).unwrap_or("<invalid utf8>")
+    }
+
+    /// Get the command line as a string slice
+    pub fn cmdline_str(&self) -> &str {
+        let len = self.cmdline.iter().position(|&b| b == 0).unwrap_or(MAX_CMDLINE_LEN);
+        core::str::from_utf8(&self.cmdline[..len]).unwrap_or("<invalid utf8>")
+    }
+
+    /// Get the command line as a vector of arguments (userspace only)
+    #[cfg(feature = "user")]
+    pub fn cmdline_vec(&self) -> alloc::vec::Vec<alloc::string::String> {
+        self.cmdline_str()
+            .split(' ')
+            .filter(|s| !s.is_empty())
+            .map(|s| alloc::string::String::from(s))
+            .collect()
+    }
+
+    /// Get the current working directory as a string slice
+    pub fn cwd_str(&self) -> &str {
+        let len = self.cwd.iter().position(|&b| b == 0).unwrap_or(MAX_CWD_LEN);
+        core::str::from_utf8(&self.cwd[..len]).unwrap_or("<invalid utf8>")
+    }
+
+    /// Get the command name as a string slice
+    pub fn comm_str(&self) -> &str {
+        let len = self.comm.iter().position(|&b| b == 0).unwrap_or(MAX_COMM_LEN);
+        core::str::from_utf8(&self.comm[..len]).unwrap_or("<invalid utf8>")
+    }
+
+    /// Check if the cache entry has valid executable path
+    pub fn has_exe(&self) -> bool {
+        self.exe[0] != 0
+    }
+
+    /// Check if the cache entry has valid command line
+    pub fn has_cmdline(&self) -> bool {
+        self.cmdline[0] != 0
+    }
+
+    /// Check if the cache entry has valid current working directory
+    pub fn has_cwd(&self) -> bool {
+        self.cwd[0] != 0
+    }
+}
+
+impl Default for ProcessCacheEntry {
+    fn default() -> Self {
+        Self {
+            tgid: 0,
+            ppid: 0,
+            uid: 0,
+            gid: 0,
+            exec_timestamp_ns: 0,
+            exe: [0; MAX_EXE_LEN],
+            cmdline: [0; MAX_CMDLINE_LEN],
+            cwd: [0; MAX_CWD_LEN],
+            comm: [0; MAX_COMM_LEN],
+            _pad: [0; 4],
+        }
+    }
+}
+
+impl core::fmt::Debug for ProcessCacheEntry {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ProcessCacheEntry")
+            .field("tgid", &self.tgid)
+            .field("ppid", &self.ppid)
+            .field("uid", &self.uid)
+            .field("gid", &self.gid)
+            .field("exec_timestamp_ns", &self.exec_timestamp_ns)
+            .field("exe", &self.exe_str())
+            .field("cmdline", &self.cmdline_str())
+            .field("cwd", &self.cwd_str())
+            .field("comm", &self.comm_str())
+            .finish()
+    }
+}
+
+// SAFETY: ProcessCacheEntry is a plain-old-data struct with all primitive/array fields,
+// no pointers, and #[repr(C)] layout. It can be safely read from BPF map memory.
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for ProcessCacheEntry {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,5 +447,51 @@ mod tests {
         assert!(FileEventType::OpenWrite.is_access_event());
         // OpenWrite is both FIM and access
         assert!(FileEventType::OpenWrite.is_fim_event());
+    }
+
+    #[test]
+    fn test_process_cache_entry_size() {
+        // ProcessCacheEntry must fit in eBPF stack with per-CPU scratch
+        // Expected: ~424 bytes (tgid + ppid + uid + gid + timestamp + exe + cmdline + cwd + comm + pad)
+        let size = core::mem::size_of::<ProcessCacheEntry>();
+        assert!(size < 512, "ProcessCacheEntry too large: {} bytes", size);
+        // Verify expected size range
+        assert!(size >= 400, "ProcessCacheEntry smaller than expected: {} bytes", size);
+    }
+
+    #[test]
+    fn test_process_cache_entry_helpers() {
+        let mut entry = ProcessCacheEntry::default();
+
+        // Test empty state
+        assert!(!entry.has_exe());
+        assert!(!entry.has_cmdline());
+        assert!(!entry.has_cwd());
+        assert_eq!(entry.exe_str(), "");
+        assert_eq!(entry.cmdline_str(), "");
+        assert_eq!(entry.cwd_str(), "");
+
+        // Populate fields
+        entry.tgid = 1234;
+        entry.ppid = 1;
+        entry.uid = 1000;
+        entry.gid = 1000;
+
+        let exe = b"/usr/bin/ls";
+        entry.exe[..exe.len()].copy_from_slice(exe);
+
+        let cmdline = b"ls -la /tmp";
+        entry.cmdline[..cmdline.len()].copy_from_slice(cmdline);
+
+        let cwd = b"/home/user";
+        entry.cwd[..cwd.len()].copy_from_slice(cwd);
+
+        // Test populated state
+        assert!(entry.has_exe());
+        assert!(entry.has_cmdline());
+        assert!(entry.has_cwd());
+        assert_eq!(entry.exe_str(), "/usr/bin/ls");
+        assert_eq!(entry.cmdline_str(), "ls -la /tmp");
+        assert_eq!(entry.cwd_str(), "/home/user");
     }
 }

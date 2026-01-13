@@ -25,8 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	arguspb "github.com/como-technologies/panoptes/gen/go/argus/v1"
-	arguspbv2 "github.com/como-technologies/panoptes/gen/go/argus/v2"
+	arguspb "github.com/como-technologies/panoptes/gen/go/argus/v2"
 	argusv1 "github.com/como-technologies/panoptes/operators/argus-operator/api/v1"
 )
 
@@ -342,16 +341,16 @@ func (m *WatchManager) UpdateWatch(ctx context.Context, nodeIP, watcherNamespace
 		return nil, fmt.Errorf("failed to get connection: %w", err)
 	}
 
-	action := arguspbv2.UpdateAction_UPDATE_ACTION_RESUME
+	action := arguspb.UpdateAction_UPDATE_ACTION_RESUME
 	if pause {
-		action = arguspbv2.UpdateAction_UPDATE_ACTION_PAUSE
+		action = arguspb.UpdateAction_UPDATE_ACTION_PAUSE
 	}
 
 	logger.V(1).Info("Updating watch state")
 
-	// Create v2 gRPC client and make the call
-	client := arguspbv2.NewArgusdServiceClient(conn)
-	req := &arguspbv2.UpdateWatchRequest{
+	// Create gRPC client and make the call
+	client := arguspb.NewArgusdServiceClient(conn)
+	req := &arguspb.UpdateWatchRequest{
 		WatcherName: watcherName,
 		Namespace:   watcherNamespace,
 		PodName:     podName,

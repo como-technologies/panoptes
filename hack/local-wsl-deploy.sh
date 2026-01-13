@@ -421,6 +421,37 @@ start_port_forwards() {
     log_wsl "No port-forward needed - kind extraPortMappings handles this"
 }
 
+# Update daemon DaemonSets with correct image variant
+# This reapplies manifests with the correct image tag based on IMAGE_VARIANT
+update_daemon_images() {
+    log_info "Updating daemon images (variant: ${IMAGE_VARIANT})..."
+
+    # Determine daemon tag based on variant
+    case "${IMAGE_VARIANT}" in
+        slim)
+            DAEMON_TAG="slim"
+            ;;
+        ebpf)
+            DAEMON_TAG="ebpf"
+            ;;
+        full|*)
+            DAEMON_TAG="${IMAGE_TAG}"
+            ;;
+    esac
+
+    log_info "Using daemon image tag: ${DAEMON_TAG}"
+
+    # Update argusd DaemonSet
+    sed "s|localhost/argusd:dev|localhost/argusd:${DAEMON_TAG}|g" "${SCRIPT_DIR}/argusd-daemonset.yaml" | \
+        sed "s|namespace: panoptes-system|namespace: ${NAMESPACE}|g" | \
+        kubectl apply -f -
+
+    # Update janusd DaemonSet
+    sed "s|localhost/janusd:dev|localhost/janusd:${DAEMON_TAG}|g" "${SCRIPT_DIR}/janusd-daemonset.yaml" | \
+        sed "s|namespace: panoptes-system|namespace: ${NAMESPACE}|g" | \
+        kubectl apply -f -
+}
+
 # Force restart all Panoptes pods to pick up new images
 # This is needed because imagePullPolicy:Never + static tag means
 # kubectl apply won't restart pods when images are updated
@@ -481,7 +512,7 @@ Commands:
     test        Create test resources and run test
     forward     Show port mappings
     restart     Restart all pods to pick up new images
-    redeploy    Quick iteration: build + load + restart pods
+    redeploy    Quick iteration: build + load + update manifests + restart
     clean       Delete cluster and resources
     all         Run full setup (cluster + build + load + deploy + test)
 
@@ -560,6 +591,7 @@ main() {
         redeploy)
             build_images
             load_images
+            update_daemon_images
             restart_pods
             start_port_forwards
             ;;

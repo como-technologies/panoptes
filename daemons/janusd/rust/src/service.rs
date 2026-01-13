@@ -13,6 +13,8 @@
 //! - `GetGuardState`: Streams current state of all guards (filtered)
 //! - `StreamAccessEvents`: Streams real-time access events
 //! - `GetMetrics`: Returns daemon and per-guard metrics
+//! - `UpdateGuard`: Pause or resume an existing guard
+//! - `UpdatePolicy`: Update allow/deny patterns of an existing guard
 //!
 //! ## Container Integration
 //!
@@ -421,6 +423,10 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
                                     gid: info.gid as i32,
                                     comm: info.comm.clone(),
                                     exe: info.exe.to_string_lossy().to_string(),
+                                    // V2 extended fields
+                                    ppid: info.ppid as i32,
+                                    cmdline: info.cmdline.clone(),
+                                    cwd: info.cwd.to_string_lossy().to_string(),
                                 }),
                                 info.comm,
                                 info.exe.to_string_lossy().to_string(),
@@ -437,6 +443,9 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
                                         gid: 0,
                                         comm: String::new(),
                                         exe: String::new(),
+                                        ppid: 0,
+                                        cmdline: vec![],
+                                        cwd: String::new(),
                                     }),
                                     String::new(),
                                     String::new(),
@@ -830,313 +839,8 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
             guard_metrics,
         }))
     }
-}
 
-// =============================================================================
-// V2 Service Implementation (Rust-only features)
-// =============================================================================
-
-/// V2 proto imports for UpdateGuard/UpdatePolicy RPCs
-use crate::proto::v2::{
-    UpdateGuardRequest, UpdateGuardResponse, UpdatePolicyRequest, UpdatePolicyResponse,
-    UpdateAction, janusd_service_server::JanusdService as JanusdServiceV2,
-};
-
-/// V2 service implementation extends V1 with UpdateGuard and UpdatePolicy RPCs.
-///
-/// V2 adds:
-/// - UpdateGuard RPC for pause/resume operations
-/// - UpdatePolicy RPC for dynamic policy pattern updates
-/// - Extended ProcessInfo with ppid, cmdline, cwd
-#[tonic::async_trait]
-impl JanusdServiceV2 for JanusdServiceImpl {
-    /// Create a new guard (delegates to v1 implementation converted to v2 types).
-    async fn create_guard(
-        &self,
-        request: Request<crate::proto::v2::CreateGuardRequest>,
-    ) -> Result<Response<crate::proto::v2::CreateGuardResponse>, Status> {
-        // Convert v2 request to v1
-        let v2_req = request.into_inner();
-        let v1_req = CreateGuardRequest {
-            guard_name: v2_req.guard_name,
-            namespace: v2_req.namespace,
-            node_name: v2_req.node_name,
-            pod_name: v2_req.pod_name,
-            container_ids: v2_req.container_ids,
-            pids: v2_req.pids,
-            subjects: v2_req.subjects.into_iter().map(|s| GuardSubject {
-                allow: s.allow,
-                deny: s.deny,
-                events: s.events,
-                only_dir: s.only_dir,
-                auto_allow_owner: s.auto_allow_owner,
-                audit: s.audit,
-                default_response: s.default_response,
-                tags: s.tags,
-            }).collect(),
-            log_format: v2_req.log_format,
-            paused: v2_req.paused,
-            enforcing: v2_req.enforcing,
-        };
-
-        // Call v1 implementation
-        let v1_resp = <Self as janusd_service_server::JanusdService>::create_guard(
-            self, Request::new(v1_req)
-        ).await?;
-        let v1_inner = v1_resp.into_inner();
-
-        // Convert to v2 response
-        Ok(Response::new(crate::proto::v2::CreateGuardResponse {
-            guard_id: v1_inner.guard_id,
-            node_name: v1_inner.node_name,
-            pod_name: v1_inner.pod_name,
-            guarded_paths: v1_inner.guarded_paths,
-            process_eventfds: v1_inner.process_eventfds,
-            paused: v1_inner.paused,
-            enforcing: v1_inner.enforcing,
-            marks_registered: v1_inner.marks_registered,
-        }))
-    }
-
-    /// Destroy an existing guard (delegates to v1 implementation).
-    async fn destroy_guard(
-        &self,
-        request: Request<crate::proto::v2::DestroyGuardRequest>,
-    ) -> Result<Response<()>, Status> {
-        let v2_req = request.into_inner();
-        let v1_req = DestroyGuardRequest {
-            guard_name: v2_req.guard_name,
-            namespace: v2_req.namespace,
-            pod_name: v2_req.pod_name,
-        };
-        <Self as janusd_service_server::JanusdService>::destroy_guard(
-            self, Request::new(v1_req)
-        ).await
-    }
-
-    type GetGuardStateStream = std::pin::Pin<
-        Box<dyn tokio_stream::Stream<Item = Result<crate::proto::v2::GuardState, Status>> + Send>
-    >;
-
-    /// Get current state of all guards (delegates to v1 with type conversion).
-    async fn get_guard_state(
-        &self,
-        request: Request<crate::proto::v2::GetGuardStateRequest>,
-    ) -> Result<Response<Self::GetGuardStateStream>, Status> {
-        let v2_req = request.into_inner();
-
-        // Filter sessions directly for v2 response
-        let sessions = self.sessions.read().await;
-        let mut states = Vec::new();
-
-        for session_arc in sessions.values() {
-            let session = session_arc.lock().await;
-
-            if !v2_req.guard_name.is_empty() && session.name != v2_req.guard_name {
-                continue;
-            }
-            if !v2_req.namespace.is_empty() && session.namespace != v2_req.namespace {
-                continue;
-            }
-
-            let guarded_paths: i32 = session.state.subjects
-                .iter()
-                .map(|s| (s.allow.len() + s.deny.len()) as i32)
-                .sum();
-
-            // Convert ready_at timestamp if present
-            let ready_at = session.state.ready_at.and_then(|t| {
-                t.duration_since(SystemTime::UNIX_EPOCH)
-                    .map(|d| Timestamp { seconds: d.as_secs() as i64, nanos: d.subsec_nanos() as i32 })
-                    .ok()
-            });
-
-            let state = crate::proto::v2::GuardState {
-                guard_name: session.name.clone(),
-                namespace: session.namespace.clone(),
-                node_name: session.node_name.clone(),
-                pod_name: session.pod_name.clone(),
-                pids: session.pids.clone(),
-                process_eventfds: vec![],
-                created_at: session.created_at.duration_since(SystemTime::UNIX_EPOCH)
-                    .map(|d| Timestamp { seconds: d.as_secs() as i64, nanos: d.subsec_nanos() as i32 })
-                    .ok(),
-                subjects: session.state.subjects.iter().map(|s| crate::proto::v2::GuardSubject {
-                    allow: s.allow.clone(),
-                    deny: s.deny.clone(),
-                    events: s.events.clone(),
-                    only_dir: s.only_dir,
-                    auto_allow_owner: s.auto_allow_owner,
-                    audit: s.audit,
-                    default_response: s.default_response,
-                    tags: s.tags.clone(),
-                }).collect(),
-                log_format: session.state.log_format.clone(),
-                paused: session.paused,
-                enforcing: session.state.enforcing,
-                guarded_paths,
-                // Readiness fields - indicates guard is actively protecting containers
-                marks_registered: session.state.marks_registered,
-                ready_at,
-                mount_count: session.state.mount_count as i32,
-            };
-
-            states.push(state);
-        }
-
-        let (tx, rx) = mpsc::channel(100);
-        tokio::spawn(async move {
-            for state in states {
-                if tx.send(Ok(state)).await.is_err() {
-                    break;
-                }
-            }
-        });
-
-        let stream = ReceiverStream::new(rx);
-        Ok(Response::new(Box::pin(stream) as Self::GetGuardStateStream))
-    }
-
-    type StreamAccessEventsStream = std::pin::Pin<
-        Box<dyn tokio_stream::Stream<Item = Result<crate::proto::v2::AccessEvent, Status>> + Send>
-    >;
-
-    /// Stream real-time access events with v2 extended ProcessInfo.
-    async fn stream_access_events(
-        &self,
-        request: Request<crate::proto::v2::StreamAccessEventsRequest>,
-    ) -> Result<Response<Self::StreamAccessEventsStream>, Status> {
-        let req = request.into_inner();
-
-        info!(
-            guard_name = %req.guard_name,
-            namespace = %req.namespace,
-            include_allowed = req.include_allowed,
-            "StreamAccessEvents v2 started"
-        );
-
-        let (tx, rx) = mpsc::channel(1000);
-        let mut event_rx = self.broadcaster.subscribe();
-        let proc_resolver = self.proc_resolver.clone();
-
-        let filter_guard_name = req.guard_name.clone();
-        let filter_namespace = req.namespace.clone();
-        let filter_event_types: Vec<i32> = req.event_types.clone();
-        let include_allowed = req.include_allowed;
-
-        tokio::spawn(async move {
-            loop {
-                match event_rx.recv().await {
-                    Ok(v1_event) => {
-                        // Apply filters
-                        if !filter_guard_name.is_empty() && v1_event.guard_name != filter_guard_name {
-                            continue;
-                        }
-                        if !filter_namespace.is_empty() && v1_event.namespace != filter_namespace {
-                            continue;
-                        }
-                        if !filter_event_types.is_empty() && !filter_event_types.contains(&v1_event.event_type) {
-                            continue;
-                        }
-                        if !include_allowed && v1_event.response == AccessResponse::Allow as i32 {
-                            continue;
-                        }
-
-                        // Resolve v2 extended ProcessInfo fields from /proc/{pid}/
-                        // The v1 event already has basic fields, we just need ppid, cmdline, cwd
-                        let v2_process_info = v1_event.process_info.map(|p| {
-                            // Try to get extended info, fall back to basic v1 fields on failure
-                            let (ppid, cmdline, cwd) = proc_resolver
-                                .get_process_info(p.pid as u32)
-                                .map(|info| (
-                                    info.ppid as i32,
-                                    info.cmdline,
-                                    info.cwd.to_string_lossy().to_string(),
-                                ))
-                                .unwrap_or((0, vec![], String::new()));
-
-                            crate::proto::v2::ProcessInfo {
-                                pid: p.pid,
-                                tid: p.tid,
-                                uid: p.uid,
-                                gid: p.gid,
-                                comm: p.comm,
-                                exe: p.exe,
-                                ppid,
-                                cmdline,
-                                cwd,
-                            }
-                        });
-
-                        // Convert v1 to v2 with extended ProcessInfo
-                        let v2_event = crate::proto::v2::AccessEvent {
-                            timestamp: v1_event.timestamp,
-                            guard_name: v1_event.guard_name,
-                            namespace: v1_event.namespace,
-                            node_name: v1_event.node_name,
-                            pod_name: v1_event.pod_name,
-                            container_id: v1_event.container_id,
-                            event_type: v1_event.event_type,
-                            path: v1_event.path,
-                            response: v1_event.response,
-                            process_info: v2_process_info,
-                            is_directory: v1_event.is_directory,
-                            tags: v1_event.tags,
-                            audit_logged: v1_event.audit_logged,
-                        };
-
-                        if tx.send(Ok(v2_event)).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        debug!("Stream client lagged, skipped {} events", n);
-                        continue;
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        break;
-                    }
-                }
-            }
-        });
-
-        let stream = ReceiverStream::new(rx);
-        Ok(Response::new(Box::pin(stream) as Self::StreamAccessEventsStream))
-    }
-
-    /// Get daemon metrics (delegates to v1 with type conversion).
-    async fn get_metrics(
-        &self,
-        request: Request<crate::proto::v2::GetMetricsRequest>,
-    ) -> Result<Response<crate::proto::v2::MetricsResponse>, Status> {
-        let v2_req = request.into_inner();
-        let v1_req = GetMetricsRequest {
-            guard_name: v2_req.guard_name,
-        };
-        let v1_resp = <Self as janusd_service_server::JanusdService>::get_metrics(
-            self, Request::new(v1_req)
-        ).await?;
-        let v1_inner = v1_resp.into_inner();
-
-        Ok(Response::new(crate::proto::v2::MetricsResponse {
-            active_guards: v1_inner.active_guards,
-            total_events_processed: v1_inner.total_events_processed,
-            total_denied: v1_inner.total_denied,
-            total_allowed: v1_inner.total_allowed,
-            guard_metrics: v1_inner.guard_metrics.into_iter().map(|m| {
-                crate::proto::v2::GuardMetrics {
-                    guard_name: m.guard_name,
-                    namespace: m.namespace,
-                    denied_count: m.denied_count,
-                    allowed_count: m.allowed_count,
-                    audited_count: m.audited_count,
-                    event_counts: m.event_counts,
-                }
-            }).collect(),
-        }))
-    }
-
-    /// Update an existing guard (pause/resume). NEW in v2.
+    /// Update an existing guard (pause/resume).
     async fn update_guard(
         &self,
         request: Request<UpdateGuardRequest>,
@@ -1195,7 +899,7 @@ impl JanusdServiceV2 for JanusdServiceImpl {
         }
     }
 
-    /// Update the policy of an existing guard. NEW in v2.
+    /// Update the policy of an existing guard.
     async fn update_policy(
         &self,
         request: Request<UpdatePolicyRequest>,

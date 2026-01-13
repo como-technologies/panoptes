@@ -156,6 +156,14 @@ impl ArgusdServiceImpl {
         // Enable kernel-side filtering
         loader.set_filter_enabled(true)?;
 
+        // Attach process tracking tracepoints for exec-time caching
+        // This enables full process attribution (exe, cmdline, cwd, ppid)
+        if let Err(e) = loader.attach_process_tracepoints() {
+            warn!(error = %e, "Failed to attach process tracepoints - process cache will be unavailable");
+        } else {
+            info!("Process cache tracepoints attached");
+        }
+
         // Start the event loop
         loader.start_event_loop().await?;
 
@@ -176,6 +184,7 @@ impl ArgusdServiceImpl {
     /// Start the background task that forwards eBPF events to the broadcaster.
     async fn start_event_forwarder(&self) {
         let receiver = self.ebpf_receiver.clone();
+        let loader = self.ebpf_loader.clone();
         let broadcaster = self.broadcaster.clone();
         let sessions = self.sessions.clone();
         let node_name = self.node_name.clone();
@@ -197,7 +206,17 @@ impl ArgusdServiceImpl {
                 };
 
                 // Convert to Argus event
-                let ebpf_event = EbpfFileEvent::from(raw_event);
+                let ebpf_event = EbpfFileEvent::from(raw_event.clone());
+
+                // Look up cached process info (exe, cmdline, cwd, ppid)
+                let cached_process = {
+                    let loader_guard = loader.lock().await;
+                    if let Some(ref ldr) = *loader_guard {
+                        ldr.get_cached_process(raw_event.tgid).ok().flatten()
+                    } else {
+                        None
+                    }
+                };
 
                 // Find matching session based on path prefix
                 let sessions_guard = sessions.read().await;
@@ -218,21 +237,62 @@ impl ArgusdServiceImpl {
                         .map(|s| s.as_str())
                         .unwrap_or("");
 
-                    let proto_event = ebpf_event.to_proto_v1(
-                        &node_name,
-                        &session.name,
-                        &session.namespace,
-                        &session.pod_name,
-                        container_id,
-                    );
+                    // Build ProcessInfo with cached data
+                    let process_info = Some(crate::proto::ProcessInfo {
+                        pid: raw_event.pid as i32,
+                        tid: raw_event.tgid as i32,
+                        uid: raw_event.uid as i32,
+                        gid: raw_event.gid as i32,
+                        comm: ebpf_event.comm.clone(),
+                        // Use cached process info if available
+                        exe: cached_process.as_ref()
+                            .map(|c| c.exe_str().to_string())
+                            .unwrap_or_default(),
+                        ppid: cached_process.as_ref()
+                            .map(|c| c.ppid as i32)
+                            .unwrap_or(0),
+                        cmdline: cached_process.as_ref()
+                            .map(|c| c.cmdline_str().split('\0')
+                                .filter(|s| !s.is_empty())
+                                .map(String::from)
+                                .collect())
+                            .unwrap_or_default(),
+                        cwd: cached_process.as_ref()
+                            .map(|c| c.cwd_str().to_string())
+                            .unwrap_or_default(),
+                    });
 
-                    // Log the event
+                    let proto_event = crate::proto::FileEvent {
+                        timestamp: Some(prost_types::Timestamp {
+                            seconds: (ebpf_event.timestamp_ns / 1_000_000_000) as i64,
+                            nanos: (ebpf_event.timestamp_ns % 1_000_000_000) as i32,
+                        }),
+                        watcher_name: session.name.clone(),
+                        namespace: session.namespace.clone(),
+                        node_name: node_name.clone(),
+                        pod_name: session.pod_name.clone(),
+                        container_id: container_id.to_string(),
+                        event_type: ebpf_event.to_inotify_event() as i32,
+                        path: ebpf_event.path.clone(),
+                        filename: ebpf_event.path.rsplit('/').next().unwrap_or("").to_string(),
+                        is_directory: false,
+                        inode: 0,
+                        tags: Default::default(),
+                        process_info,
+                    };
+
+                    // Log the event with process attribution
+                    let exe_info = cached_process.as_ref()
+                        .filter(|c| c.has_exe())
+                        .map(|c| format!(" ({})", c.exe_str()))
+                        .unwrap_or_default();
                     info!(
-                        "<{}> file '{}' by {}:{} ({}:{})",
+                        "<{}> file '{}' by {}:{}{} ({}:{})",
                         ebpf_event.event_type_str().to_uppercase(),
                         ebpf_event.path,
                         ebpf_event.comm,
                         ebpf_event.pid,
+                        exe_info,
                         session.pod_name,
                         node_name
                     );
@@ -636,242 +696,6 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
             total_watch_descriptors,
             events_processed: totals.events_total as i64,
             watch_metrics,
-        }))
-    }
-}
-
-// =============================================================================
-// V2 Service Implementation (eBPF mode with ProcessInfo)
-// =============================================================================
-
-use crate::proto::v2::{
-    UpdateWatchRequest, UpdateWatchResponse, UpdateAction,
-    argusd_service_server::ArgusdService as ArgusdServiceV2,
-};
-
-#[tonic::async_trait]
-impl ArgusdServiceV2 for ArgusdServiceImpl {
-    async fn create_watch(
-        &self,
-        request: Request<crate::proto::v2::CreateWatchRequest>,
-    ) -> Result<Response<crate::proto::v2::CreateWatchResponse>, Status> {
-        let v2_req = request.into_inner();
-        let v1_req = CreateWatchRequest {
-            watcher_name: v2_req.watcher_name,
-            namespace: v2_req.namespace,
-            node_name: v2_req.node_name,
-            pod_name: v2_req.pod_name,
-            container_ids: v2_req.container_ids,
-            pids: v2_req.pids,
-            subjects: v2_req.subjects.into_iter().map(|s| WatchSubject {
-                paths: s.paths,
-                events: s.events,
-                ignore: s.ignore,
-                recursive: s.recursive,
-                max_depth: s.max_depth,
-                only_dir: s.only_dir,
-                follow_move: s.follow_move,
-                tags: s.tags,
-            }).collect(),
-            log_format: v2_req.log_format,
-            paused: v2_req.paused,
-        };
-
-        let v1_resp = <Self as argusd_service_server::ArgusdService>::create_watch(
-            self, Request::new(v1_req)
-        ).await?;
-        let v1_inner = v1_resp.into_inner();
-
-        Ok(Response::new(crate::proto::v2::CreateWatchResponse {
-            watch_id: v1_inner.watch_id,
-            node_name: v1_inner.node_name,
-            pod_name: v1_inner.pod_name,
-            watched_paths: v1_inner.watched_paths,
-            paused: v1_inner.paused,
-            watches_ready: v1_inner.watches_ready,
-        }))
-    }
-
-    async fn destroy_watch(
-        &self,
-        request: Request<crate::proto::v2::DestroyWatchRequest>,
-    ) -> Result<Response<()>, Status> {
-        let v2_req = request.into_inner();
-        let v1_req = DestroyWatchRequest {
-            watcher_name: v2_req.watcher_name,
-            namespace: v2_req.namespace,
-            pod_name: v2_req.pod_name,
-        };
-        <Self as argusd_service_server::ArgusdService>::destroy_watch(
-            self, Request::new(v1_req)
-        ).await
-    }
-
-    type GetWatchStateStream = Pin<
-        Box<dyn tokio_stream::Stream<Item = Result<crate::proto::v2::WatchState, Status>> + Send>
-    >;
-
-    async fn get_watch_state(
-        &self,
-        request: Request<crate::proto::v2::GetWatchStateRequest>,
-    ) -> Result<Response<Self::GetWatchStateStream>, Status> {
-        let v2_req = request.into_inner();
-
-        let sessions = self.sessions.read().await;
-        let mut states = Vec::new();
-
-        for session_arc in sessions.values() {
-            let session = session_arc.lock().await;
-
-            if !v2_req.watcher_name.is_empty() && session.name != v2_req.watcher_name {
-                continue;
-            }
-            if !v2_req.namespace.is_empty() && session.namespace != v2_req.namespace {
-                continue;
-            }
-
-            let state = crate::proto::v2::WatchState {
-                watcher_name: session.name.clone(),
-                namespace: session.namespace.clone(),
-                node_name: session.node_name.clone(),
-                pod_name: session.pod_name.clone(),
-                pids: session.pids.clone(),
-                watch_descriptors: session.state.watched_prefixes.load(Ordering::Relaxed) as i32,
-                created_at: system_time_to_timestamp(session.created_at),
-                subjects: session.state.subjects.iter().map(|s| crate::proto::v2::WatchSubject {
-                    paths: s.paths.clone(),
-                    events: s.events.clone(),
-                    ignore: s.ignore.clone(),
-                    recursive: s.recursive,
-                    max_depth: s.max_depth,
-                    only_dir: s.only_dir,
-                    follow_move: s.follow_move,
-                    tags: s.tags.clone(),
-                }).collect(),
-                log_format: session.state.log_format.clone(),
-                paused: session.paused,
-                watches_ready: session.state.watches_ready,
-                ready_at: session.state.ready_at.and_then(system_time_to_timestamp),
-                active_watch_descriptors: session.state.watched_prefixes.load(Ordering::Relaxed) as i32,
-            };
-
-            states.push(state);
-        }
-
-        Ok(stream_from_iter(states, 100))
-    }
-
-    type StreamEventsStream = Pin<
-        Box<dyn tokio_stream::Stream<Item = Result<crate::proto::v2::FileEvent, Status>> + Send>
-    >;
-
-    /// Stream real-time file events with ProcessInfo (eBPF provides this).
-    async fn stream_events(
-        &self,
-        request: Request<crate::proto::v2::StreamEventsRequest>,
-    ) -> Result<Response<Self::StreamEventsStream>, Status> {
-        let req = request.into_inner();
-
-        info!(
-            watcher = %req.watcher_name,
-            namespace = %req.namespace,
-            "StreamEvents v2 started (eBPF mode - with ProcessInfo)"
-        );
-
-        let filter_name = if req.watcher_name.is_empty() { None } else { Some(req.watcher_name) };
-        let filter_namespace = if req.namespace.is_empty() { None } else { Some(req.namespace) };
-        let filter_events: Option<Vec<String>> = if req.event_types.is_empty() {
-            None
-        } else {
-            Some(req.event_types
-                .iter()
-                .map(|e| inotify_event_to_string(*e as i32))
-                .filter(|s| !s.is_empty())
-                .collect())
-        };
-
-        let rx = self.broadcaster.subscribe();
-
-        // Stream that converts v1 events to v2 with ProcessInfo
-        // Note: eBPF mode provides full process info, so we look it up from the original event
-        let stream = async_stream::stream! {
-            use tokio_stream::StreamExt;
-            let mut stream = tokio_stream::wrappers::BroadcastStream::new(rx);
-
-            while let Some(result) = stream.next().await {
-                let v1_event = match result {
-                    Ok(e) => e,
-                    Err(_) => continue,
-                };
-
-                // Apply filters
-                if let Some(ref name) = filter_name {
-                    if v1_event.watcher_name != *name {
-                        continue;
-                    }
-                }
-                if let Some(ref ns) = filter_namespace {
-                    if v1_event.namespace != *ns {
-                        continue;
-                    }
-                }
-                if let Some(ref events) = filter_events {
-                    let event_str = inotify_event_to_string(v1_event.event_type);
-                    if !events.contains(&event_str) {
-                        continue;
-                    }
-                }
-
-                // In eBPF mode, we have process info - look up from session
-                // Note: The event forwarder should populate this, but for now we use None
-                // A future enhancement would store ProcessInfo in the broadcast event
-                let v2_event = crate::proto::v2::FileEvent {
-                    timestamp: v1_event.timestamp,
-                    watcher_name: v1_event.watcher_name,
-                    namespace: v1_event.namespace,
-                    node_name: v1_event.node_name,
-                    pod_name: v1_event.pod_name,
-                    container_id: v1_event.container_id,
-                    event_type: v1_event.event_type,
-                    path: v1_event.path,
-                    filename: v1_event.filename,
-                    is_directory: v1_event.is_directory,
-                    inode: v1_event.inode,
-                    tags: v1_event.tags,
-                    process_info: None, // TODO: Enhance broadcaster to include ProcessInfo
-                };
-
-                yield Ok(v2_event);
-            }
-        };
-
-        Ok(Response::new(Box::pin(stream)))
-    }
-
-    async fn get_metrics(
-        &self,
-        request: Request<crate::proto::v2::GetMetricsRequest>,
-    ) -> Result<Response<crate::proto::v2::MetricsResponse>, Status> {
-        let v2_req = request.into_inner();
-        let v1_req = GetMetricsRequest {
-            watcher_name: v2_req.watcher_name,
-        };
-        let v1_resp = <Self as argusd_service_server::ArgusdService>::get_metrics(
-            self, Request::new(v1_req)
-        ).await?;
-        let v1_inner = v1_resp.into_inner();
-
-        Ok(Response::new(crate::proto::v2::MetricsResponse {
-            active_watches: v1_inner.active_watches,
-            total_watch_descriptors: v1_inner.total_watch_descriptors,
-            events_processed: v1_inner.events_processed,
-            watch_metrics: v1_inner.watch_metrics.into_iter().map(|m| {
-                crate::proto::v2::WatchMetrics {
-                    watcher_name: m.watcher_name,
-                    namespace: m.namespace,
-                    event_counts: m.event_counts,
-                }
-            }).collect(),
         }))
     }
 

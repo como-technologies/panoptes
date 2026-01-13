@@ -3,7 +3,7 @@
 //
 //! # ArgusdService gRPC Implementation
 //!
-//! This module implements the gRPC service defined in `argus.v1.proto`.
+//! This module implements the gRPC service defined in `argus.v2.proto`.
 //!
 //! ## RPCs Implemented
 //!
@@ -12,6 +12,7 @@
 //! - `GetWatchState` - Stream current state of all watches
 //! - `StreamEvents` - Stream real-time file system events
 //! - `GetMetrics` - Retrieve daemon metrics
+//! - `UpdateWatch` - Pause or resume an existing watch
 
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -425,6 +426,8 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
                                             is_directory: event.is_dir,
                                             inode: 0,
                                             tags: HashMap::new(),
+                                            // Argus (inotify) doesn't provide process info - only Janus (fanotify) does
+                                            process_info: None,
                                         };
                                         drop(session);
 
@@ -653,262 +656,8 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
             watch_metrics,
         }))
     }
-}
 
-// =============================================================================
-// V2 Service Implementation (Rust-only features)
-// =============================================================================
-
-/// V2 proto imports for UpdateWatch RPC
-use crate::proto::v2::{
-    UpdateWatchRequest, UpdateWatchResponse, UpdateAction,
-    argusd_service_server::ArgusdService as ArgusdServiceV2,
-};
-
-/// V2 service implementation extends V1 with UpdateWatch RPC.
-///
-/// V2 adds:
-/// - UpdateWatch RPC for pause/resume operations
-/// - ProcessInfo in FileEvent (for future eBPF integration)
-#[tonic::async_trait]
-impl ArgusdServiceV2 for ArgusdServiceImpl {
-    /// Create a new watch (delegates to v1 implementation converted to v2 types).
-    async fn create_watch(
-        &self,
-        request: Request<crate::proto::v2::CreateWatchRequest>,
-    ) -> Result<Response<crate::proto::v2::CreateWatchResponse>, Status> {
-        // Convert v2 request to v1
-        let v2_req = request.into_inner();
-        let v1_req = CreateWatchRequest {
-            watcher_name: v2_req.watcher_name,
-            namespace: v2_req.namespace,
-            node_name: v2_req.node_name,
-            pod_name: v2_req.pod_name,
-            container_ids: v2_req.container_ids,
-            pids: v2_req.pids,
-            subjects: v2_req.subjects.into_iter().map(|s| WatchSubject {
-                paths: s.paths,
-                events: s.events,
-                ignore: s.ignore,
-                recursive: s.recursive,
-                max_depth: s.max_depth,
-                only_dir: s.only_dir,
-                follow_move: s.follow_move,
-                tags: s.tags,
-            }).collect(),
-            log_format: v2_req.log_format,
-            paused: v2_req.paused,
-        };
-
-        // Call v1 implementation
-        let v1_resp = <Self as argusd_service_server::ArgusdService>::create_watch(
-            self, Request::new(v1_req)
-        ).await?;
-        let v1_inner = v1_resp.into_inner();
-
-        // Convert to v2 response
-        Ok(Response::new(crate::proto::v2::CreateWatchResponse {
-            watch_id: v1_inner.watch_id,
-            node_name: v1_inner.node_name,
-            pod_name: v1_inner.pod_name,
-            watched_paths: v1_inner.watched_paths,
-            paused: v1_inner.paused,
-            watches_ready: v1_inner.watches_ready,
-        }))
-    }
-
-    /// Destroy an existing watch (delegates to v1 implementation).
-    async fn destroy_watch(
-        &self,
-        request: Request<crate::proto::v2::DestroyWatchRequest>,
-    ) -> Result<Response<()>, Status> {
-        let v2_req = request.into_inner();
-        let v1_req = DestroyWatchRequest {
-            watcher_name: v2_req.watcher_name,
-            namespace: v2_req.namespace,
-            pod_name: v2_req.pod_name,
-        };
-        <Self as argusd_service_server::ArgusdService>::destroy_watch(
-            self, Request::new(v1_req)
-        ).await
-    }
-
-    type GetWatchStateStream = Pin<
-        Box<dyn tokio_stream::Stream<Item = Result<crate::proto::v2::WatchState, Status>> + Send>
-    >;
-
-    /// Get current state of all watches (delegates to v1 with type conversion).
-    async fn get_watch_state(
-        &self,
-        request: Request<crate::proto::v2::GetWatchStateRequest>,
-    ) -> Result<Response<Self::GetWatchStateStream>, Status> {
-        let v2_req = request.into_inner();
-
-        // Filter sessions directly for v2 response
-        let sessions = self.sessions.read().await;
-        let mut states = Vec::new();
-
-        for session_arc in sessions.values() {
-            let session = session_arc.lock().await;
-
-            if !v2_req.watcher_name.is_empty() && session.name != v2_req.watcher_name {
-                continue;
-            }
-            if !v2_req.namespace.is_empty() && session.namespace != v2_req.namespace {
-                continue;
-            }
-
-            let state = crate::proto::v2::WatchState {
-                watcher_name: session.name.clone(),
-                namespace: session.namespace.clone(),
-                node_name: session.node_name.clone(),
-                pod_name: session.pod_name.clone(),
-                pids: session.pids.clone(),
-                watch_descriptors: session.state.watch_descriptors.load(Ordering::Relaxed) as i32,
-                created_at: system_time_to_timestamp(session.created_at),
-                subjects: session.state.subjects.iter().map(|s| crate::proto::v2::WatchSubject {
-                    paths: s.paths.clone(),
-                    events: s.events.clone(),
-                    ignore: s.ignore.clone(),
-                    recursive: s.recursive,
-                    max_depth: s.max_depth,
-                    only_dir: s.only_dir,
-                    follow_move: s.follow_move,
-                    tags: s.tags.clone(),
-                }).collect(),
-                log_format: session.state.log_format.clone(),
-                paused: session.paused,
-                // Readiness fields for watcher-wait init container
-                watches_ready: session.state.watches_ready,
-                ready_at: session.state.ready_at.and_then(system_time_to_timestamp),
-                active_watch_descriptors: session.state.watch_descriptors.load(Ordering::Relaxed) as i32,
-            };
-
-            states.push(state);
-        }
-
-        Ok(stream_from_iter(states, 100))
-    }
-
-    type StreamEventsStream = Pin<
-        Box<dyn tokio_stream::Stream<Item = Result<crate::proto::v2::FileEvent, Status>> + Send>
-    >;
-
-    /// Stream real-time file events (v2 API).
-    ///
-    /// Note: Argus (inotify) does not provide process information - inotify only
-    /// reports WHAT changed, not WHO changed it. For process attribution, use
-    /// Janus (fanotify) which inherently provides process info with each event.
-    async fn stream_events(
-        &self,
-        request: Request<crate::proto::v2::StreamEventsRequest>,
-    ) -> Result<Response<Self::StreamEventsStream>, Status> {
-        let req = request.into_inner();
-
-        info!(
-            watcher = %req.watcher_name,
-            namespace = %req.namespace,
-            "StreamEvents v2 started"
-        );
-
-        // Build filter from request
-        let filter_name = if req.watcher_name.is_empty() { None } else { Some(req.watcher_name) };
-        let filter_namespace = if req.namespace.is_empty() { None } else { Some(req.namespace) };
-        let filter_events: Option<Vec<String>> = if req.event_types.is_empty() {
-            None
-        } else {
-            Some(req.event_types
-                .iter()
-                .map(|e| inotify_event_to_string(*e as i32))
-                .filter(|s| !s.is_empty())
-                .collect())
-        };
-
-        // Subscribe to broadcaster
-        let rx = self.broadcaster.subscribe();
-
-        // Create an async stream that converts v1 events to v2
-        let stream = async_stream::stream! {
-            use tokio_stream::StreamExt;
-            let mut stream = tokio_stream::wrappers::BroadcastStream::new(rx);
-
-            while let Some(result) = stream.next().await {
-                let v1_event = match result {
-                    Ok(e) => e,
-                    Err(_) => continue, // Skip lagged events
-                };
-
-                // Apply filters
-                if let Some(ref name) = filter_name {
-                    if v1_event.watcher_name != *name {
-                        continue;
-                    }
-                }
-                if let Some(ref ns) = filter_namespace {
-                    if v1_event.namespace != *ns {
-                        continue;
-                    }
-                }
-                if let Some(ref events) = filter_events {
-                    let event_str = inotify_event_to_string(v1_event.event_type);
-                    if !events.contains(&event_str) {
-                        continue;
-                    }
-                }
-
-                // Convert to v2 event (process_info is None for Argus - inotify doesn't provide it)
-                let v2_event = crate::proto::v2::FileEvent {
-                    timestamp: v1_event.timestamp,
-                    watcher_name: v1_event.watcher_name,
-                    namespace: v1_event.namespace,
-                    node_name: v1_event.node_name,
-                    pod_name: v1_event.pod_name,
-                    container_id: v1_event.container_id,
-                    event_type: v1_event.event_type,
-                    path: v1_event.path,
-                    filename: v1_event.filename,
-                    is_directory: v1_event.is_directory,
-                    inode: v1_event.inode,
-                    tags: v1_event.tags,
-                    process_info: None,
-                };
-
-                yield Ok(v2_event);
-            }
-        };
-
-        Ok(Response::new(Box::pin(stream)))
-    }
-
-    /// Get daemon metrics (delegates to v1 with type conversion).
-    async fn get_metrics(
-        &self,
-        request: Request<crate::proto::v2::GetMetricsRequest>,
-    ) -> Result<Response<crate::proto::v2::MetricsResponse>, Status> {
-        let v2_req = request.into_inner();
-        let v1_req = GetMetricsRequest {
-            watcher_name: v2_req.watcher_name,
-        };
-        let v1_resp = <Self as argusd_service_server::ArgusdService>::get_metrics(
-            self, Request::new(v1_req)
-        ).await?;
-        let v1_inner = v1_resp.into_inner();
-
-        Ok(Response::new(crate::proto::v2::MetricsResponse {
-            active_watches: v1_inner.active_watches,
-            total_watch_descriptors: v1_inner.total_watch_descriptors,
-            events_processed: v1_inner.events_processed,
-            watch_metrics: v1_inner.watch_metrics.into_iter().map(|m| {
-                crate::proto::v2::WatchMetrics {
-                    watcher_name: m.watcher_name,
-                    namespace: m.namespace,
-                    event_counts: m.event_counts,
-                }
-            }).collect(),
-        }))
-    }
-
-    /// Update an existing watch (pause/resume). NEW in v2.
+    /// Update an existing watch (pause/resume).
     async fn update_watch(
         &self,
         request: Request<UpdateWatchRequest>,
@@ -1052,6 +801,7 @@ mod tests {
             is_directory: false,
             inode: 0,
             tags: HashMap::new(),
+            process_info: None, // Argus (inotify) doesn't provide process info
         };
 
         assert_eq!(event.filter_name(), "test-watcher");

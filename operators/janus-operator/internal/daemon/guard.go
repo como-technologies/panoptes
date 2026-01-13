@@ -25,8 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	januspb "github.com/como-technologies/panoptes/gen/go/janus/v1"
-	januspbv2 "github.com/como-technologies/panoptes/gen/go/janus/v2"
+	januspb "github.com/como-technologies/panoptes/gen/go/janus/v2"
 	janusv1 "github.com/como-technologies/panoptes/operators/janus-operator/api/v1"
 )
 
@@ -340,16 +339,16 @@ func (m *GuardManager) UpdateGuard(ctx context.Context, nodeIP, guardNamespace, 
 		return nil, fmt.Errorf("failed to get connection: %w", err)
 	}
 
-	action := januspbv2.UpdateAction_UPDATE_ACTION_RESUME
+	action := januspb.UpdateAction_UPDATE_ACTION_RESUME
 	if pause {
-		action = januspbv2.UpdateAction_UPDATE_ACTION_PAUSE
+		action = januspb.UpdateAction_UPDATE_ACTION_PAUSE
 	}
 
 	logger.V(1).Info("Updating guard state")
 
-	// Create v2 gRPC client and make the call
-	client := januspbv2.NewJanusdServiceClient(conn)
-	req := &januspbv2.UpdateGuardRequest{
+	// Create gRPC client and make the call
+	client := januspb.NewJanusdServiceClient(conn)
+	req := &januspb.UpdateGuardRequest{
 		GuardName: guardName,
 		Namespace: guardNamespace,
 		PodName:   podName,
@@ -402,9 +401,9 @@ func (m *GuardManager) UpdatePolicy(ctx context.Context, nodeIP, guardNamespace,
 
 	logger.V(1).Info("Updating guard policy")
 
-	// Create v2 gRPC client and make the call
-	client := januspbv2.NewJanusdServiceClient(conn)
-	req := &januspbv2.UpdatePolicyRequest{
+	// Create gRPC client and make the call
+	client := januspb.NewJanusdServiceClient(conn)
+	req := &januspb.UpdatePolicyRequest{
 		GuardName:     guardName,
 		Namespace:     guardNamespace,
 		PodName:       podName,

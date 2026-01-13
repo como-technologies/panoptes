@@ -15,7 +15,7 @@
 # ============================================================================
 # Stage 1: eBPF bytecode builder (only used when FEATURES contains "ebpf")
 # ============================================================================
-FROM rust:1.83-bookworm AS ebpf-builder
+FROM rust:1.86-bookworm AS ebpf-builder
 
 ARG FEATURES=""
 
@@ -49,7 +49,7 @@ RUN if echo "$FEATURES" | grep -q "ebpf"; then \
 # ============================================================================
 # Stage 2: Userspace binary builder (musl for static linking)
 # ============================================================================
-FROM rust:1.83-alpine AS builder
+FROM rust:1.86-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache \

@@ -37,18 +37,12 @@ mod ebpf;
 mod service_ebpf;
 
 pub mod proto {
-    // V1 proto types (re-exported at root for backward compatibility)
-    tonic::include_proto!("argus.v1");
-
-    // V2 proto types (Rust-only features: ProcessInfo in FileEvent, UpdateWatch RPC)
-    pub mod v2 {
-        tonic::include_proto!("argus.v2");
-    }
+    // V2 proto types (V1 deprecated - all clients should use V2)
+    tonic::include_proto!("argus.v2");
 }
 
 /// Service name for health checks (matches the gRPC service name)
-const SERVICE_NAME_V1: &str = "argus.v1.ArgusdService";
-const SERVICE_NAME_V2: &str = "argus.v2.ArgusdService";
+const SERVICE_NAME: &str = "argus.v2.ArgusdService";
 
 /// Runtime mode selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -269,22 +263,17 @@ async fn main() -> Result<()> {
             config.max_watches,
         ));
 
-        // Set services as serving
+        // Set service as serving
         health_reporter
             .set_serving::<proto::argusd_service_server::ArgusdServiceServer<Arc<service_ebpf::ArgusdServiceImpl>>>()
             .await;
-        health_reporter.set_service_status(SERVICE_NAME_V1, tonic_health::ServingStatus::Serving).await;
-        health_reporter
-            .set_serving::<proto::v2::argusd_service_server::ArgusdServiceServer<Arc<service_ebpf::ArgusdServiceImpl>>>()
-            .await;
-        health_reporter.set_service_status(SERVICE_NAME_V2, tonic_health::ServingStatus::Serving).await;
+        health_reporter.set_service_status(SERVICE_NAME, tonic_health::ServingStatus::Serving).await;
 
-        info!(addr = %listen_addr, "Starting gRPC server (v1 + v2)");
+        info!(addr = %listen_addr, "Starting gRPC server (v2)");
 
         Server::builder()
             .add_service(health_service)
-            .add_service(proto::argusd_service_server::ArgusdServiceServer::from_arc(argusd_service.clone()))
-            .add_service(proto::v2::argusd_service_server::ArgusdServiceServer::from_arc(argusd_service))
+            .add_service(proto::argusd_service_server::ArgusdServiceServer::from_arc(argusd_service))
             .serve(listen_addr)
             .await?;
     } else {
@@ -297,18 +286,13 @@ async fn main() -> Result<()> {
         health_reporter
             .set_serving::<proto::argusd_service_server::ArgusdServiceServer<Arc<service::ArgusdServiceImpl>>>()
             .await;
-        health_reporter.set_service_status(SERVICE_NAME_V1, tonic_health::ServingStatus::Serving).await;
-        health_reporter
-            .set_serving::<proto::v2::argusd_service_server::ArgusdServiceServer<Arc<service::ArgusdServiceImpl>>>()
-            .await;
-        health_reporter.set_service_status(SERVICE_NAME_V2, tonic_health::ServingStatus::Serving).await;
+        health_reporter.set_service_status(SERVICE_NAME, tonic_health::ServingStatus::Serving).await;
 
-        info!(addr = %listen_addr, "Starting gRPC server (v1 + v2)");
+        info!(addr = %listen_addr, "Starting gRPC server (v2)");
 
         Server::builder()
             .add_service(health_service)
-            .add_service(proto::argusd_service_server::ArgusdServiceServer::from_arc(argusd_service.clone()))
-            .add_service(proto::v2::argusd_service_server::ArgusdServiceServer::from_arc(argusd_service))
+            .add_service(proto::argusd_service_server::ArgusdServiceServer::from_arc(argusd_service))
             .serve(listen_addr)
             .await?;
     }
@@ -324,18 +308,13 @@ async fn main() -> Result<()> {
         health_reporter
             .set_serving::<proto::argusd_service_server::ArgusdServiceServer<Arc<service::ArgusdServiceImpl>>>()
             .await;
-        health_reporter.set_service_status(SERVICE_NAME_V1, tonic_health::ServingStatus::Serving).await;
-        health_reporter
-            .set_serving::<proto::v2::argusd_service_server::ArgusdServiceServer<Arc<service::ArgusdServiceImpl>>>()
-            .await;
-        health_reporter.set_service_status(SERVICE_NAME_V2, tonic_health::ServingStatus::Serving).await;
+        health_reporter.set_service_status(SERVICE_NAME, tonic_health::ServingStatus::Serving).await;
 
-        info!(addr = %listen_addr, "Starting gRPC server (v1 + v2)");
+        info!(addr = %listen_addr, "Starting gRPC server (v2)");
 
         Server::builder()
             .add_service(health_service)
-            .add_service(proto::argusd_service_server::ArgusdServiceServer::from_arc(argusd_service.clone()))
-            .add_service(proto::v2::argusd_service_server::ArgusdServiceServer::from_arc(argusd_service))
+            .add_service(proto::argusd_service_server::ArgusdServiceServer::from_arc(argusd_service))
             .serve(listen_addr)
             .await?;
     }

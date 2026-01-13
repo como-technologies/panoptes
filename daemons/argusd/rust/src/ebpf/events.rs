@@ -60,8 +60,8 @@ impl EbpfFileEvent {
         }
     }
 
-    /// Convert to proto FileEvent format (V1)
-    pub fn to_proto_v1(
+    /// Convert to proto FileEvent format (V2)
+    pub fn to_proto(
         &self,
         node_name: &str,
         watcher_name: &str,
@@ -85,6 +85,7 @@ impl EbpfFileEvent {
             is_directory: false,
             inode: 0,
             tags: Default::default(),
+            process_info: None, // eBPF can populate this if available
         }
     }
 }

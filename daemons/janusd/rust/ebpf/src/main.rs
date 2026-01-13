@@ -2,6 +2,12 @@
 //!
 //! Uses LSM hooks for file access auditing with permission control.
 //! Uses per-CPU scratch buffer to avoid stack overflow.
+//!
+//! # Process Cache
+//!
+//! Includes exec/exit tracepoints to maintain a process cache for enriching
+//! access events with cmdline, cwd, exe, and ppid. Userspace queries this cache
+//! when processing events.
 
 #![no_std]
 #![no_main]
@@ -11,12 +17,17 @@ use aya_ebpf::maps::HashMap;
 use aya_ebpf::programs::LsmContext;
 
 use panoptes_ebpf_kernel::{
-    define_filter_maps, extract_path_from_file, populate_process_info, submit_event_filtered,
+    define_filter_maps, define_process_cache_maps, define_process_tracepoints,
+    extract_path_from_file, populate_process_info, submit_event_filtered,
     File, FileEvent, FileEventType,
 };
 
 // Define maps including EVENT_SCRATCH per-CPU array
 define_filter_maps!(GUARDED_PREFIXES);
+
+// Define process cache maps and exec/exit tracepoints
+define_process_cache_maps!();
+define_process_tracepoints!();
 
 /// Paths to deny access (kernel-level enforcement)
 #[map]

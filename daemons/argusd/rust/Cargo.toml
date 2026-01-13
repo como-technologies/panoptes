@@ -2,7 +2,7 @@
 name = "argusd"
 version = "2.0.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.82"
 authors = ["Como Technologies, LTD <info@spectrocloud.com>"]
 description = "Argus File Integrity Monitoring Daemon (Rust implementation)"
 license = "Apache-2.0"
