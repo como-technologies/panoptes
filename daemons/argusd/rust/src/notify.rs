@@ -102,6 +102,7 @@ pub enum NotifyError {
     Io(#[from] std::io::Error),
 
     /// Path does not exist or is not accessible.
+    #[allow(dead_code)]
     #[error("path not found: {0}")]
     PathNotFound(PathBuf),
 
@@ -128,12 +129,14 @@ pub enum NotifyError {
     ///
     /// The kernel's event queue overflowed (IN_Q_OVERFLOW). Some events
     /// were lost and a full rescan of watched directories may be needed.
+    #[allow(dead_code)]
     #[error("event queue overflow - events may have been lost")]
     QueueOverflow,
 
     /// Watch descriptor is invalid or stale.
     ///
     /// The watch descriptor was removed (explicitly or due to deletion).
+    #[allow(dead_code)]
     #[error("invalid watch descriptor: {0:?}")]
     InvalidWatchDescriptor(WatchDescriptor),
 
@@ -179,23 +182,6 @@ impl EventType {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "access" => EventType::Access,
-            "attrib" => EventType::Attrib,
-            "closewrite" => EventType::CloseWrite,
-            "closenowrite" => EventType::CloseNoWrite,
-            "create" => EventType::Create,
-            "delete" => EventType::Delete,
-            "deleteself" => EventType::DeleteSelf,
-            "modify" => EventType::Modify,
-            "moveself" => EventType::MoveSelf,
-            "movedfrom" => EventType::MovedFrom,
-            "movedto" => EventType::MovedTo,
-            "open" => EventType::Open,
-            _ => EventType::Unknown,
-        }
-    }
 }
 
 /// A file system event detected by inotify.
@@ -217,14 +203,16 @@ pub struct FileEvent {
     /// Whether the event target is a directory.
     pub is_dir: bool,
     /// Cookie for correlating move events (0 if not a move).
+    #[allow(dead_code)]
     pub cookie: u32,
     /// For move events: the paired path (from for MovedTo, to for MovedFrom).
+    #[allow(dead_code)]
     pub move_peer: Option<PathBuf>,
 }
 
 /// A pending move event awaiting its pair.
 #[derive(Debug, Clone)]
-struct PendingMove {
+pub struct PendingMove {
     /// Path the file was moved from.
     path: PathBuf,
     /// Filename that was moved.
@@ -326,6 +314,7 @@ impl MovePairTracker {
     }
 
     /// Number of pending moves awaiting their pair.
+    #[allow(dead_code)]
     pub fn pending_count(&self) -> usize {
         self.pending.len()
     }
@@ -373,6 +362,8 @@ pub fn events_to_flags(events: &[String]) -> AddWatchFlags {
 pub struct WatchConfig {
     pub paths: Vec<PathBuf>,
     pub events: Vec<String>,
+    /// Patterns to ignore (not yet implemented in filtering)
+    #[allow(dead_code)]
     pub ignore_patterns: Vec<String>,
     pub recursive: bool,
     pub max_depth: Option<u32>,
@@ -503,6 +494,7 @@ impl Watcher {
     }
 
     /// Remove a watch by descriptor.
+    #[allow(dead_code)]
     pub fn remove_watch(&mut self, wd: WatchDescriptor) -> Result<(), NotifyError> {
         if let Err(e) = self.inotify.rm_watch(wd) {
             // EINVAL means the watch was already removed (e.g., path deleted)
@@ -522,6 +514,7 @@ impl Watcher {
     }
 
     /// Remove a watch by path.
+    #[allow(dead_code)]
     pub fn remove_watch_by_path(&mut self, path: &Path) -> Result<(), NotifyError> {
         let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         if let Some(wd) = self.path_to_wd.remove(&canonical) {
@@ -531,32 +524,38 @@ impl Watcher {
     }
 
     /// Get path for a watch descriptor.
+    #[allow(dead_code)]
     pub fn get_path(&self, wd: WatchDescriptor) -> Option<&PathBuf> {
         self.watches.get(&wd)
     }
 
     /// Get watch descriptor for a path.
+    #[allow(dead_code)]
     pub fn get_wd(&self, path: &Path) -> Option<WatchDescriptor> {
         let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         self.path_to_wd.get(&canonical).copied()
     }
 
     /// Get the number of active watches.
+    #[allow(dead_code)]
     pub fn watch_count(&self) -> usize {
         self.watches.len()
     }
 
     /// Get current watcher state.
+    #[allow(dead_code)]
     pub fn state(&self) -> &WatchState {
         &self.state
     }
 
     /// Get list of all watched paths.
+    #[allow(dead_code)]
     pub fn watched_paths(&self) -> Vec<PathBuf> {
         self.watches.values().cloned().collect()
     }
 
     /// Check if a specific path is being watched.
+    #[allow(dead_code)]
     pub fn is_watching(&self, path: &Path) -> bool {
         let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         self.path_to_wd.contains_key(&canonical)
@@ -565,6 +564,7 @@ impl Watcher {
     /// Validate cache consistency by checking if watched paths still exist.
     ///
     /// Returns paths that no longer exist and should have their watches removed.
+    #[allow(dead_code)]
     pub fn validate_watches(&self) -> Vec<(WatchDescriptor, PathBuf)> {
         self.watches
             .iter()
@@ -576,6 +576,7 @@ impl Watcher {
     /// Remove stale watches for paths that no longer exist.
     ///
     /// This is called during recovery or periodically for cache consistency.
+    #[allow(dead_code)]
     pub fn cleanup_stale_watches(&mut self) -> usize {
         let stale = self.validate_watches();
         let count = stale.len();
@@ -588,9 +589,168 @@ impl Watcher {
         count
     }
 
+    /// Add watches for a configuration WITHOUT starting the event loop.
+    ///
+    /// This is used for SYNCHRONOUS watch registration, which is critical
+    /// for the hardening pattern. The watcher-wait init container relies
+    /// on watches being registered before it exits.
+    ///
+    /// Returns the number of watch descriptors added.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let wd_count = watcher.add_watches(&config)?;
+    /// // watches are now registered, set watches_ready = true
+    /// // then start the event loop separately
+    /// watcher.run_event_loop(tx).await?;
+    /// ```
+    pub fn add_watches(&mut self, config: &WatchConfig) -> Result<usize, NotifyError> {
+        let flags = events_to_flags(&config.events);
+
+        // Store config for pause/resume
+        self.config = Some(config.clone());
+
+        let mut added = 0;
+
+        // Add watches for all paths
+        for path in &config.paths {
+            if !path.exists() {
+                warn!(path = %path.display(), "Path does not exist, skipping");
+                continue;
+            }
+
+            debug!(
+                path = %path.display(),
+                flags = ?flags,
+                "Adding inotify watch (synchronous)"
+            );
+            self.add_watch(path, flags)?;
+            added += 1;
+
+            // Add recursive watches if enabled
+            if config.recursive && path.is_dir() {
+                let before = self.watches.len();
+                self.add_recursive_watches(path, flags, config.max_depth.unwrap_or(0), 0)?;
+                added += self.watches.len() - before;
+            }
+        }
+
+        if let Some(ref metrics) = self.metrics {
+            metrics.set_watches_active(self.watches.len() as u64);
+        }
+
+        info!(
+            watch_count = self.watches.len(),
+            added_count = added,
+            "inotify watches registered synchronously"
+        );
+
+        Ok(added)
+    }
+
+    /// Run the event loop for an already-initialized watcher.
+    ///
+    /// Call this AFTER `add_watches()` to start processing events.
+    /// This separation allows synchronous watch registration for the
+    /// watcher-wait init container pattern.
+    pub async fn run_event_loop(
+        &mut self,
+        tx: mpsc::Sender<FileEvent>,
+    ) -> Result<(), NotifyError> {
+        let config = self.config.clone().ok_or_else(|| NotifyError::Io(
+            std::io::Error::new(std::io::ErrorKind::Other, "no config - call add_watches first")
+        ))?;
+
+        self.running.store(true, Ordering::SeqCst);
+        self.state = WatchState::Running;
+        let running = self.running.clone();
+
+        info!(watch_count = self.watches.len(), "Event loop started");
+
+        // Event loop
+        while running.load(Ordering::SeqCst) {
+            // Process any expired move pairs
+            self.emit_expired_moves(&tx).await?;
+
+            match self.inotify.read_events() {
+                Ok(events) => {
+                    let event_count = events.len() as u64;
+
+                    if event_count > 0 {
+                        debug!(event_count = event_count, "Read inotify events");
+                    }
+
+                    for event in events {
+                        debug!(
+                            wd = ?event.wd,
+                            mask = ?event.mask,
+                            cookie = event.cookie,
+                            name = ?event.name,
+                            "Processing inotify event"
+                        );
+
+                        // Handle queue overflow
+                        if event.mask.contains(AddWatchFlags::IN_Q_OVERFLOW) {
+                            warn!("inotify queue overflow detected");
+                            if let Some(ref metrics) = self.metrics {
+                                metrics.record_queue_overflow();
+                            }
+                            self.handle_overflow(&config, &tx).await?;
+                            continue;
+                        }
+
+                        // Handle watch removal (IN_IGNORED)
+                        if event.mask.contains(AddWatchFlags::IN_IGNORED) {
+                            self.handle_watch_removed(event.wd);
+                            continue;
+                        }
+
+                        // Process regular events
+                        if let Some(file_events) = self.process_event(&event) {
+                            for file_event in file_events {
+                                debug!(
+                                    event_type = %file_event.event_type.as_str(),
+                                    path = %file_event.path.display(),
+                                    "Sending file event to channel"
+                                );
+                                if let Some(ref metrics) = self.metrics {
+                                    metrics.record_event_typed(file_event.event_type.as_str());
+                                }
+
+                                if tx.send(file_event).await.is_err() {
+                                    warn!("Event channel closed");
+                                    running.store(false, Ordering::SeqCst);
+                                    break;
+                                }
+                            }
+                        } else {
+                            debug!(wd = ?event.wd, "Event dropped - wd not in watches map");
+                        }
+                    }
+                }
+                Err(nix::Error::EAGAIN) => {
+                    // No events available, sleep briefly
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Err(e) => {
+                    error!(error = %e, "Error reading inotify events");
+                    if let Some(ref metrics) = self.metrics {
+                        metrics.record_error();
+                    }
+                }
+            }
+        }
+
+        self.state = WatchState::Stopped;
+        Ok(())
+    }
+
     /// Start watching and send events to channel.
     ///
     /// This method blocks until `stop()` is called or the channel closes.
+    /// Note: For hardened deployments, prefer using `add_watches()` + `run_event_loop()`
+    /// separately to ensure watches are registered synchronously before returning.
     pub async fn watch(
         &mut self,
         config: WatchConfig,
@@ -690,10 +850,6 @@ impl Watcher {
                         } else {
                             debug!(wd = ?event.wd, "Event dropped - wd not in watches map");
                         }
-                    }
-
-                    if let Some(ref metrics) = self.metrics {
-                        metrics.record_event_batch(event_count);
                     }
                 }
                 Err(nix::Error::EAGAIN) => {

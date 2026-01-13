@@ -122,6 +122,10 @@ message CreateWatchResponse {
 
   // paused indicates if the watcher is currently paused.
   bool paused = 5;
+
+  // watches_ready indicates all inotify watches have been registered.
+  // True when the watch is immediately active and capturing events.
+  bool watches_ready = 6;
 }
 
 // DestroyWatchRequest identifies a watch to remove.
@@ -176,6 +180,18 @@ message WatchState {
 
   // paused indicates whether the watch is currently paused.
   bool paused = 10;
+
+  // watches_ready indicates all inotify watches have been registered
+  // and file events will be captured. Set to true after inotify_add_watch()
+  // completes for all paths. Used by watcher-wait init container.
+  bool watches_ready = 11;
+
+  // ready_at is when the watches became ready (inotify registration completed).
+  google.protobuf.Timestamp ready_at = 12;
+
+  // active_watch_descriptors is the number of inotify watch descriptors
+  // currently active. Should match expected count when watches_ready is true.
+  int32 active_watch_descriptors = 13;
 }
 
 // StreamEventsRequest filters the event stream.

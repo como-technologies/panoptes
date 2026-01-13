@@ -190,28 +190,101 @@ The table below maps planned Panoptes features to specific compliance framework 
 
 **Gap:** We detect that a file was modified but not whether the content actually changed or matches a known-good state.
 
-**Required:** SHA-256 hash comparison against a baseline.
+**Required:** Cryptographic hash comparison against a baseline.
 
-**Implementation Path:**
-- Add optional `hashBaseline: true` to ArgusWatcher subjects
-- Compute SHA-256 when watch is established
-- Store baseline in ConfigMap or CRD annotation
-- On modify events, re-hash and compare
-- Alert on mismatch even if no inotify event (scheduled verification)
+#### Security Considerations
 
-**Why:** Detects tampering even if timestamps are manipulated. Required for detecting sophisticated attacks that bypass inotify.
+> **WARNING:** Storing plaintext SHA-256 hashes of sensitive files in ConfigMaps or CRD
+> annotations is a **security anti-pattern**. This enables confirmation attacks and
+> violates the security intent of compliance frameworks.
 
-**CRD Extension:**
+**Why plaintext hashes are dangerous:**
+
+1. **Confirmation Attacks**: Attacker with ConfigMap read access can pre-compute hashes
+   against known file contents (e.g., password databases) and verify their guesses
+   without ever reading the protected file.
+
+2. **Information Leakage**: Hash changes reveal when users are added/removed, when
+   password rotations occur, and which users exist across a fleet.
+
+3. **ConfigMaps Are Not Encrypted**: Visible in `kubectl get configmap -o yaml`,
+   logged in audit trails, exposed in etcd backups.
+
+**Industry Practice**: No enterprise FIM tool (OSSEC, Wazuh, Tripwire) stores baselines
+in plaintext shared storage. All use encrypted databases or local filesystem with
+restricted permissions.
+
+#### Recommended Approaches
+
+**Option A: HMAC-SHA256 (Recommended)**
+
+Use keyed hashing—attacker cannot pre-compute without the secret key:
+
 ```yaml
 subjects:
-  - paths:
-      - /etc/passwd
-    events:
-      - modify
+  - paths: ["/etc/passwd"]
+    events: [modify]
     hashBaseline: true
-    hashAlgorithm: sha256  # default
-    verifyInterval: 1h     # periodic re-check
+    hashAlgorithm: hmac-sha256
+    hmacKeySecret:
+      name: argus-hmac-key
+      key: key
+    verifyInterval: 1h
 ```
+
+The HMAC key is stored in a Kubernetes Secret (encrypted at rest if etcd encryption
+is enabled), not a ConfigMap. Key rotation is independent of baselines.
+
+**Option B: Exclude Sensitive Files from Hashing**
+
+For files containing credentials (`/etc/shadow`, private keys), use event detection
+only—don't attempt to verify content:
+
+```yaml
+subjects:
+  - paths: ["/etc/shadow"]
+    events: [modify, delete]
+    hashBaseline: false  # Detect changes, don't hash contents
+    tags:
+      severity: critical
+```
+
+This is appropriate when:
+- File contains credentials/secrets
+- Change detection is sufficient (no need to verify "correct" state)
+- Compliance only requires "detect modification" not "verify integrity"
+
+**Option C: External Baseline Service (Production)**
+
+For high-security environments, keep baselines off the Kubernetes cluster entirely:
+
+```
+Panoptes Daemon → (gRPC + mTLS) → External Baseline Service → HSM/KMS
+```
+
+Benefits: Baselines never in etcd, hardware-backed encryption, centralized audit
+logging, FIPS 140-2 compliant.
+
+#### Implementation Path
+
+1. Add `BaselineConfig` to proto with HMAC support and `SecretKeyRef`
+2. Operator validates HMAC key Secret exists before enabling baseline hashing
+3. Daemon loads HMAC key from mounted Secret at startup
+4. Use constant-time comparison to prevent timing attacks
+5. Reject insecure configurations (plaintext SHA-256 in ConfigMap)
+
+#### Summary
+
+| Approach | Security | When to Use |
+|----------|----------|-------------|
+| SHA-256 in ConfigMap | **INSECURE** | Never |
+| HMAC-SHA256 in Secret | Secure | Default for baseline verification |
+| Skip hashing | Secure | For `/etc/shadow`, credential files |
+| External service | Most secure | Production, regulated environments |
+
+**Why:** Detects tampering even if timestamps are manipulated. Required for detecting
+sophisticated attacks that bypass inotify. HMAC ensures baselines cannot be exploited
+by attackers with partial cluster access.
 
 ### 3. Compliance-Ready Reporting
 

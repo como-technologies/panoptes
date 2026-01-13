@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	januspb "github.com/como-technologies/panoptes/gen/go/janus/v1"
+	januspbv2 "github.com/como-technologies/panoptes/gen/go/janus/v2"
 	janusv1 "github.com/como-technologies/panoptes/operators/janus-operator/api/v1"
 )
 
@@ -314,4 +315,119 @@ func GetNodeIP(node *corev1.Node) string {
 		}
 	}
 	return ""
+}
+
+// UpdateGuardResult contains the result of an update guard operation (v2 API).
+type UpdateGuardResult struct {
+	GuardID      string
+	Paused       bool
+	Enforcing    bool
+	GuardedPaths int32
+}
+
+// UpdateGuard pauses or resumes an existing guard (v2 API).
+// This method uses the v2 proto which is only supported by Rust daemons.
+func (m *GuardManager) UpdateGuard(ctx context.Context, nodeIP, guardNamespace, guardName, podName string, pause bool) (*UpdateGuardResult, error) {
+	logger := log.FromContext(ctx).WithValues(
+		"guard", guardName,
+		"namespace", guardNamespace,
+		"pod", podName,
+		"pause", pause,
+	)
+
+	conn, err := m.client.GetConnection(ctx, nodeIP)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connection: %w", err)
+	}
+
+	action := januspbv2.UpdateAction_UPDATE_ACTION_RESUME
+	if pause {
+		action = januspbv2.UpdateAction_UPDATE_ACTION_PAUSE
+	}
+
+	logger.V(1).Info("Updating guard state")
+
+	// Create v2 gRPC client and make the call
+	client := januspbv2.NewJanusdServiceClient(conn)
+	req := &januspbv2.UpdateGuardRequest{
+		GuardName: guardName,
+		Namespace: guardNamespace,
+		PodName:   podName,
+		Action:    action,
+	}
+
+	resp, err := client.UpdateGuard(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("gRPC UpdateGuard failed: %w", err)
+	}
+
+	logger.Info("Guard updated successfully",
+		"guardID", resp.GuardId,
+		"paused", resp.Paused,
+		"enforcing", resp.Enforcing,
+		"guardedPaths", resp.GuardedPaths,
+	)
+
+	return &UpdateGuardResult{
+		GuardID:      resp.GuardId,
+		Paused:       resp.Paused,
+		Enforcing:    resp.Enforcing,
+		GuardedPaths: resp.GuardedPaths,
+	}, nil
+}
+
+// UpdatePolicyResult contains the result of an update policy operation (v2 API).
+type UpdatePolicyResult struct {
+	GuardID           string
+	DenyPatternCount  int32
+	AllowPatternCount int32
+	CacheCleared      bool
+}
+
+// UpdatePolicy updates the allow/deny patterns of an existing guard (v2 API).
+// This method uses the v2 proto which is only supported by Rust daemons.
+func (m *GuardManager) UpdatePolicy(ctx context.Context, nodeIP, guardNamespace, guardName, podName string, denyPatterns, allowPatterns []string) (*UpdatePolicyResult, error) {
+	logger := log.FromContext(ctx).WithValues(
+		"guard", guardName,
+		"namespace", guardNamespace,
+		"pod", podName,
+		"denyPatterns", len(denyPatterns),
+		"allowPatterns", len(allowPatterns),
+	)
+
+	conn, err := m.client.GetConnection(ctx, nodeIP)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connection: %w", err)
+	}
+
+	logger.V(1).Info("Updating guard policy")
+
+	// Create v2 gRPC client and make the call
+	client := januspbv2.NewJanusdServiceClient(conn)
+	req := &januspbv2.UpdatePolicyRequest{
+		GuardName:     guardName,
+		Namespace:     guardNamespace,
+		PodName:       podName,
+		DenyPatterns:  denyPatterns,
+		AllowPatterns: allowPatterns,
+	}
+
+	resp, err := client.UpdatePolicy(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("gRPC UpdatePolicy failed: %w", err)
+	}
+
+	logger.Info("Guard policy updated successfully",
+		"guardID", resp.GuardId,
+		"denyPatternCount", resp.DenyPatternCount,
+		"allowPatternCount", resp.AllowPatternCount,
+		"cacheCleared", resp.CacheCleared,
+	)
+
+	return &UpdatePolicyResult{
+		GuardID:           resp.GuardId,
+		DenyPatternCount:  resp.DenyPatternCount,
+		AllowPatternCount: resp.AllowPatternCount,
+		CacheCleared:      resp.CacheCleared,
+	}, nil
 }

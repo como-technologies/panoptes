@@ -120,6 +120,9 @@ use tracing::{debug, error, info, warn};
 use crate::dedupe::DedupeCache;
 use crate::policy::{PolicyError, PolicyEvaluator};
 
+// Re-export AccessResponse from audit module for backward compatibility
+pub use crate::audit::AccessResponse;
+
 /// Errors from the guard module
 #[derive(Error, Debug)]
 pub enum GuardError {
@@ -131,17 +134,6 @@ pub enum GuardError {
 
     #[error("policy error: {0}")]
     Policy(#[from] PolicyError),
-
-    #[error("permission denied")]
-    PermissionDenied,
-}
-
-/// Access response type
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AccessResponse {
-    Allow,
-    Deny,
-    Audit,
 }
 
 /// Access event from fanotify
@@ -149,10 +141,8 @@ pub enum AccessResponse {
 pub struct AccessEvent {
     pub event_type: String,
     pub path: String,
-    pub filename: String,
     pub is_dir: bool,
     pub pid: i32,
-    pub uid: u32,
     pub response: AccessResponse,
     /// True if the path matched any configured allow/deny pattern.
     /// Used to filter logging - only log events for paths we care about.
@@ -165,9 +155,7 @@ pub struct GuardConfig {
     pub allow_patterns: Vec<String>,
     pub deny_patterns: Vec<String>,
     pub events: Vec<String>,
-    pub only_dir: bool,
     pub auto_allow_owner: bool,
-    pub audit: bool,
     pub enforce: bool,
 }
 
@@ -228,7 +216,7 @@ impl Guard {
             config.deny_patterns.clone(),
             config.allow_patterns.clone(),
             config.auto_allow_owner,
-            None, // owner_pid set later via set_owner_pid()
+            None, // owner_pid not currently supported
             default_response,
             Some(1024), // LRU cache size
         )?;
@@ -353,11 +341,6 @@ impl Guard {
         Ok(())
     }
 
-    /// Stop the guard
-    pub fn stop(&self) {
-        self.running.store(false, Ordering::SeqCst);
-    }
-
     fn events_to_mask(&self) -> MaskFlags {
         let mut mask = MaskFlags::empty();
         // Use _PERM variants when enforcing (like C daemon) to enable blocking
@@ -409,12 +392,6 @@ impl Guard {
         // This converts host-relative paths to container-relative paths
         let path = Self::strip_container_prefix(&raw_path);
 
-        let filename = path
-            .rsplit('/')
-            .next()
-            .unwrap_or("")
-            .to_string();
-
         // Determine event type
         let event_type = if event.mask().contains(MaskFlags::FAN_ACCESS_PERM)
             || event.mask().contains(MaskFlags::FAN_ACCESS)
@@ -451,10 +428,8 @@ impl Guard {
         AccessEvent {
             event_type: event_type.to_string(),
             path,
-            filename,
             is_dir: false, // TODO: Check if path is directory
             pid,
-            uid: 0, // TODO: Get from /proc/{pid}/status
             response,
             matched_pattern,
         }
@@ -497,29 +472,6 @@ impl Guard {
         }
 
         path.to_string()
-    }
-
-    /// Update the guard's policy with new patterns.
-    ///
-    /// This allows dynamic policy updates without recreating the guard.
-    pub fn update_policy(
-        &mut self,
-        deny_patterns: Option<Vec<String>>,
-        allow_patterns: Option<Vec<String>>,
-    ) -> Result<(), GuardError> {
-        self.policy
-            .update(deny_patterns, allow_patterns, None, None, None)?;
-        Ok(())
-    }
-
-    /// Set the owner PID for auto_allow_owner feature.
-    pub fn set_owner_pid(&mut self, pid: i32) {
-        self.policy.set_owner_pid(pid);
-    }
-
-    /// Get a reference to the policy evaluator for inspection.
-    pub fn policy(&self) -> &PolicyEvaluator {
-        &self.policy
     }
 }
 

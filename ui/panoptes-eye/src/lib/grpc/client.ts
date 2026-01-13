@@ -24,8 +24,9 @@ function getProtoRoot(): string {
 }
 
 const PROTO_ROOT = getProtoRoot();
-const ARGUS_PROTO = path.join(PROTO_ROOT, 'argus/v1/argus.proto');
-const JANUS_PROTO = path.join(PROTO_ROOT, 'janus/v1/janus.proto');
+// Use v2 protos for ProcessInfo support (Rust daemon features)
+const ARGUS_PROTO = path.join(PROTO_ROOT, 'argus/v2/argus.proto');
+const JANUS_PROTO = path.join(PROTO_ROOT, 'janus/v2/janus.proto');
 
 // Default daemon endpoints
 const DEFAULT_ARGUSD_HOST = process.env.ARGUSD_HOST || 'localhost:50051';
@@ -82,10 +83,10 @@ export async function getArgusdClient(host?: string): Promise<grpc.Client | null
   try {
     const proto = await loadArgusProto();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ArgusdService = (proto as any).argus?.v1?.ArgusdService;
+    const ArgusdService = (proto as any).argus?.v2?.ArgusdService;
 
     if (!ArgusdService) {
-      console.error('ArgusdService not found in proto');
+      console.error('ArgusdService not found in proto (v2)');
       return null;
     }
 
@@ -108,10 +109,10 @@ export async function getJanusdClient(host?: string): Promise<grpc.Client | null
   try {
     const proto = await loadJanusProto();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const JanusdService = (proto as any).janus?.v1?.JanusdService;
+    const JanusdService = (proto as any).janus?.v2?.JanusdService;
 
     if (!JanusdService) {
-      console.error('JanusdService not found in proto');
+      console.error('JanusdService not found in proto (v2)');
       return null;
     }
 

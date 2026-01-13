@@ -17,6 +17,10 @@ RUN cd proto && buf generate && \
     go mod init github.com/como-technologies/panoptes/gen/go && \
     go mod tidy
 
+# Copy shared common module manifests first (needed by operator go.mod replace directive)
+COPY operators/common/go.mod operators/common/go.mod
+COPY operators/common/go.sum operators/common/go.sum
+
 # Copy the operator's Go Modules manifests
 COPY operators/janus-operator/go.mod operators/janus-operator/go.mod
 COPY operators/janus-operator/go.sum operators/janus-operator/go.sum
@@ -25,8 +29,11 @@ COPY operators/janus-operator/go.sum operators/janus-operator/go.sum
 WORKDIR /workspace/operators/janus-operator
 RUN go mod download
 
-# Copy the operator source
+# Copy the shared common source
 WORKDIR /workspace
+COPY operators/common operators/common
+
+# Copy the operator source
 COPY operators/janus-operator operators/janus-operator
 
 # Build

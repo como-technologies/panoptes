@@ -1,0 +1,21 @@
+[package]
+name = "panoptes-ebpf-types"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Shared types for Panoptes eBPF programs and userspace (both argusd and janusd)"
+license = "Apache-2.0"
+repository = "https://github.com/panoptes-project/panoptes"
+keywords = ["ebpf", "kubernetes", "containers", "security"]
+
+[features]
+default = []
+# Enable userspace-only features (not available in eBPF kernel context)
+user = ["thiserror"]
+
+[dependencies]
+# Error handling - only in userspace
+thiserror = { version = "1", optional = true }
+
+[lib]
+# no_std compatible for eBPF kernel programs

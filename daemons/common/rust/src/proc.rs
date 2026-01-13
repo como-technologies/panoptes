@@ -72,11 +72,16 @@ use crate::error::ProcError;
 
 /// Information about a process.
 ///
-/// Retrieved from `/proc/{pid}/stat` and `/proc/{pid}/status`.
+/// Retrieved from `/proc/{pid}/stat`, `/proc/{pid}/status`, and related files.
 ///
 /// # Fields
 ///
 /// All IDs are from the init (root) PID namespace perspective.
+///
+/// # V2 Extensions
+///
+/// The `cmdline` and `cwd` fields were added in v2 for enhanced process
+/// attribution in Janus access events.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcessInfo {
     /// Process ID.
@@ -101,6 +106,19 @@ pub struct ProcessInfo {
     ///
     /// May be empty if the executable was deleted or permission denied.
     pub exe: PathBuf,
+
+    /// Full command line arguments (from `/proc/{pid}/cmdline`).
+    ///
+    /// The first element is typically the program name/path.
+    /// May be empty if permission denied or process is a kernel thread.
+    /// Added in v2 for enhanced process attribution.
+    pub cmdline: Vec<String>,
+
+    /// Current working directory (from `/proc/{pid}/cwd` symlink).
+    ///
+    /// May be empty if permission denied.
+    /// Added in v2 for enhanced process attribution.
+    pub cwd: PathBuf,
 }
 
 /// Trait for resolving process information.
@@ -375,6 +393,45 @@ impl ProcfsProcessResolver {
         // Return empty path on failure
         fs::read_link(&exe_path).unwrap_or_default()
     }
+
+    /// Reads the /proc/{pid}/cmdline file to get command line arguments.
+    ///
+    /// # Format
+    ///
+    /// Arguments are separated by null bytes (\0). The file contains:
+    /// ```text
+    /// /usr/bin/program\0arg1\0arg2\0
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// - Kernel threads have empty cmdline
+    /// - Some processes modify their cmdline (e.g., password hiding)
+    fn read_cmdline(&self, pid: u32) -> Vec<String> {
+        let cmdline_path = self.proc_path.join(format!("{}/cmdline", pid));
+
+        // Read raw bytes (contains null separators)
+        match fs::read(&cmdline_path) {
+            Ok(bytes) => {
+                // Split by null bytes and filter empty strings
+                bytes
+                    .split(|&b| b == 0)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| String::from_utf8_lossy(s).into_owned())
+                    .collect()
+            }
+            Err(_) => Vec::new(),
+        }
+    }
+
+    /// Reads the /proc/{pid}/cwd symlink to get current working directory.
+    fn read_cwd(&self, pid: u32) -> PathBuf {
+        let cwd_path = self.proc_path.join(format!("{}/cwd", pid));
+
+        // readlink may fail (permission denied, process exited, etc.)
+        // Return empty path on failure
+        fs::read_link(&cwd_path).unwrap_or_default()
+    }
 }
 
 impl ProcessResolver for ProcfsProcessResolver {
@@ -388,6 +445,12 @@ impl ProcessResolver for ProcfsProcessResolver {
         // Read executable path
         let exe = self.read_exe(pid);
 
+        // Read command line arguments (v2 extension)
+        let cmdline = self.read_cmdline(pid);
+
+        // Read current working directory (v2 extension)
+        let cwd = self.read_cwd(pid);
+
         Ok(ProcessInfo {
             pid: parsed_pid,
             ppid,
@@ -395,6 +458,8 @@ impl ProcessResolver for ProcfsProcessResolver {
             gid,
             comm,
             exe,
+            cmdline,
+            cwd,
         })
     }
 
@@ -441,10 +506,14 @@ mod tests {
                 gid: 1000,
                 comm: "test".to_string(),
                 exe: PathBuf::from("/usr/bin/test"),
+                cmdline: vec!["test".to_string(), "--flag".to_string()],
+                cwd: PathBuf::from("/home/user"),
             };
             let debug_str = format!("{:?}", info);
             assert!(debug_str.contains("1234"));
             assert!(debug_str.contains("test"));
+            assert!(debug_str.contains("cmdline"));
+            assert!(debug_str.contains("cwd"));
         }
 
         #[test]
@@ -456,9 +525,28 @@ mod tests {
                 gid: 1000,
                 comm: "test".to_string(),
                 exe: PathBuf::from("/usr/bin/test"),
+                cmdline: vec!["test".to_string()],
+                cwd: PathBuf::from("/home/user"),
             };
             let cloned = info.clone();
             assert_eq!(info, cloned);
+        }
+
+        #[test]
+        fn test_v2_fields() {
+            let info = ProcessInfo {
+                pid: 1234,
+                ppid: 1,
+                uid: 1000,
+                gid: 1000,
+                comm: "bash".to_string(),
+                exe: PathBuf::from("/usr/bin/bash"),
+                cmdline: vec!["-bash".to_string(), "-c".to_string(), "echo hello".to_string()],
+                cwd: PathBuf::from("/home/user/project"),
+            };
+            assert_eq!(info.cmdline.len(), 3);
+            assert_eq!(info.cmdline[0], "-bash");
+            assert_eq!(info.cwd.to_str().unwrap(), "/home/user/project");
         }
     }
 
@@ -569,12 +657,73 @@ mod tests {
             writeln!(status_file, "Uid:\t1000\t1000\t1000\t1000").unwrap();
             writeln!(status_file, "Gid:\t1001\t1001\t1001\t1001").unwrap();
 
+            // Create cmdline file (null-separated)
+            let cmdline_path = pid_dir.join("cmdline");
+            fs::write(&cmdline_path, b"myprocess\0--arg1\0--arg2\0").unwrap();
+
+            // Create cwd symlink
+            let cwd_target = PathBuf::from("/home/user/work");
+            std::os::unix::fs::symlink(&cwd_target, pid_dir.join("cwd")).unwrap();
+
             let info = resolver.get_process_info(1234).unwrap();
             assert_eq!(info.pid, 1234);
             assert_eq!(info.ppid, 5678);
             assert_eq!(info.uid, 1000);
             assert_eq!(info.gid, 1001);
             assert_eq!(info.comm, "myprocess");
+            // V2 fields
+            assert_eq!(info.cmdline, vec!["myprocess", "--arg1", "--arg2"]);
+            assert_eq!(info.cwd, cwd_target);
+        }
+
+        #[test]
+        fn test_read_cmdline() {
+            let (temp_dir, resolver) = setup_mock_proc(1234);
+            let pid_dir = temp_dir.path().join("1234");
+
+            // Test normal cmdline
+            fs::write(pid_dir.join("cmdline"), b"/usr/bin/bash\0-c\0echo hello\0").unwrap();
+            let cmdline = resolver.read_cmdline(1234);
+            assert_eq!(cmdline, vec!["/usr/bin/bash", "-c", "echo hello"]);
+        }
+
+        #[test]
+        fn test_read_cmdline_empty() {
+            let (temp_dir, resolver) = setup_mock_proc(1234);
+            let pid_dir = temp_dir.path().join("1234");
+
+            // Empty cmdline (kernel thread)
+            fs::write(pid_dir.join("cmdline"), b"").unwrap();
+            let cmdline = resolver.read_cmdline(1234);
+            assert!(cmdline.is_empty());
+        }
+
+        #[test]
+        fn test_read_cmdline_missing() {
+            let (_temp_dir, resolver) = setup_mock_proc(1234);
+            // No cmdline file created
+            let cmdline = resolver.read_cmdline(1234);
+            assert!(cmdline.is_empty());
+        }
+
+        #[test]
+        fn test_read_cwd() {
+            let (temp_dir, resolver) = setup_mock_proc(1234);
+            let pid_dir = temp_dir.path().join("1234");
+
+            let target = PathBuf::from("/var/log");
+            std::os::unix::fs::symlink(&target, pid_dir.join("cwd")).unwrap();
+
+            let cwd = resolver.read_cwd(1234);
+            assert_eq!(cwd, target);
+        }
+
+        #[test]
+        fn test_read_cwd_missing() {
+            let (_temp_dir, resolver) = setup_mock_proc(1234);
+            // No cwd symlink created
+            let cwd = resolver.read_cwd(1234);
+            assert!(cwd.as_os_str().is_empty());
         }
 
         #[test]

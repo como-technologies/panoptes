@@ -59,13 +59,19 @@ Fully tested with 54 unit tests and 12 integration tests.
 
 ```
 rust/
-├── Cargo.toml           # Rust dependencies
+├── Cargo.toml           # Rust dependencies and workspace
 ├── build.rs             # Proto compilation (tonic-build)
 ├── src/
 │   ├── main.rs          # Entry point and CLI configuration
 │   ├── service.rs       # gRPC service implementation
 │   ├── notify.rs        # inotify wrapper, Watcher, MovePairTracker
-│   └── metrics.rs       # Atomic metrics collection
+│   ├── metrics.rs       # Atomic metrics collection
+│   └── ebpf/            # eBPF userspace integration (feature-gated)
+│       ├── mod.rs       # Re-exports from panoptes-common
+│       └── events.rs    # EbpfFileEvent → proto conversion
+├── ebpf/                # eBPF kernel programs (BPF target)
+│   ├── Cargo.toml
+│   └── src/main.rs      # LSM hooks (inode_create, inode_unlink, etc.)
 ├── tests/
 │   └── integration_tests.rs  # 12 integration tests
 └── benches/
@@ -78,7 +84,7 @@ rust/
 |---------|--------|-------------|
 | CreateWatch RPC | ✅ | Create inotify watches for container paths |
 | DestroyWatch RPC | ✅ | Clean up watches and resources |
-| GetWatchState RPC | ✅ | Streaming watch state updates |
+| GetWatchState RPC | ✅ | Streaming watch state updates with readiness |
 | StreamEvents RPC | ✅ | Real-time file events with filtering |
 | GetMetrics RPC | ✅ | Daemon-level metrics |
 | Move event pairing | ✅ | Cookie-based pairing with 2ms timeout |
@@ -87,6 +93,8 @@ rust/
 | Container runtime | ✅ | Auto-detection (containerd, CRI-O) |
 | Glob filtering | ✅ | Ignore patterns like `*.tmp`, `node_modules/**` |
 | Health checks | ✅ | gRPC health service (tonic-health) |
+| Synchronous init | ✅ | Watches ready before RPC returns |
+| **eBPF FIM** | ✅ | Process attribution via LSM hooks (optional feature) |
 
 ## Key Dependencies
 
@@ -99,7 +107,9 @@ rust/
 | `prost` | 0.13 | Protobuf code generation |
 | `tracing` | 0.1 | Structured JSON logging |
 | `glob` | 0.3 | Pattern matching for ignore paths |
-| `panoptes-common` | 0.1 | Shared container runtime library |
+| `panoptes-common` | 0.1 | Shared utilities (container runtime, eBPF loader) |
+| `panoptes-ebpf-types` | 0.1 | Shared eBPF types (no_std, via panoptes-common) |
+| `aya-ebpf` | 0.1 | eBPF kernel program runtime (BPF target) |
 
 ## Building
 
@@ -226,6 +236,78 @@ cargo bench
 | Dependencies | gRPC C++, spdlog | Tokio, Tonic |
 | Build time | Fast (with cache) | Slower |
 | Testing | GoogleTest | Rust built-in |
+
+## eBPF-Based File Integrity Monitoring
+
+For comprehensive eBPF documentation including architecture, kernel requirements, and troubleshooting, see **[`daemons/common/EBPF.md`](../../common/EBPF.md)**.
+
+### Argus-Specific LSM Hooks
+
+| Hook | Event | Description |
+|------|-------|-------------|
+| `security_inode_create` | Create | File or directory created |
+| `security_inode_unlink` | Delete | File deleted |
+| `security_inode_rename` | Rename | File renamed or moved |
+| `security_file_open` | OpenWrite | File opened for writing |
+
+### Building with eBPF
+
+```bash
+cd daemons/argusd/rust
+
+# Build with eBPF feature
+cargo build --release --features ebpf
+
+# Build kernel programs
+cd ebpf && cargo build --target bpfel-unknown-none
+```
+
+### Project Structure (eBPF)
+
+```
+daemons/argusd/rust/
+├── ebpf/                          # eBPF kernel programs (argusd-ebpf crate)
+│   ├── Cargo.toml                 # Uses bpfel-unknown-none target
+│   └── src/main.rs                # LSM hook implementations
+│
+└── src/ebpf/                      # Userspace integration
+    ├── mod.rs                     # Re-exports from panoptes-common
+    └── events.rs                  # EbpfFileEvent → argus.v2.FileEvent
+```
+
+Shared types and loader are in `panoptes-common` with the `ebpf` feature.
+
+---
+
+## Security Considerations
+
+### Compliance Implications
+
+For compliance frameworks that require knowing WHO accessed files (PCI-DSS 10.2.1, HIPAA,
+SOC2), enable the eBPF feature or **use JanusGuard** for those paths.
+
+| Use Case | Recommended Tool | Why |
+|----------|------------------|-----|
+| File integrity monitoring (detect changes) | ArgusWatcher | Detects modifications |
+| FIM with process attribution | ArgusWatcher + eBPF | Full audit trail |
+| Access auditing (who read the file) | JanusGuard | Captures process info |
+| Access control (block unauthorized access) | JanusGuard | Can deny access |
+| Configuration drift detection | ArgusWatcher | Detects config changes |
+| Sensitive file protection | JanusGuard | Real-time blocking |
+
+### Security Capabilities
+
+Argus requires the following Linux capabilities:
+
+| Capability | Purpose | Required |
+|------------|---------|----------|
+| `SYS_PTRACE` | Access container filesystems via `/proc/{pid}/root` | Yes |
+| `DAC_READ_SEARCH` | Bypass file read permission checks | Yes |
+| `BPF` | Load eBPF programs (with `ebpf` feature) | For eBPF |
+| `PERFMON` | Attach to LSM hooks (with `ebpf` feature) | For eBPF |
+
+**Note:** The DaemonSet uses `privileged: true` which includes all capabilities.
+For production, consider using specific capabilities instead.
 
 ## Kubernetes Deployment
 

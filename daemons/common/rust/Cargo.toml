@@ -27,6 +27,11 @@ tonic = { version = "0.12", optional = true }
 # Security
 caps = "0.5"
 
+# eBPF support (optional, for kernel-level process attribution)
+panoptes-ebpf-types = { path = "src/ebpf/types", features = ["user"], optional = true }
+aya = { version = "0.13", optional = true }
+aya-log = { version = "0.2", optional = true }
+
 [dev-dependencies]
 tempfile = "3.10"
 tokio-test = "0.4"
@@ -37,3 +42,6 @@ default = []
 mock = []
 # Enable gRPC streaming helpers (requires tonic)
 grpc = ["tonic"]
+# Enable eBPF support for kernel-level process attribution
+# Requires: Linux 5.7+, BTF, CAP_BPF + CAP_PERFMON (or CAP_SYS_ADMIN)
+ebpf = ["aya", "aya-log", "panoptes-ebpf-types"]

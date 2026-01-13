@@ -17,6 +17,10 @@ RUN cd proto && buf generate && \
     go mod init github.com/como-technologies/panoptes/gen/go && \
     go mod tidy
 
+# Copy shared common module manifests first (needed by operator go.mod replace directive)
+COPY operators/common/go.mod operators/common/go.mod
+COPY operators/common/go.sum operators/common/go.sum
+
 # Copy the operator's Go Modules manifests
 COPY operators/argus-operator/go.mod operators/argus-operator/go.mod
 COPY operators/argus-operator/go.sum operators/argus-operator/go.sum
@@ -25,8 +29,11 @@ COPY operators/argus-operator/go.sum operators/argus-operator/go.sum
 WORKDIR /workspace/operators/argus-operator
 RUN go mod download
 
-# Copy the operator source
+# Copy the shared common source
 WORKDIR /workspace
+COPY operators/common operators/common
+
+# Copy the operator source
 COPY operators/argus-operator operators/argus-operator
 
 # Build

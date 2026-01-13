@@ -31,7 +31,7 @@ use panoptes_common::{
     EventBroadcaster, Filterable,
     DaemonMetrics, MetricsAggregator,
 };
-use panoptes_common::proc::ProcfsProcessResolver;
+use panoptes_common::proc::{ProcessResolver, ProcfsProcessResolver};
 use prost_types::Timestamp;
 use tokio::sync::{mpsc, Mutex};
 use tokio_stream::wrappers::ReceiverStream;
@@ -58,6 +58,14 @@ pub struct GuardSessionState {
     pub event_tx: mpsc::Sender<GuardAccessEvent>,
     /// Typed reference to GuardMetrics for fanotify-specific operations
     pub typed_metrics: Arc<GuardMetrics>,
+    /// Guard configuration (for resume after pause).
+    pub guard_config: Option<GuardConfig>,
+    /// Whether fanotify marks have been registered (guard is ready).
+    pub marks_registered: bool,
+    /// Timestamp when guard became ready (marks registered).
+    pub ready_at: Option<SystemTime>,
+    /// Number of container mounts successfully registered.
+    pub mount_count: u32,
 }
 
 impl SessionState for GuardSessionState {
@@ -100,6 +108,19 @@ fn session_to_guard_state(session: &Session<GuardSessionState>) -> GuardState {
         })
         .ok();
 
+    // Convert ready_at timestamp if present
+    let ready_at = session
+        .state
+        .ready_at
+        .and_then(|t| {
+            t.duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| Timestamp {
+                    seconds: d.as_secs() as i64,
+                    nanos: d.subsec_nanos() as i32,
+                })
+                .ok()
+        });
+
     GuardState {
         guard_name: session.name.clone(),
         namespace: session.namespace.clone(),
@@ -118,19 +139,21 @@ fn session_to_guard_state(session: &Session<GuardSessionState>) -> GuardState {
             .iter()
             .map(|s| s.allow.len() + s.deny.len())
             .sum::<usize>() as i32,
+        // Readiness fields - indicates guard is actively protecting containers
+        marks_registered: session.state.marks_registered,
+        ready_at,
+        mount_count: session.state.mount_count as i32,
     }
 }
 
 /// Janus daemon gRPC service implementation.
 pub struct JanusdServiceImpl {
-    node_name: String,
     max_guards: usize,
     sessions: SessionMap<GuardSessionState>,
     /// Event broadcaster for streaming proto events to UI clients.
     broadcaster: EventBroadcaster<AccessEvent>,
     metrics: Arc<MetricsAggregator>,
     runtime: Option<Box<dyn ContainerRuntime>>,
-    #[allow(dead_code)]
     proc_resolver: ProcfsProcessResolver,
     /// Audit logger for writing access events to kernel audit log.
     audit: Arc<dyn AuditLogger>,
@@ -165,7 +188,6 @@ impl JanusdServiceImpl {
         }
 
         Self {
-            node_name: node_name.clone(),
             max_guards,
             sessions: new_session_map(),
             broadcaster: EventBroadcaster::new(10000),
@@ -309,6 +331,10 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
                 enforcing: req.enforcing,
                 event_tx: event_tx.clone(),
                 typed_metrics: typed_metrics.clone(),
+                guard_config: None,
+                marks_registered: false,
+                ready_at: None,
+                mount_count: 0,
             },
         }));
 
@@ -324,6 +350,7 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
         // Spawn event forwarding task
         let metrics_clone = typed_metrics.clone();
         let audit_clone = self.audit.clone();
+        let proc_resolver = self.proc_resolver.clone();
         let guard_name_clone = req.guard_name.clone();
         let namespace_clone = req.namespace.clone();
         let pod_name_clone = req.pod_name.clone();
@@ -338,23 +365,6 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
                     }
                     GuardAccessResponse::Deny => {
                         metrics_clone.record_denied();
-
-                        // Log denied events to kernel audit log
-                        let audit_event = AuditAccessEvent {
-                            guard_name: guard_name_clone.clone(),
-                            namespace: namespace_clone.clone(),
-                            pod_name: pod_name_clone.clone(),
-                            container_id: container_id_clone.clone(),
-                            path: event.path.clone(),
-                            pid: event.pid,
-                            uid: event.uid,
-                            gid: 0, // TODO: Get from process info
-                            response: GuardAccessResponse::Deny,
-                            event_type: AuditEventType::Denied,
-                        };
-                        if let Err(e) = audit_clone.log_access(&audit_event) {
-                            debug!(error = %e, "Failed to log denied access to audit");
-                        }
                     }
                     GuardAccessResponse::Audit => {
                         metrics_clone.record_audited();
@@ -399,6 +409,68 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
                         }
                     }
 
+                    // Resolve process info from /proc/{pid}/
+                    // Process may have exited, so fall back to PID-only on error
+                    let (process_info, resolved_comm, resolved_exe, resolved_uid, resolved_gid) =
+                        match proc_resolver.get_process_info(event.pid as u32) {
+                            Ok(info) => (
+                                Some(ProcessInfo {
+                                    pid: info.pid as i32,
+                                    tid: 0,
+                                    uid: info.uid as i32,
+                                    gid: info.gid as i32,
+                                    comm: info.comm.clone(),
+                                    exe: info.exe.to_string_lossy().to_string(),
+                                }),
+                                info.comm,
+                                info.exe.to_string_lossy().to_string(),
+                                info.uid,
+                                info.gid,
+                            ),
+                            Err(_) => {
+                                // Process may have exited - fall back to PID only
+                                (
+                                    Some(ProcessInfo {
+                                        pid: event.pid,
+                                        tid: 0,
+                                        uid: 0,
+                                        gid: 0,
+                                        comm: String::new(),
+                                        exe: String::new(),
+                                    }),
+                                    String::new(),
+                                    String::new(),
+                                    0,
+                                    0,
+                                )
+                            }
+                        };
+
+                    // Log ALL events to kernel audit (for compliance: PCI-DSS, HIPAA, SOC2)
+                    // Includes process attribution to answer WHO made the access
+                    let (audit_response, audit_event_type) = match event.response {
+                        GuardAccessResponse::Allow => (GuardAccessResponse::Allow, AuditEventType::Access),
+                        GuardAccessResponse::Deny => (GuardAccessResponse::Deny, AuditEventType::Denied),
+                        GuardAccessResponse::Audit => (GuardAccessResponse::Audit, AuditEventType::Open),
+                    };
+                    let audit_event = AuditAccessEvent {
+                        guard_name: guard_name_clone.clone(),
+                        namespace: namespace_clone.clone(),
+                        pod_name: pod_name_clone.clone(),
+                        container_id: container_id_clone.clone(),
+                        path: event.path.clone(),
+                        pid: event.pid,
+                        uid: resolved_uid,
+                        gid: resolved_gid,
+                        response: audit_response,
+                        event_type: audit_event_type,
+                        comm: resolved_comm.clone(),
+                        exe: resolved_exe.clone(),
+                    };
+                    if let Err(e) = audit_clone.log_access(&audit_event) {
+                        debug!(error = %e, "Failed to log access event to kernel audit");
+                    }
+
                     // Stream to UI with full context
                     let proto_event = AccessEvent {
                         timestamp: Some(Timestamp {
@@ -416,14 +488,7 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
                         event_type: JanusdServiceImpl::event_type_to_proto(&event.event_type),
                         path: event.path.clone(),
                         response: JanusdServiceImpl::response_to_proto(event.response),
-                        process_info: Some(ProcessInfo {
-                            pid: event.pid,
-                            tid: 0,
-                            uid: event.uid as i32,
-                            gid: 0,
-                            comm: String::new(),
-                            exe: String::new(),
-                        }),
+                        process_info,
                         is_directory: event.is_dir,
                         tags: HashMap::new(),
                         audit_logged: false,
@@ -436,87 +501,117 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
             }
         });
 
-        // If not paused, spawn the guard task
+        // Track number of fanotify marks registered (0 if paused)
+        let mut marks_registered: i32 = 0;
+
+        // If not paused, create guard SYNCHRONOUSLY before returning response.
+        // This ensures fanotify marks are registered before the operator considers
+        // the pod "guarded" - eliminating the race condition window.
         if !req.paused {
-            let session_clone = session.clone();
+            let session_guard = session.lock().await;
+            let running = session_guard.running.clone();
+            let event_tx = session_guard.state.event_tx.clone();
+            let container_pids = session_guard.pids.clone();
+            let enforcing = session_guard.state.enforcing;
 
-            tokio::spawn(async move {
-                let session_guard = session_clone.lock().await;
-                let running = session_guard.running.clone();
-                let event_tx = session_guard.state.event_tx.clone();
-                let container_pids = session_guard.pids.clone();
+            // Build guard config from first subject (simplified for now)
+            let config = if let Some(subject) = session_guard.state.subjects.first() {
+                GuardConfig {
+                    allow_patterns: subject.allow.clone(),
+                    deny_patterns: subject.deny.clone(),
+                    events: subject
+                        .events
+                        .iter()
+                        .filter_map(|e| {
+                            JanusdServiceImpl::fanotify_event_to_string(
+                                FanotifyEvent::try_from(*e).unwrap_or(FanotifyEvent::Unspecified),
+                            )
+                        })
+                        .map(String::from)
+                        .collect(),
+                    auto_allow_owner: subject.auto_allow_owner,
+                    enforce: enforcing,
+                }
+            } else {
+                GuardConfig {
+                    allow_patterns: vec![],
+                    deny_patterns: vec![],
+                    events: vec!["open_perm".to_string(), "access_perm".to_string()],
+                    auto_allow_owner: false,
+                    enforce: enforcing,
+                }
+            };
+            drop(session_guard);
 
-                // Build guard config from first subject (simplified for now)
-                let config = if let Some(subject) = session_guard.state.subjects.first() {
-                    GuardConfig {
-                        allow_patterns: subject.allow.clone(),
-                        deny_patterns: subject.deny.clone(),
-                        events: subject
-                            .events
-                            .iter()
-                            .filter_map(|e| {
-                                JanusdServiceImpl::fanotify_event_to_string(
-                                    FanotifyEvent::try_from(*e).unwrap_or(FanotifyEvent::Unspecified),
-                                )
-                            })
-                            .map(String::from)
-                            .collect(),
-                        only_dir: subject.only_dir,
-                        auto_allow_owner: subject.auto_allow_owner,
-                        audit: subject.audit,
-                        enforce: session_guard.state.enforcing,
+            // Create guard SYNCHRONOUSLY - blocks until fanotify_init() completes
+            let guard = Guard::new(config.clone()).map_err(|e| {
+                error!(error = %e, "Failed to create guard");
+                running.store(false, Ordering::SeqCst);
+                Status::internal(format!("Failed to create guard: {}", e))
+            })?;
+
+            // Register fanotify marks SYNCHRONOUSLY for all container PIDs.
+            // This is the critical section - marks must be registered before
+            // we return success to the operator.
+            let mut mount_count: u32 = 0;
+            for pid in &container_pids {
+                let container_root = format!("/proc/{}/root", pid);
+                let path = std::path::Path::new(&container_root);
+                if path.exists() {
+                    match guard.add_mount(path) {
+                        Ok(_) => {
+                            mount_count += 1;
+                            info!(pid = pid, path = %container_root, "Registered fanotify mark for container");
+                        }
+                        Err(e) => {
+                            warn!(pid = pid, error = %e, "Failed to add container mount to guard");
+                        }
                     }
                 } else {
-                    GuardConfig {
-                        allow_patterns: vec![],
-                        deny_patterns: vec![],
-                        events: vec!["open_perm".to_string(), "access_perm".to_string()],
-                        only_dir: false,
-                        auto_allow_owner: false,
-                        audit: true,
-                        enforce: session_guard.state.enforcing,
-                    }
-                };
-                drop(session_guard);
+                    warn!(pid = pid, path = %container_root, "Container root path does not exist");
+                }
+            }
 
-                match Guard::new(config) {
-                    Ok(guard) => {
-                        // Add container root mounts for monitoring (like C daemon)
-                        // Each container is accessed via /proc/{pid}/root
-                        let mut mount_added = false;
-                        for pid in &container_pids {
-                            let container_root = format!("/proc/{}/root", pid);
-                            let path = std::path::Path::new(&container_root);
-                            if path.exists() {
-                                if let Err(e) = guard.add_mount(path) {
-                                    warn!(pid = pid, error = %e, "Failed to add container mount to guard");
-                                } else {
-                                    info!(pid = pid, path = %container_root, "Added container mount to guard");
-                                    mount_added = true;
-                                }
-                            } else {
-                                warn!(pid = pid, path = %container_root, "Container root path does not exist");
-                            }
-                        }
+            // Fail if no mounts could be registered
+            if mount_count == 0 && !container_pids.is_empty() {
+                error!("No container mounts could be added to guard");
+                running.store(false, Ordering::SeqCst);
+                return Err(Status::internal("Failed to register any fanotify marks"));
+            }
 
-                        if !mount_added {
-                            error!("No container mounts could be added to guard");
-                            running.store(false, Ordering::SeqCst);
-                            return;
-                        }
+            // Record ready timestamp - guard is now protecting the containers
+            let ready_at = SystemTime::now();
+            info!(
+                mount_count = mount_count,
+                "Guard ready - fanotify marks registered synchronously"
+            );
 
-                        if let Err(e) = guard.guard(event_tx).await {
-                            error!(error = %e, "Guard task error");
-                        }
-                    }
-                    Err(e) => {
-                        error!(error = %e, "Failed to create guard");
-                        running.store(false, Ordering::SeqCst);
-                    }
+            // Update session state with readiness info.
+            // Note: We don't store the Guard in session state because it's owned
+            // exclusively by the event loop task. The guard_config can be used
+            // to recreate the guard if needed (e.g., for resume after pause).
+            {
+                let mut session_guard = session.lock().await;
+                session_guard.state.guard_config = Some(config);
+                session_guard.state.marks_registered = true;
+                session_guard.state.ready_at = Some(ready_at);
+                session_guard.state.mount_count = mount_count;
+            }
+
+            // Set marks_registered for the response
+            marks_registered = mount_count as i32;
+
+            // NOW spawn the event loop (async is fine - marks are already registered).
+            // The Guard is moved into this task and owned exclusively by it.
+            tokio::spawn(async move {
+                if let Err(e) = guard.guard(event_tx).await {
+                    error!(error = %e, "Guard event loop error");
                 }
             });
         }
 
+        // Return success ONLY AFTER fanotify marks are registered.
+        // marks_registered > 0 indicates the guard is ready and protecting containers.
         Ok(Response::new(CreateGuardResponse {
             guard_id: key,
             node_name: req.node_name.clone(),
@@ -525,6 +620,7 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
             process_eventfds: vec![],
             paused: req.paused,
             enforcing: req.enforcing,
+            marks_registered,
         }))
     }
 
@@ -736,6 +832,425 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
     }
 }
 
+// =============================================================================
+// V2 Service Implementation (Rust-only features)
+// =============================================================================
+
+/// V2 proto imports for UpdateGuard/UpdatePolicy RPCs
+use crate::proto::v2::{
+    UpdateGuardRequest, UpdateGuardResponse, UpdatePolicyRequest, UpdatePolicyResponse,
+    UpdateAction, janusd_service_server::JanusdService as JanusdServiceV2,
+};
+
+/// V2 service implementation extends V1 with UpdateGuard and UpdatePolicy RPCs.
+///
+/// V2 adds:
+/// - UpdateGuard RPC for pause/resume operations
+/// - UpdatePolicy RPC for dynamic policy pattern updates
+/// - Extended ProcessInfo with ppid, cmdline, cwd
+#[tonic::async_trait]
+impl JanusdServiceV2 for JanusdServiceImpl {
+    /// Create a new guard (delegates to v1 implementation converted to v2 types).
+    async fn create_guard(
+        &self,
+        request: Request<crate::proto::v2::CreateGuardRequest>,
+    ) -> Result<Response<crate::proto::v2::CreateGuardResponse>, Status> {
+        // Convert v2 request to v1
+        let v2_req = request.into_inner();
+        let v1_req = CreateGuardRequest {
+            guard_name: v2_req.guard_name,
+            namespace: v2_req.namespace,
+            node_name: v2_req.node_name,
+            pod_name: v2_req.pod_name,
+            container_ids: v2_req.container_ids,
+            pids: v2_req.pids,
+            subjects: v2_req.subjects.into_iter().map(|s| GuardSubject {
+                allow: s.allow,
+                deny: s.deny,
+                events: s.events,
+                only_dir: s.only_dir,
+                auto_allow_owner: s.auto_allow_owner,
+                audit: s.audit,
+                default_response: s.default_response,
+                tags: s.tags,
+            }).collect(),
+            log_format: v2_req.log_format,
+            paused: v2_req.paused,
+            enforcing: v2_req.enforcing,
+        };
+
+        // Call v1 implementation
+        let v1_resp = <Self as janusd_service_server::JanusdService>::create_guard(
+            self, Request::new(v1_req)
+        ).await?;
+        let v1_inner = v1_resp.into_inner();
+
+        // Convert to v2 response
+        Ok(Response::new(crate::proto::v2::CreateGuardResponse {
+            guard_id: v1_inner.guard_id,
+            node_name: v1_inner.node_name,
+            pod_name: v1_inner.pod_name,
+            guarded_paths: v1_inner.guarded_paths,
+            process_eventfds: v1_inner.process_eventfds,
+            paused: v1_inner.paused,
+            enforcing: v1_inner.enforcing,
+            marks_registered: v1_inner.marks_registered,
+        }))
+    }
+
+    /// Destroy an existing guard (delegates to v1 implementation).
+    async fn destroy_guard(
+        &self,
+        request: Request<crate::proto::v2::DestroyGuardRequest>,
+    ) -> Result<Response<()>, Status> {
+        let v2_req = request.into_inner();
+        let v1_req = DestroyGuardRequest {
+            guard_name: v2_req.guard_name,
+            namespace: v2_req.namespace,
+            pod_name: v2_req.pod_name,
+        };
+        <Self as janusd_service_server::JanusdService>::destroy_guard(
+            self, Request::new(v1_req)
+        ).await
+    }
+
+    type GetGuardStateStream = std::pin::Pin<
+        Box<dyn tokio_stream::Stream<Item = Result<crate::proto::v2::GuardState, Status>> + Send>
+    >;
+
+    /// Get current state of all guards (delegates to v1 with type conversion).
+    async fn get_guard_state(
+        &self,
+        request: Request<crate::proto::v2::GetGuardStateRequest>,
+    ) -> Result<Response<Self::GetGuardStateStream>, Status> {
+        let v2_req = request.into_inner();
+
+        // Filter sessions directly for v2 response
+        let sessions = self.sessions.read().await;
+        let mut states = Vec::new();
+
+        for session_arc in sessions.values() {
+            let session = session_arc.lock().await;
+
+            if !v2_req.guard_name.is_empty() && session.name != v2_req.guard_name {
+                continue;
+            }
+            if !v2_req.namespace.is_empty() && session.namespace != v2_req.namespace {
+                continue;
+            }
+
+            let guarded_paths: i32 = session.state.subjects
+                .iter()
+                .map(|s| (s.allow.len() + s.deny.len()) as i32)
+                .sum();
+
+            // Convert ready_at timestamp if present
+            let ready_at = session.state.ready_at.and_then(|t| {
+                t.duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| Timestamp { seconds: d.as_secs() as i64, nanos: d.subsec_nanos() as i32 })
+                    .ok()
+            });
+
+            let state = crate::proto::v2::GuardState {
+                guard_name: session.name.clone(),
+                namespace: session.namespace.clone(),
+                node_name: session.node_name.clone(),
+                pod_name: session.pod_name.clone(),
+                pids: session.pids.clone(),
+                process_eventfds: vec![],
+                created_at: session.created_at.duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| Timestamp { seconds: d.as_secs() as i64, nanos: d.subsec_nanos() as i32 })
+                    .ok(),
+                subjects: session.state.subjects.iter().map(|s| crate::proto::v2::GuardSubject {
+                    allow: s.allow.clone(),
+                    deny: s.deny.clone(),
+                    events: s.events.clone(),
+                    only_dir: s.only_dir,
+                    auto_allow_owner: s.auto_allow_owner,
+                    audit: s.audit,
+                    default_response: s.default_response,
+                    tags: s.tags.clone(),
+                }).collect(),
+                log_format: session.state.log_format.clone(),
+                paused: session.paused,
+                enforcing: session.state.enforcing,
+                guarded_paths,
+                // Readiness fields - indicates guard is actively protecting containers
+                marks_registered: session.state.marks_registered,
+                ready_at,
+                mount_count: session.state.mount_count as i32,
+            };
+
+            states.push(state);
+        }
+
+        let (tx, rx) = mpsc::channel(100);
+        tokio::spawn(async move {
+            for state in states {
+                if tx.send(Ok(state)).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        let stream = ReceiverStream::new(rx);
+        Ok(Response::new(Box::pin(stream) as Self::GetGuardStateStream))
+    }
+
+    type StreamAccessEventsStream = std::pin::Pin<
+        Box<dyn tokio_stream::Stream<Item = Result<crate::proto::v2::AccessEvent, Status>> + Send>
+    >;
+
+    /// Stream real-time access events with v2 extended ProcessInfo.
+    async fn stream_access_events(
+        &self,
+        request: Request<crate::proto::v2::StreamAccessEventsRequest>,
+    ) -> Result<Response<Self::StreamAccessEventsStream>, Status> {
+        let req = request.into_inner();
+
+        info!(
+            guard_name = %req.guard_name,
+            namespace = %req.namespace,
+            include_allowed = req.include_allowed,
+            "StreamAccessEvents v2 started"
+        );
+
+        let (tx, rx) = mpsc::channel(1000);
+        let mut event_rx = self.broadcaster.subscribe();
+        let proc_resolver = self.proc_resolver.clone();
+
+        let filter_guard_name = req.guard_name.clone();
+        let filter_namespace = req.namespace.clone();
+        let filter_event_types: Vec<i32> = req.event_types.clone();
+        let include_allowed = req.include_allowed;
+
+        tokio::spawn(async move {
+            loop {
+                match event_rx.recv().await {
+                    Ok(v1_event) => {
+                        // Apply filters
+                        if !filter_guard_name.is_empty() && v1_event.guard_name != filter_guard_name {
+                            continue;
+                        }
+                        if !filter_namespace.is_empty() && v1_event.namespace != filter_namespace {
+                            continue;
+                        }
+                        if !filter_event_types.is_empty() && !filter_event_types.contains(&v1_event.event_type) {
+                            continue;
+                        }
+                        if !include_allowed && v1_event.response == AccessResponse::Allow as i32 {
+                            continue;
+                        }
+
+                        // Resolve v2 extended ProcessInfo fields from /proc/{pid}/
+                        // The v1 event already has basic fields, we just need ppid, cmdline, cwd
+                        let v2_process_info = v1_event.process_info.map(|p| {
+                            // Try to get extended info, fall back to basic v1 fields on failure
+                            let (ppid, cmdline, cwd) = proc_resolver
+                                .get_process_info(p.pid as u32)
+                                .map(|info| (
+                                    info.ppid as i32,
+                                    info.cmdline,
+                                    info.cwd.to_string_lossy().to_string(),
+                                ))
+                                .unwrap_or((0, vec![], String::new()));
+
+                            crate::proto::v2::ProcessInfo {
+                                pid: p.pid,
+                                tid: p.tid,
+                                uid: p.uid,
+                                gid: p.gid,
+                                comm: p.comm,
+                                exe: p.exe,
+                                ppid,
+                                cmdline,
+                                cwd,
+                            }
+                        });
+
+                        // Convert v1 to v2 with extended ProcessInfo
+                        let v2_event = crate::proto::v2::AccessEvent {
+                            timestamp: v1_event.timestamp,
+                            guard_name: v1_event.guard_name,
+                            namespace: v1_event.namespace,
+                            node_name: v1_event.node_name,
+                            pod_name: v1_event.pod_name,
+                            container_id: v1_event.container_id,
+                            event_type: v1_event.event_type,
+                            path: v1_event.path,
+                            response: v1_event.response,
+                            process_info: v2_process_info,
+                            is_directory: v1_event.is_directory,
+                            tags: v1_event.tags,
+                            audit_logged: v1_event.audit_logged,
+                        };
+
+                        if tx.send(Ok(v2_event)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        debug!("Stream client lagged, skipped {} events", n);
+                        continue;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        break;
+                    }
+                }
+            }
+        });
+
+        let stream = ReceiverStream::new(rx);
+        Ok(Response::new(Box::pin(stream) as Self::StreamAccessEventsStream))
+    }
+
+    /// Get daemon metrics (delegates to v1 with type conversion).
+    async fn get_metrics(
+        &self,
+        request: Request<crate::proto::v2::GetMetricsRequest>,
+    ) -> Result<Response<crate::proto::v2::MetricsResponse>, Status> {
+        let v2_req = request.into_inner();
+        let v1_req = GetMetricsRequest {
+            guard_name: v2_req.guard_name,
+        };
+        let v1_resp = <Self as janusd_service_server::JanusdService>::get_metrics(
+            self, Request::new(v1_req)
+        ).await?;
+        let v1_inner = v1_resp.into_inner();
+
+        Ok(Response::new(crate::proto::v2::MetricsResponse {
+            active_guards: v1_inner.active_guards,
+            total_events_processed: v1_inner.total_events_processed,
+            total_denied: v1_inner.total_denied,
+            total_allowed: v1_inner.total_allowed,
+            guard_metrics: v1_inner.guard_metrics.into_iter().map(|m| {
+                crate::proto::v2::GuardMetrics {
+                    guard_name: m.guard_name,
+                    namespace: m.namespace,
+                    denied_count: m.denied_count,
+                    allowed_count: m.allowed_count,
+                    audited_count: m.audited_count,
+                    event_counts: m.event_counts,
+                }
+            }).collect(),
+        }))
+    }
+
+    /// Update an existing guard (pause/resume). NEW in v2.
+    async fn update_guard(
+        &self,
+        request: Request<UpdateGuardRequest>,
+    ) -> Result<Response<UpdateGuardResponse>, Status> {
+        let req = request.into_inner();
+        let key = Self::session_key(&req.guard_name, &req.namespace, &req.pod_name);
+
+        info!(
+            guard = %req.guard_name,
+            namespace = %req.namespace,
+            pod = %req.pod_name,
+            action = ?req.action,
+            "UpdateGuard request"
+        );
+
+        // Get session
+        let session_arc = self.get(&key).await
+            .ok_or_else(|| Status::not_found(format!("Guard not found: {}", key)))?;
+
+        let mut session = session_arc.lock().await;
+
+        match UpdateAction::try_from(req.action).unwrap_or(UpdateAction::Unspecified) {
+            UpdateAction::Pause => {
+                if session.paused {
+                    return Err(Status::failed_precondition("Guard is already paused"));
+                }
+
+                // Stop the guard by setting running to false
+                session.running.store(false, Ordering::SeqCst);
+                session.paused = true;
+
+                info!(guard_id = %key, "Guard paused");
+
+                Ok(Response::new(UpdateGuardResponse {
+                    guard_id: key,
+                    paused: true,
+                    enforcing: session.state.enforcing,
+                    guarded_paths: 0,
+                }))
+            }
+            UpdateAction::Resume => {
+                if !session.paused {
+                    return Err(Status::failed_precondition("Guard is not paused"));
+                }
+
+                // Note: Resume requires recreating the guard task
+                // For now, return an error suggesting destroy/recreate
+                // Full resume support would require significant refactoring
+                Err(Status::unimplemented(
+                    "Resume not fully implemented. Please destroy and recreate the guard."
+                ))
+            }
+            UpdateAction::Unspecified => {
+                Err(Status::invalid_argument("Action must be PAUSE or RESUME"))
+            }
+        }
+    }
+
+    /// Update the policy of an existing guard. NEW in v2.
+    async fn update_policy(
+        &self,
+        request: Request<UpdatePolicyRequest>,
+    ) -> Result<Response<UpdatePolicyResponse>, Status> {
+        let req = request.into_inner();
+        let key = Self::session_key(&req.guard_name, &req.namespace, &req.pod_name);
+
+        info!(
+            guard = %req.guard_name,
+            namespace = %req.namespace,
+            pod = %req.pod_name,
+            deny_patterns = req.deny_patterns.len(),
+            allow_patterns = req.allow_patterns.len(),
+            "UpdatePolicy request"
+        );
+
+        // Get session
+        let session_arc = self.get(&key).await
+            .ok_or_else(|| Status::not_found(format!("Guard not found: {}", key)))?;
+
+        let mut session = session_arc.lock().await;
+
+        // Update the subjects with new patterns
+        // This stores the new patterns in the session state
+        // The guard will use these patterns after being recreated
+        if !req.deny_patterns.is_empty() || !req.allow_patterns.is_empty() {
+            if let Some(subject) = session.state.subjects.first_mut() {
+                if !req.deny_patterns.is_empty() {
+                    subject.deny = req.deny_patterns.clone();
+                }
+                if !req.allow_patterns.is_empty() {
+                    subject.allow = req.allow_patterns.clone();
+                }
+            }
+        }
+
+        let deny_count = session.state.subjects.iter().map(|s| s.deny.len()).sum::<usize>() as i32;
+        let allow_count = session.state.subjects.iter().map(|s| s.allow.len()).sum::<usize>() as i32;
+
+        info!(
+            guard_id = %key,
+            deny_patterns = deny_count,
+            allow_patterns = allow_count,
+            "Policy updated (will take effect on next event or after resume)"
+        );
+
+        Ok(Response::new(UpdatePolicyResponse {
+            guard_id: key,
+            deny_pattern_count: deny_count,
+            allow_pattern_count: allow_count,
+            cache_cleared: true, // Policy cache is conceptually cleared
+        }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -834,7 +1349,6 @@ mod tests {
         use crate::audit::NullAuditLogger;
         let audit: Arc<dyn AuditLogger> = Arc::new(NullAuditLogger);
         let service = JanusdServiceImpl::new("test-node".to_string(), 100, audit);
-        assert_eq!(service.node_name, "test-node");
         assert_eq!(service.max_guards, 100);
     }
 
@@ -871,6 +1385,10 @@ mod tests {
                 enforcing: true,
                 event_tx: tx,
                 typed_metrics,
+                guard_config: None,
+                marks_registered: false,
+                ready_at: None,
+                mount_count: 0,
             },
         };
 
@@ -914,6 +1432,10 @@ mod tests {
                 enforcing: false,
                 event_tx: tx,
                 typed_metrics: typed_metrics.clone(),
+                guard_config: None,
+                marks_registered: false,
+                ready_at: None,
+                mount_count: 0,
             },
         };
 

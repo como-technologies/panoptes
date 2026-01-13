@@ -1,0 +1,37 @@
+[package]
+name = "panoptes-ebpf-kernel"
+version = "0.1.0"
+edition = "2021"
+description = "Shared eBPF kernel code for Panoptes daemons"
+license = "Apache-2.0"
+
+# This crate is for eBPF kernel programs only (#![no_std])
+# It provides common maps, filtering, and helper functions for in-kernel eBPF programs
+
+[dependencies]
+# Shared types (no_std compatible)
+panoptes-ebpf-types = { path = "../types" }
+
+# Aya eBPF runtime (kernel side)
+aya-ebpf = "0.1"
+aya-log-ebpf = "0.1"
+
+[lib]
+path = "src/lib.rs"
+
+# eBPF programs require specific optimization settings
+[profile.dev]
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+lto = true
+panic = "abort"
+incremental = false
+codegen-units = 1
+rpath = false
+
+[profile.release]
+lto = true
+panic = "abort"
+codegen-units = 1

@@ -31,9 +31,9 @@ use std::sync::RwLock;
 use glob::Pattern;
 use lru::LruCache;
 use thiserror::Error;
-use tracing::{debug, warn};
+use tracing::debug;
 
-use crate::guard::AccessResponse;
+use crate::audit::AccessResponse;
 
 /// Maximum cache size (1024 entries by default).
 const DEFAULT_CACHE_SIZE: usize = 1024;
@@ -43,9 +43,6 @@ const DEFAULT_CACHE_SIZE: usize = 1024;
 pub enum PolicyError {
     #[error("invalid glob pattern: {pattern} - {reason}")]
     InvalidPattern { pattern: String, reason: String },
-
-    #[error("policy update failed: {0}")]
-    UpdateFailed(String),
 }
 
 /// A compiled glob pattern with its original string for debugging.
@@ -330,12 +327,6 @@ impl PolicyEvaluator {
             .unwrap_or(0)
     }
 
-    /// Set owner PID for auto_allow_owner feature.
-    pub fn set_owner_pid(&mut self, pid: i32) {
-        self.owner_pid = Some(pid);
-        self.clear_cache(); // Clear cache since owner decisions may change
-    }
-
     /// Check if path matches any configured pattern (allow or deny).
     ///
     /// Used to filter logging - only log events for paths we care about.
@@ -355,32 +346,6 @@ impl PolicyEvaluator {
     }
 }
 
-/// Trait for policy evaluators.
-pub trait PolicyEvaluatorTrait: Send + Sync {
-    /// Evaluate access policy for a path.
-    fn evaluate(&self, path: &Path, pid: Option<i32>) -> AccessResponse;
-
-    /// Update the policy configuration.
-    fn update_policy(
-        &mut self,
-        deny_patterns: Option<Vec<String>>,
-        allow_patterns: Option<Vec<String>>,
-    ) -> Result<(), PolicyError>;
-}
-
-impl PolicyEvaluatorTrait for PolicyEvaluator {
-    fn evaluate(&self, path: &Path, pid: Option<i32>) -> AccessResponse {
-        PolicyEvaluator::evaluate(self, path, pid)
-    }
-
-    fn update_policy(
-        &mut self,
-        deny_patterns: Option<Vec<String>>,
-        allow_patterns: Option<Vec<String>>,
-    ) -> Result<(), PolicyError> {
-        self.update(deny_patterns, allow_patterns, None, None, None)
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -593,30 +558,6 @@ mod tests {
     }
 
     #[test]
-    fn test_policy_set_owner_pid() {
-        let mut policy = PolicyEvaluator::with_config(
-            vec![],
-            vec![],
-            true,
-            None,
-            AccessResponse::Deny,
-            None,
-        )
-        .unwrap();
-
-        // Without owner PID, should deny
-        let result = policy.evaluate(Path::new("/path"), Some(1234));
-        assert_eq!(result, AccessResponse::Deny);
-
-        // Set owner PID
-        policy.set_owner_pid(1234);
-
-        // Now should allow
-        let result = policy.evaluate(Path::new("/path"), Some(1234));
-        assert_eq!(result, AccessResponse::Allow);
-    }
-
-    #[test]
     fn test_policy_no_cache() {
         let policy = PolicyEvaluator::with_config(
             vec![],
@@ -630,24 +571,6 @@ mod tests {
 
         policy.evaluate(Path::new("/path"), None);
         assert_eq!(policy.cache_size(), 0);
-    }
-
-    #[test]
-    fn test_policy_evaluator_trait() {
-        let mut policy = PolicyEvaluator::new();
-        let evaluator: &mut dyn PolicyEvaluatorTrait = &mut policy;
-
-        // Should work through trait
-        let result = evaluator.evaluate(Path::new("/any"), None);
-        assert_eq!(result, AccessResponse::Allow);
-
-        // Update should work
-        evaluator
-            .update_policy(Some(vec!["/any".to_string()]), None)
-            .unwrap();
-
-        let result = evaluator.evaluate(Path::new("/any"), None);
-        assert_eq!(result, AccessResponse::Deny);
     }
 
     #[test]

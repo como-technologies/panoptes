@@ -9,7 +9,6 @@
 //! ## Metrics Collected
 //!
 //! - `events_total` - Total events processed by type
-//! - `events_per_second` - Event throughput rate
 //! - `watches_active` - Number of active watch descriptors
 //! - `watches_total` - Total watches created
 //! - `errors_total` - Total errors by type
@@ -34,59 +33,9 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use panoptes_common::{DaemonMetrics, MetricsSnapshot};
-
-/// Sliding window for events/second calculation.
-struct EventWindow {
-    /// Ring buffer of (timestamp, count) pairs.
-    samples: Vec<(Instant, u64)>,
-    /// Current sample index.
-    index: usize,
-    /// Window duration.
-    window: Duration,
-}
-
-impl EventWindow {
-    fn new(window: Duration, sample_count: usize) -> Self {
-        Self {
-            samples: vec![(Instant::now(), 0); sample_count],
-            index: 0,
-            window,
-        }
-    }
-
-    fn record(&mut self, count: u64) {
-        let now = Instant::now();
-        self.samples[self.index] = (now, count);
-        self.index = (self.index + 1) % self.samples.len();
-    }
-
-    fn events_per_second(&self) -> f64 {
-        let now = Instant::now();
-        let cutoff = now - self.window;
-
-        let mut total = 0u64;
-        let mut oldest = now;
-
-        for (timestamp, count) in &self.samples {
-            if *timestamp >= cutoff {
-                total += count;
-                if *timestamp < oldest {
-                    oldest = *timestamp;
-                }
-            }
-        }
-
-        let elapsed = now.duration_since(oldest).as_secs_f64();
-        if elapsed > 0.0 {
-            total as f64 / elapsed
-        } else {
-            0.0
-        }
-    }
-}
 
 /// Per-watcher metrics collector with inotify-specific extensions.
 ///
@@ -107,8 +56,6 @@ pub struct WatcherMetrics {
     move_pairs_matched: AtomicU64,
     move_pairs_timeout: AtomicU64,
     start_time: Instant,
-    // For events/second calculation
-    event_window: RwLock<EventWindow>,
 }
 
 impl WatcherMetrics {
@@ -126,7 +73,6 @@ impl WatcherMetrics {
             move_pairs_matched: AtomicU64::new(0),
             move_pairs_timeout: AtomicU64::new(0),
             start_time: Instant::now(),
-            event_window: RwLock::new(EventWindow::new(Duration::from_secs(60), 60)),
         }
     }
 
@@ -156,12 +102,7 @@ impl WatcherMetrics {
         }
     }
 
-    /// Record a batch of events (for throughput calculation).
-    pub fn record_event_batch(&self, count: u64) {
-        if let Ok(mut window) = self.event_window.write() {
-            window.record(count);
-        }
-    }
+    // Inotify-specific methods (used by notify.rs which is always compiled)
 
     /// Record a watch being added.
     pub fn record_watch_added(&self) {
@@ -197,11 +138,13 @@ impl WatcherMetrics {
     }
 
     /// Get current watches active count.
+    #[allow(dead_code)]
     pub fn watches_active(&self) -> u64 {
         self.watches_active.load(Ordering::Relaxed)
     }
 
     /// Reset all counters.
+    #[allow(dead_code)]
     pub fn reset(&self) {
         self.events_total.store(0, Ordering::Relaxed);
         self.events_by_type.write().unwrap().clear();

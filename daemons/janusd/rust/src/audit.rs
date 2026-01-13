@@ -45,7 +45,19 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
-use crate::guard::AccessResponse;
+/// Access response type for audit events.
+///
+/// Defined here (not in guard module) so it's available in both
+/// traditional (fanotify) and eBPF modes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessResponse {
+    /// Access was allowed
+    Allow,
+    /// Access was denied
+    Deny,
+    /// Access was audited (logged without policy enforcement)
+    Audit,
+}
 
 /// Netlink protocol for kernel audit.
 const NETLINK_AUDIT: i32 = 9;
@@ -88,8 +100,6 @@ pub enum AuditEventType {
     Open,
     /// Access was denied
     Denied,
-    /// Policy change
-    Policy,
 }
 
 impl AuditEventType {
@@ -98,7 +108,6 @@ impl AuditEventType {
             Self::Access => "ACCESS",
             Self::Open => "OPEN",
             Self::Denied => "DENIED",
-            Self::Policy => "POLICY",
         }
     }
 }
@@ -116,17 +125,28 @@ pub struct AuditAccessEvent {
     pub gid: u32,
     pub response: AccessResponse,
     pub event_type: AuditEventType,
+    /// Process name (comm) from /proc/{pid}/stat
+    pub comm: String,
+    /// Executable path from /proc/{pid}/exe
+    pub exe: String,
 }
 
 impl AuditAccessEvent {
     /// Format the event as an audit message string.
+    ///
+    /// For compliance (PCI-DSS, HIPAA, SOC2), audit messages must answer:
+    /// - WHO: uid, gid, comm (process name), exe (executable path)
+    /// - WHAT: type (ACCESS/OPEN/DENIED), path, allowed
+    /// - WHEN: implicit in kernel audit timestamp
+    /// - WHERE: guard, namespace, pod, container
     pub fn to_audit_message(&self) -> String {
         let allowed = match self.response {
             AccessResponse::Allow | AccessResponse::Audit => "yes",
             AccessResponse::Deny => "no",
         };
 
-        format!(
+        // Base format with all required compliance fields
+        let mut msg = format!(
             "op=janus type={} guard=\"{}\" namespace=\"{}\" pod=\"{}\" \
              container=\"{}\" path=\"{}\" pid={} uid={} gid={} allowed={}",
             self.event_type.as_str(),
@@ -139,32 +159,17 @@ impl AuditAccessEvent {
             self.uid,
             self.gid,
             allowed
-        )
-    }
-}
+        );
 
-/// Policy change information for audit logging.
-#[derive(Debug, Clone)]
-pub struct AuditPolicyChange {
-    pub guard_name: String,
-    pub namespace: String,
-    pub action: String, // "add", "remove", "update"
-    pub patterns_added: usize,
-    pub patterns_removed: usize,
-}
+        // Add process attribution if available (WHO made the access)
+        if !self.comm.is_empty() {
+            msg.push_str(&format!(" comm=\"{}\"", self.comm));
+        }
+        if !self.exe.is_empty() {
+            msg.push_str(&format!(" exe=\"{}\"", self.exe));
+        }
 
-impl AuditPolicyChange {
-    /// Format the policy change as an audit message string.
-    pub fn to_audit_message(&self) -> String {
-        format!(
-            "op=janus type=POLICY guard=\"{}\" namespace=\"{}\" \
-             action=\"{}\" patterns_added={} patterns_removed={}",
-            self.guard_name,
-            self.namespace,
-            self.action,
-            self.patterns_added,
-            self.patterns_removed
-        )
+        msg
     }
 }
 
@@ -172,9 +177,6 @@ impl AuditPolicyChange {
 pub trait AuditLogger: Send + Sync {
     /// Log an access event to the kernel audit log.
     fn log_access(&self, event: &AuditAccessEvent) -> Result<(), AuditError>;
-
-    /// Log a policy change to the kernel audit log.
-    fn log_policy_change(&self, change: &AuditPolicyChange) -> Result<(), AuditError>;
 
     /// Check if audit logging is available.
     fn is_available(&self) -> bool;
@@ -314,11 +316,6 @@ impl AuditLogger for NetlinkAuditLogger {
         self.send_message(&message)
     }
 
-    fn log_policy_change(&self, change: &AuditPolicyChange) -> Result<(), AuditError> {
-        let message = change.to_audit_message();
-        self.send_message(&message)
-    }
-
     fn is_available(&self) -> bool {
         true
     }
@@ -336,10 +333,6 @@ pub struct NullAuditLogger;
 
 impl AuditLogger for NullAuditLogger {
     fn log_access(&self, _event: &AuditAccessEvent) -> Result<(), AuditError> {
-        Ok(())
-    }
-
-    fn log_policy_change(&self, _change: &AuditPolicyChange) -> Result<(), AuditError> {
         Ok(())
     }
 
@@ -368,7 +361,6 @@ mod tests {
         assert_eq!(AuditEventType::Access.as_str(), "ACCESS");
         assert_eq!(AuditEventType::Open.as_str(), "OPEN");
         assert_eq!(AuditEventType::Denied.as_str(), "DENIED");
-        assert_eq!(AuditEventType::Policy.as_str(), "POLICY");
     }
 
     #[test]
@@ -384,6 +376,8 @@ mod tests {
             gid: 1000,
             response: AccessResponse::Deny,
             event_type: AuditEventType::Denied,
+            comm: "cat".to_string(),
+            exe: "/usr/bin/cat".to_string(),
         };
 
         let message = event.to_audit_message();
@@ -397,6 +391,9 @@ mod tests {
         assert!(message.contains("pid=1234"));
         assert!(message.contains("uid=1000"));
         assert!(message.contains("allowed=no"));
+        // Process attribution fields for compliance
+        assert!(message.contains("comm=\"cat\""));
+        assert!(message.contains("exe=\"/usr/bin/cat\""));
     }
 
     #[test]
@@ -412,10 +409,15 @@ mod tests {
             gid: 0,
             response: AccessResponse::Allow,
             event_type: AuditEventType::Access,
+            comm: String::new(),
+            exe: String::new(),
         };
 
         let message = event.to_audit_message();
         assert!(message.contains("allowed=yes"));
+        // Empty comm/exe should not be included in message
+        assert!(!message.contains("comm="));
+        assert!(!message.contains("exe="));
     }
 
     #[test]
@@ -431,31 +433,13 @@ mod tests {
             gid: 0,
             response: AccessResponse::Audit,
             event_type: AuditEventType::Open,
+            comm: String::new(),
+            exe: String::new(),
         };
 
         let message = event.to_audit_message();
         assert!(message.contains("type=OPEN"));
         assert!(message.contains("allowed=yes"));
-    }
-
-    #[test]
-    fn test_audit_policy_change_to_message() {
-        let change = AuditPolicyChange {
-            guard_name: "my-guard".to_string(),
-            namespace: "default".to_string(),
-            action: "update".to_string(),
-            patterns_added: 5,
-            patterns_removed: 2,
-        };
-
-        let message = change.to_audit_message();
-
-        assert!(message.contains("op=janus"));
-        assert!(message.contains("type=POLICY"));
-        assert!(message.contains("guard=\"my-guard\""));
-        assert!(message.contains("action=\"update\""));
-        assert!(message.contains("patterns_added=5"));
-        assert!(message.contains("patterns_removed=2"));
     }
 
     #[test]
@@ -475,19 +459,11 @@ mod tests {
             gid: 0,
             response: AccessResponse::Allow,
             event_type: AuditEventType::Access,
+            comm: String::new(),
+            exe: String::new(),
         };
 
         assert!(logger.log_access(&event).is_ok());
-
-        let change = AuditPolicyChange {
-            guard_name: "guard".to_string(),
-            namespace: "ns".to_string(),
-            action: "add".to_string(),
-            patterns_added: 1,
-            patterns_removed: 0,
-        };
-
-        assert!(logger.log_policy_change(&change).is_ok());
     }
 
     #[test]
@@ -508,6 +484,8 @@ mod tests {
             gid: 0,
             response: AccessResponse::Allow,
             event_type: AuditEventType::Access,
+            comm: String::new(),
+            exe: String::new(),
         };
 
         // Should not panic
@@ -527,11 +505,14 @@ mod tests {
             gid: 65534,
             response: AccessResponse::Deny,
             event_type: AuditEventType::Denied,
+            comm: "special-proc".to_string(),
+            exe: "/usr/local/bin/special-proc".to_string(),
         };
 
         let message = event.to_audit_message();
 
         // Should contain the path with special chars
         assert!(message.contains("/path/with spaces/and\"quotes"));
+        assert!(message.contains("comm=\"special-proc\""));
     }
 }

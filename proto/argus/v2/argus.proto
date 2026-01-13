@@ -1,0 +1,355 @@
+// Copyright 2026 Como Technologies, LTD
+// Licensed under the Apache License, Version 2.0
+
+syntax = "proto3";
+
+package argus.v2;
+
+option go_package = "github.com/como-technologies/panoptes/gen/go/argus/v2;argusv2";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// ArgusdService provides file integrity monitoring capabilities
+// using inotify to watch for filesystem events in containers.
+//
+// V2 adds:
+// - ProcessInfo in FileEvent (for future eBPF/audit integration)
+// - UpdateWatch RPC for pause/resume operations
+service ArgusdService {
+  // CreateWatch establishes a new file watch for the specified configuration.
+  rpc CreateWatch(CreateWatchRequest) returns (CreateWatchResponse);
+
+  // DestroyWatch removes an existing file watch.
+  rpc DestroyWatch(DestroyWatchRequest) returns (google.protobuf.Empty);
+
+  // GetWatchState retrieves the current state of all watches on this node.
+  rpc GetWatchState(GetWatchStateRequest) returns (stream WatchState);
+
+  // StreamEvents provides a real-time stream of file system events.
+  rpc StreamEvents(StreamEventsRequest) returns (stream FileEvent);
+
+  // GetMetrics retrieves current metrics for monitoring purposes.
+  rpc GetMetrics(GetMetricsRequest) returns (MetricsResponse);
+
+  // UpdateWatch pauses or resumes an existing watch. (NEW in v2)
+  rpc UpdateWatch(UpdateWatchRequest) returns (UpdateWatchResponse);
+}
+
+// ProcessInfo contains information about a process. (NEW in v2)
+// Note: For Argus (inotify-based), this will be empty until eBPF/audit integration.
+message ProcessInfo {
+  // pid is the process ID.
+  int32 pid = 1;
+
+  // tid is the thread ID.
+  int32 tid = 2;
+
+  // uid is the user ID of the process.
+  int32 uid = 3;
+
+  // gid is the group ID of the process.
+  int32 gid = 4;
+
+  // comm is the command name (truncated to 16 chars).
+  string comm = 5;
+
+  // exe is the executable path.
+  string exe = 6;
+
+  // ppid is the parent process ID. (NEW in v2)
+  int32 ppid = 7;
+
+  // cmdline is the full command line arguments. (NEW in v2)
+  repeated string cmdline = 8;
+
+  // cwd is the current working directory of the process. (NEW in v2)
+  string cwd = 9;
+}
+
+// UpdateAction defines the action to take when updating a watch. (NEW in v2)
+enum UpdateAction {
+  UPDATE_ACTION_UNSPECIFIED = 0;
+  UPDATE_ACTION_PAUSE = 1;   // Pause the watch (stop monitoring but keep config)
+  UPDATE_ACTION_RESUME = 2;  // Resume a paused watch
+}
+
+// UpdateWatchRequest requests a pause or resume of an existing watch. (NEW in v2)
+message UpdateWatchRequest {
+  // watcher_name is the name of the ArgusWatcher resource.
+  string watcher_name = 1;
+
+  // namespace is the Kubernetes namespace.
+  string namespace = 2;
+
+  // pod_name is the pod being watched.
+  string pod_name = 3;
+
+  // action is the update action to perform.
+  UpdateAction action = 4;
+}
+
+// UpdateWatchResponse contains the result of an update operation. (NEW in v2)
+message UpdateWatchResponse {
+  // watch_id is the unique identifier for the watch.
+  string watch_id = 1;
+
+  // paused indicates if the watch is now paused.
+  bool paused = 2;
+
+  // watched_paths is the number of paths being watched (0 if paused).
+  int32 watched_paths = 3;
+}
+
+// CreateWatchRequest contains configuration for creating a new watch.
+message CreateWatchRequest {
+  // watcher_name is the name of the ArgusWatcher resource.
+  string watcher_name = 1;
+
+  // namespace is the Kubernetes namespace of the ArgusWatcher.
+  string namespace = 2;
+
+  // node_name is the name of the Kubernetes node.
+  string node_name = 3;
+
+  // pod_name is the name of the pod being watched.
+  string pod_name = 4;
+
+  // container_ids is the list of container IDs to watch.
+  repeated string container_ids = 5;
+
+  // pids is the list of process IDs to watch (derived from containers).
+  repeated int32 pids = 6;
+
+  // subjects defines what paths and events to watch.
+  repeated WatchSubject subjects = 7;
+
+  // log_format is an optional custom log format template.
+  string log_format = 8;
+
+  // paused indicates the watcher should not actively monitor files.
+  // When true, no inotify watches will be created but the configuration
+  // is stored for auto-recreation when unpaused.
+  bool paused = 9;
+}
+
+// WatchSubject defines a file watch target.
+message WatchSubject {
+  // paths is the list of file or directory paths to monitor.
+  repeated string paths = 1;
+
+  // events is the list of inotify event types to watch for.
+  repeated InotifyEvent events = 2;
+
+  // ignore is the list of glob patterns to ignore.
+  repeated string ignore = 3;
+
+  // recursive enables recursive directory watching.
+  bool recursive = 4;
+
+  // max_depth limits recursion depth (0 = unlimited).
+  int32 max_depth = 5;
+
+  // only_dir restricts watching to directories only.
+  bool only_dir = 6;
+
+  // follow_move tracks moved files by inode.
+  bool follow_move = 7;
+
+  // tags are custom key-value metadata for this watch.
+  map<string, string> tags = 8;
+}
+
+// InotifyEvent represents supported inotify event types.
+enum InotifyEvent {
+  INOTIFY_EVENT_UNSPECIFIED = 0;
+  INOTIFY_EVENT_ACCESS = 1;
+  INOTIFY_EVENT_ATTRIB = 2;
+  INOTIFY_EVENT_CLOSE_WRITE = 3;
+  INOTIFY_EVENT_CLOSE_NOWRITE = 4;
+  INOTIFY_EVENT_CREATE = 5;
+  INOTIFY_EVENT_DELETE = 6;
+  INOTIFY_EVENT_DELETE_SELF = 7;
+  INOTIFY_EVENT_MODIFY = 8;
+  INOTIFY_EVENT_MOVE_SELF = 9;
+  INOTIFY_EVENT_MOVED_FROM = 10;
+  INOTIFY_EVENT_MOVED_TO = 11;
+  INOTIFY_EVENT_OPEN = 12;
+  INOTIFY_EVENT_ALL = 99;
+}
+
+// CreateWatchResponse contains the result of a watch creation.
+message CreateWatchResponse {
+  // watch_id is the unique identifier for this watch.
+  string watch_id = 1;
+
+  // node_name is the node where the watch was created.
+  string node_name = 2;
+
+  // pod_name is the pod being watched.
+  string pod_name = 3;
+
+  // watched_paths is the number of paths being watched.
+  int32 watched_paths = 4;
+
+  // paused indicates if the watcher is currently paused.
+  bool paused = 5;
+
+  // watches_ready indicates all inotify watches have been registered.
+  // True when the watch is immediately active and capturing events.
+  bool watches_ready = 6;
+}
+
+// DestroyWatchRequest identifies a watch to remove.
+message DestroyWatchRequest {
+  // watcher_name is the name of the ArgusWatcher resource.
+  string watcher_name = 1;
+
+  // namespace is the Kubernetes namespace.
+  string namespace = 2;
+
+  // pod_name is the pod to stop watching.
+  string pod_name = 3;
+}
+
+// GetWatchStateRequest filters which watch states to retrieve.
+message GetWatchStateRequest {
+  // watcher_name filters by ArgusWatcher name (empty = all).
+  string watcher_name = 1;
+
+  // namespace filters by namespace (empty = all).
+  string namespace = 2;
+}
+
+// WatchState represents the current state of a watch.
+message WatchState {
+  // watcher_name is the name of the ArgusWatcher resource.
+  string watcher_name = 1;
+
+  // namespace is the Kubernetes namespace.
+  string namespace = 2;
+
+  // node_name is the node running the watch.
+  string node_name = 3;
+
+  // pod_name is the pod being watched.
+  string pod_name = 4;
+
+  // pids is the list of watched process IDs.
+  repeated int32 pids = 5;
+
+  // watch_descriptors is the number of active inotify watch descriptors.
+  int32 watch_descriptors = 6;
+
+  // created_at is when the watch was established.
+  google.protobuf.Timestamp created_at = 7;
+
+  // subjects is the configured watch subjects (for config comparison).
+  repeated WatchSubject subjects = 8;
+
+  // log_format is the configured log format template.
+  string log_format = 9;
+
+  // paused indicates whether the watch is currently paused.
+  bool paused = 10;
+
+  // watches_ready indicates all inotify watches have been registered
+  // and file events will be captured. Set to true after inotify_add_watch()
+  // completes for all paths. Used by watcher-wait init container.
+  bool watches_ready = 11;
+
+  // ready_at is when the watches became ready (inotify registration completed).
+  google.protobuf.Timestamp ready_at = 12;
+
+  // active_watch_descriptors is the number of inotify watch descriptors
+  // currently active. Should match expected count when watches_ready is true.
+  int32 active_watch_descriptors = 13;
+}
+
+// StreamEventsRequest filters the event stream.
+message StreamEventsRequest {
+  // watcher_name filters by ArgusWatcher name (empty = all).
+  string watcher_name = 1;
+
+  // namespace filters by namespace (empty = all).
+  string namespace = 2;
+
+  // event_types filters by event types (empty = all).
+  repeated InotifyEvent event_types = 3;
+}
+
+// FileEvent represents a detected filesystem event.
+message FileEvent {
+  // timestamp is when the event occurred.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // watcher_name is the name of the ArgusWatcher that detected this.
+  string watcher_name = 2;
+
+  // namespace is the Kubernetes namespace.
+  string namespace = 3;
+
+  // node_name is the node where the event occurred.
+  string node_name = 4;
+
+  // pod_name is the pod where the event occurred.
+  string pod_name = 5;
+
+  // container_id is the container where the event occurred.
+  string container_id = 6;
+
+  // event_type is the type of filesystem event.
+  InotifyEvent event_type = 7;
+
+  // path is the file path that triggered the event.
+  string path = 8;
+
+  // filename is the name of the file (for directory events).
+  string filename = 9;
+
+  // is_directory indicates if the path is a directory.
+  bool is_directory = 10;
+
+  // inode is the inode number of the file.
+  uint64 inode = 11;
+
+  // tags are custom metadata from the watch subject.
+  map<string, string> tags = 12;
+
+  // process_info contains information about the process that triggered the event. (NEW in v2)
+  // Note: This will be empty until eBPF/audit integration is implemented.
+  optional ProcessInfo process_info = 13;
+}
+
+// GetMetricsRequest specifies what metrics to retrieve.
+message GetMetricsRequest {
+  // watcher_name filters by ArgusWatcher name (empty = all).
+  string watcher_name = 1;
+}
+
+// MetricsResponse contains daemon metrics.
+message MetricsResponse {
+  // active_watches is the number of active watches.
+  int32 active_watches = 1;
+
+  // total_watch_descriptors is the total inotify watch descriptors in use.
+  int32 total_watch_descriptors = 2;
+
+  // events_processed is the total number of events processed.
+  int64 events_processed = 3;
+
+  // watch_metrics contains per-watcher metrics.
+  repeated WatchMetrics watch_metrics = 4;
+}
+
+// WatchMetrics contains metrics for a specific watcher.
+message WatchMetrics {
+  // watcher_name is the name of the ArgusWatcher.
+  string watcher_name = 1;
+
+  // namespace is the Kubernetes namespace.
+  string namespace = 2;
+
+  // event_counts contains counts by event type.
+  map<string, int64> event_counts = 3;
+}

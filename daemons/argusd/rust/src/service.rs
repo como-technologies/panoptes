@@ -31,7 +31,7 @@ use panoptes_common::{
     filtered_broadcast_stream, stream_from_iter,
 };
 use prost_types::Timestamp;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, warn};
 
@@ -58,12 +58,19 @@ pub struct WatchSessionState {
     pub log_format: String,
     /// Number of active watch descriptors.
     pub watch_descriptors: AtomicU64,
-    /// Event channel sender for this session.
+    /// Event channel sender for this session (for resume).
     pub event_tx: Option<mpsc::Sender<NotifyFileEvent>>,
-    /// Watcher task handle.
-    pub watcher: Option<Watcher>,
+    /// Watcher instance (shared for pause/resume via UpdateWatch).
+    pub watcher: Option<Arc<Mutex<Watcher>>>,
     /// Typed metrics for inotify-specific tracking (Watcher needs this type).
     pub typed_metrics: Arc<WatcherMetrics>,
+    /// Watch configuration (for resume).
+    pub watch_config: Option<WatchConfig>,
+    /// Whether all inotify watches have been registered and are active.
+    /// Used by watcher-wait init container to block pod startup.
+    pub watches_ready: bool,
+    /// When watches became ready (inotify registration completed).
+    pub ready_at: Option<SystemTime>,
 }
 
 impl SessionState for WatchSessionState {
@@ -89,6 +96,7 @@ impl Filterable for FileEvent {
 /// Argusd gRPC service implementation.
 pub struct ArgusdServiceImpl {
     /// Node name.
+    #[allow(dead_code)]
     node_name: String,
     /// Maximum number of watches per session.
     max_watches: usize,
@@ -311,6 +319,9 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
             event_tx: None,
             watcher: None,
             typed_metrics: typed_metrics.clone(),
+            watch_config: None,
+            watches_ready: false,  // Will be set true after inotify registration
+            ready_at: None,
         };
 
         // Create generic session with Argus-specific state
@@ -332,8 +343,11 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
             .map_err(|e| Status::resource_exhausted(e.to_string()))?;
 
         let mut watched_paths = 0;
+        let mut watches_ready = false;
 
-        // If not paused, start watching
+        // If not paused, start watching SYNCHRONOUSLY
+        // This ensures watches are registered before we return, so the
+        // watcher-wait init container can rely on watches_ready=true
         if !req.paused {
             for container_id in &req.container_ids {
                 match self.build_watch_config(&req.subjects, container_id) {
@@ -348,10 +362,50 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
                         match Watcher::with_metrics(self.max_watches, typed_metrics) {
                             Ok(mut watcher) => {
                                 let (tx, mut rx) = mpsc::channel::<NotifyFileEvent>(1000);
+
+                                // SYNCHRONOUS: Register inotify watches BEFORE returning
+                                // This is critical for the hardening pattern - ensures watches
+                                // are active before the watcher-wait init container exits.
+                                match watcher.add_watches(&config) {
+                                    Ok(wd_count) => {
+                                        info!(
+                                            watch_id = %watch_id,
+                                            paths = config.paths.len(),
+                                            watch_descriptors = wd_count,
+                                            "inotify watches registered SYNCHRONOUSLY"
+                                        );
+
+                                        // Mark watches as ready
+                                        let ready_time = SystemTime::now();
+                                        {
+                                            let mut session_guard = session_arc.lock().await;
+                                            session_guard.state.watches_ready = true;
+                                            session_guard.state.ready_at = Some(ready_time);
+                                            session_guard.state.watch_descriptors.store(wd_count as u64, Ordering::Relaxed);
+                                        }
+                                        watches_ready = true;
+                                    }
+                                    Err(e) => {
+                                        warn!(error = %e, "Failed to register inotify watches");
+                                        // watches_ready remains false
+                                    }
+                                }
+
+                                // Wrap watcher in Arc<Mutex> for shared access (UpdateWatch)
+                                let watcher_arc = Arc::new(Mutex::new(watcher));
+
                                 let broadcaster = self.broadcaster.clone();
                                 let session_clone = session_arc.clone();
                                 let container_id_clone = container_id.clone();
                                 let node_name = req.node_name.clone();
+
+                                // Store watcher and event_tx in session for UpdateWatch
+                                {
+                                    let mut session_guard = session_arc.lock().await;
+                                    session_guard.state.watcher = Some(watcher_arc.clone());
+                                    session_guard.state.event_tx = Some(tx.clone());
+                                    session_guard.state.watch_config = Some(config.clone());
+                                }
 
                                 // Spawn event forwarding task
                                 tokio::spawn(async move {
@@ -389,11 +443,12 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
                                     }
                                 });
 
-                                // Spawn watcher task
-                                let config_clone = config;
+                                // Spawn watcher event loop task (watches already registered above)
+                                let watcher_task = watcher_arc.clone();
                                 tokio::spawn(async move {
-                                    if let Err(e) = watcher.watch(config_clone, tx).await {
-                                        error!(error = %e, "Watcher error");
+                                    let mut watcher = watcher_task.lock().await;
+                                    if let Err(e) = watcher.run_event_loop(tx).await {
+                                        error!(error = %e, "Watcher event loop error");
                                     }
                                 });
                             }
@@ -409,12 +464,15 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
             }
         }
 
+        // Return watches_ready status so watcher-wait init container knows
+        // that protection is active
         Ok(Response::new(CreateWatchResponse {
             watch_id,
             node_name: req.node_name.clone(),
             pod_name: req.pod_name,
             watched_paths,
             paused: req.paused,
+            watches_ready,
         }))
     }
 
@@ -441,7 +499,8 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
             let session = session.lock().await;
 
             // Stop watcher if running
-            if let Some(ref watcher) = session.state.watcher {
+            if let Some(ref watcher_arc) = session.state.watcher {
+                let watcher = watcher_arc.lock().await;
                 watcher.stop();
             }
 
@@ -500,6 +559,10 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
                 subjects: session.state.subjects.clone(),
                 log_format: session.state.log_format.clone(),
                 paused: session.paused,
+                // Readiness fields for watcher-wait init container
+                watches_ready: session.state.watches_ready,
+                ready_at: session.state.ready_at.and_then(system_time_to_timestamp),
+                active_watch_descriptors: session.state.watch_descriptors.load(Ordering::Relaxed) as i32,
             };
 
             states.push(state);
@@ -589,6 +652,344 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
             events_processed: totals.events_total as i64,
             watch_metrics,
         }))
+    }
+}
+
+// =============================================================================
+// V2 Service Implementation (Rust-only features)
+// =============================================================================
+
+/// V2 proto imports for UpdateWatch RPC
+use crate::proto::v2::{
+    UpdateWatchRequest, UpdateWatchResponse, UpdateAction,
+    argusd_service_server::ArgusdService as ArgusdServiceV2,
+};
+
+/// V2 service implementation extends V1 with UpdateWatch RPC.
+///
+/// V2 adds:
+/// - UpdateWatch RPC for pause/resume operations
+/// - ProcessInfo in FileEvent (for future eBPF integration)
+#[tonic::async_trait]
+impl ArgusdServiceV2 for ArgusdServiceImpl {
+    /// Create a new watch (delegates to v1 implementation converted to v2 types).
+    async fn create_watch(
+        &self,
+        request: Request<crate::proto::v2::CreateWatchRequest>,
+    ) -> Result<Response<crate::proto::v2::CreateWatchResponse>, Status> {
+        // Convert v2 request to v1
+        let v2_req = request.into_inner();
+        let v1_req = CreateWatchRequest {
+            watcher_name: v2_req.watcher_name,
+            namespace: v2_req.namespace,
+            node_name: v2_req.node_name,
+            pod_name: v2_req.pod_name,
+            container_ids: v2_req.container_ids,
+            pids: v2_req.pids,
+            subjects: v2_req.subjects.into_iter().map(|s| WatchSubject {
+                paths: s.paths,
+                events: s.events,
+                ignore: s.ignore,
+                recursive: s.recursive,
+                max_depth: s.max_depth,
+                only_dir: s.only_dir,
+                follow_move: s.follow_move,
+                tags: s.tags,
+            }).collect(),
+            log_format: v2_req.log_format,
+            paused: v2_req.paused,
+        };
+
+        // Call v1 implementation
+        let v1_resp = <Self as argusd_service_server::ArgusdService>::create_watch(
+            self, Request::new(v1_req)
+        ).await?;
+        let v1_inner = v1_resp.into_inner();
+
+        // Convert to v2 response
+        Ok(Response::new(crate::proto::v2::CreateWatchResponse {
+            watch_id: v1_inner.watch_id,
+            node_name: v1_inner.node_name,
+            pod_name: v1_inner.pod_name,
+            watched_paths: v1_inner.watched_paths,
+            paused: v1_inner.paused,
+            watches_ready: v1_inner.watches_ready,
+        }))
+    }
+
+    /// Destroy an existing watch (delegates to v1 implementation).
+    async fn destroy_watch(
+        &self,
+        request: Request<crate::proto::v2::DestroyWatchRequest>,
+    ) -> Result<Response<()>, Status> {
+        let v2_req = request.into_inner();
+        let v1_req = DestroyWatchRequest {
+            watcher_name: v2_req.watcher_name,
+            namespace: v2_req.namespace,
+            pod_name: v2_req.pod_name,
+        };
+        <Self as argusd_service_server::ArgusdService>::destroy_watch(
+            self, Request::new(v1_req)
+        ).await
+    }
+
+    type GetWatchStateStream = Pin<
+        Box<dyn tokio_stream::Stream<Item = Result<crate::proto::v2::WatchState, Status>> + Send>
+    >;
+
+    /// Get current state of all watches (delegates to v1 with type conversion).
+    async fn get_watch_state(
+        &self,
+        request: Request<crate::proto::v2::GetWatchStateRequest>,
+    ) -> Result<Response<Self::GetWatchStateStream>, Status> {
+        let v2_req = request.into_inner();
+
+        // Filter sessions directly for v2 response
+        let sessions = self.sessions.read().await;
+        let mut states = Vec::new();
+
+        for session_arc in sessions.values() {
+            let session = session_arc.lock().await;
+
+            if !v2_req.watcher_name.is_empty() && session.name != v2_req.watcher_name {
+                continue;
+            }
+            if !v2_req.namespace.is_empty() && session.namespace != v2_req.namespace {
+                continue;
+            }
+
+            let state = crate::proto::v2::WatchState {
+                watcher_name: session.name.clone(),
+                namespace: session.namespace.clone(),
+                node_name: session.node_name.clone(),
+                pod_name: session.pod_name.clone(),
+                pids: session.pids.clone(),
+                watch_descriptors: session.state.watch_descriptors.load(Ordering::Relaxed) as i32,
+                created_at: system_time_to_timestamp(session.created_at),
+                subjects: session.state.subjects.iter().map(|s| crate::proto::v2::WatchSubject {
+                    paths: s.paths.clone(),
+                    events: s.events.clone(),
+                    ignore: s.ignore.clone(),
+                    recursive: s.recursive,
+                    max_depth: s.max_depth,
+                    only_dir: s.only_dir,
+                    follow_move: s.follow_move,
+                    tags: s.tags.clone(),
+                }).collect(),
+                log_format: session.state.log_format.clone(),
+                paused: session.paused,
+                // Readiness fields for watcher-wait init container
+                watches_ready: session.state.watches_ready,
+                ready_at: session.state.ready_at.and_then(system_time_to_timestamp),
+                active_watch_descriptors: session.state.watch_descriptors.load(Ordering::Relaxed) as i32,
+            };
+
+            states.push(state);
+        }
+
+        Ok(stream_from_iter(states, 100))
+    }
+
+    type StreamEventsStream = Pin<
+        Box<dyn tokio_stream::Stream<Item = Result<crate::proto::v2::FileEvent, Status>> + Send>
+    >;
+
+    /// Stream real-time file events (v2 API).
+    ///
+    /// Note: Argus (inotify) does not provide process information - inotify only
+    /// reports WHAT changed, not WHO changed it. For process attribution, use
+    /// Janus (fanotify) which inherently provides process info with each event.
+    async fn stream_events(
+        &self,
+        request: Request<crate::proto::v2::StreamEventsRequest>,
+    ) -> Result<Response<Self::StreamEventsStream>, Status> {
+        let req = request.into_inner();
+
+        info!(
+            watcher = %req.watcher_name,
+            namespace = %req.namespace,
+            "StreamEvents v2 started"
+        );
+
+        // Build filter from request
+        let filter_name = if req.watcher_name.is_empty() { None } else { Some(req.watcher_name) };
+        let filter_namespace = if req.namespace.is_empty() { None } else { Some(req.namespace) };
+        let filter_events: Option<Vec<String>> = if req.event_types.is_empty() {
+            None
+        } else {
+            Some(req.event_types
+                .iter()
+                .map(|e| inotify_event_to_string(*e as i32))
+                .filter(|s| !s.is_empty())
+                .collect())
+        };
+
+        // Subscribe to broadcaster
+        let rx = self.broadcaster.subscribe();
+
+        // Create an async stream that converts v1 events to v2
+        let stream = async_stream::stream! {
+            use tokio_stream::StreamExt;
+            let mut stream = tokio_stream::wrappers::BroadcastStream::new(rx);
+
+            while let Some(result) = stream.next().await {
+                let v1_event = match result {
+                    Ok(e) => e,
+                    Err(_) => continue, // Skip lagged events
+                };
+
+                // Apply filters
+                if let Some(ref name) = filter_name {
+                    if v1_event.watcher_name != *name {
+                        continue;
+                    }
+                }
+                if let Some(ref ns) = filter_namespace {
+                    if v1_event.namespace != *ns {
+                        continue;
+                    }
+                }
+                if let Some(ref events) = filter_events {
+                    let event_str = inotify_event_to_string(v1_event.event_type);
+                    if !events.contains(&event_str) {
+                        continue;
+                    }
+                }
+
+                // Convert to v2 event (process_info is None for Argus - inotify doesn't provide it)
+                let v2_event = crate::proto::v2::FileEvent {
+                    timestamp: v1_event.timestamp,
+                    watcher_name: v1_event.watcher_name,
+                    namespace: v1_event.namespace,
+                    node_name: v1_event.node_name,
+                    pod_name: v1_event.pod_name,
+                    container_id: v1_event.container_id,
+                    event_type: v1_event.event_type,
+                    path: v1_event.path,
+                    filename: v1_event.filename,
+                    is_directory: v1_event.is_directory,
+                    inode: v1_event.inode,
+                    tags: v1_event.tags,
+                    process_info: None,
+                };
+
+                yield Ok(v2_event);
+            }
+        };
+
+        Ok(Response::new(Box::pin(stream)))
+    }
+
+    /// Get daemon metrics (delegates to v1 with type conversion).
+    async fn get_metrics(
+        &self,
+        request: Request<crate::proto::v2::GetMetricsRequest>,
+    ) -> Result<Response<crate::proto::v2::MetricsResponse>, Status> {
+        let v2_req = request.into_inner();
+        let v1_req = GetMetricsRequest {
+            watcher_name: v2_req.watcher_name,
+        };
+        let v1_resp = <Self as argusd_service_server::ArgusdService>::get_metrics(
+            self, Request::new(v1_req)
+        ).await?;
+        let v1_inner = v1_resp.into_inner();
+
+        Ok(Response::new(crate::proto::v2::MetricsResponse {
+            active_watches: v1_inner.active_watches,
+            total_watch_descriptors: v1_inner.total_watch_descriptors,
+            events_processed: v1_inner.events_processed,
+            watch_metrics: v1_inner.watch_metrics.into_iter().map(|m| {
+                crate::proto::v2::WatchMetrics {
+                    watcher_name: m.watcher_name,
+                    namespace: m.namespace,
+                    event_counts: m.event_counts,
+                }
+            }).collect(),
+        }))
+    }
+
+    /// Update an existing watch (pause/resume). NEW in v2.
+    async fn update_watch(
+        &self,
+        request: Request<UpdateWatchRequest>,
+    ) -> Result<Response<UpdateWatchResponse>, Status> {
+        let req = request.into_inner();
+        let key = Self::session_key(&req.watcher_name, &req.namespace, &req.pod_name);
+
+        info!(
+            watcher = %req.watcher_name,
+            namespace = %req.namespace,
+            pod = %req.pod_name,
+            action = ?req.action,
+            "UpdateWatch request"
+        );
+
+        // Get session
+        let session_arc = self.get(&key).await
+            .ok_or_else(|| Status::not_found(format!("Watch not found: {}", key)))?;
+
+        let mut session = session_arc.lock().await;
+
+        match UpdateAction::try_from(req.action).unwrap_or(UpdateAction::Unspecified) {
+            UpdateAction::Pause => {
+                if session.paused {
+                    return Err(Status::failed_precondition("Watch is already paused"));
+                }
+
+                // Pause the watcher
+                if let Some(ref watcher_arc) = session.state.watcher {
+                    let mut watcher = watcher_arc.lock().await;
+                    if let Err(e) = watcher.pause() {
+                        return Err(Status::internal(format!("Failed to pause watcher: {}", e)));
+                    }
+                }
+
+                session.paused = true;
+                info!(watch_id = %key, "Watch paused");
+
+                Ok(Response::new(UpdateWatchResponse {
+                    watch_id: key,
+                    paused: true,
+                    watched_paths: 0, // No active watches when paused
+                }))
+            }
+            UpdateAction::Resume => {
+                if !session.paused {
+                    return Err(Status::failed_precondition("Watch is not paused"));
+                }
+
+                // Resume the watcher
+                if let Some(ref watcher_arc) = session.state.watcher {
+                    if let Some(ref tx) = session.state.event_tx {
+                        let mut watcher = watcher_arc.lock().await;
+                        if let Err(e) = watcher.resume(tx.clone()).await {
+                            return Err(Status::internal(format!("Failed to resume watcher: {}", e)));
+                        }
+                    } else {
+                        return Err(Status::internal("No event channel available for resume"));
+                    }
+                } else {
+                    return Err(Status::internal("No watcher available for resume"));
+                }
+
+                session.paused = false;
+                let watched_paths = session.state.watch_config
+                    .as_ref()
+                    .map(|c| c.paths.len() as i32)
+                    .unwrap_or(0);
+
+                info!(watch_id = %key, "Watch resumed");
+
+                Ok(Response::new(UpdateWatchResponse {
+                    watch_id: key,
+                    paused: false,
+                    watched_paths,
+                }))
+            }
+            UpdateAction::Unspecified => {
+                Err(Status::invalid_argument("Action must be PAUSE or RESUME"))
+            }
+        }
     }
 }
 

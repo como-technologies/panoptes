@@ -82,6 +82,96 @@ functionality.
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
+## Hardening: Init Container Injection
+
+To eliminate the race condition where file access could occur before fanotify guards
+are active, Janus provides a webhook-based hardening pattern that blocks pod startup until
+protection is in place.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Pod Startup Flow (Hardened)                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  1. Pod CREATE request → Admission Webhook                       │
+│  2. Webhook injects guard-wait init container                    │
+│  3. Pod scheduled, init container starts                         │
+│  4. guard-wait polls GetGuardState RPC                           │
+│  5. Janusd creates guard SYNCHRONOUSLY (marks registered)        │
+│  6. GetGuardState returns marks_registered=true                  │
+│  7. guard-wait exits 0 → main containers start (PROTECTED)      │
+│                                                                  │
+│  Defense layers:                                                 │
+│  ✓ Synchronous guard init (fanotify marks before response)     │
+│  ✓ Readiness fields in proto (marks_registered, ready_at)       │
+│  ✓ Webhook + init container (blocks pod until ready)            │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Enabling Webhook Injection
+
+1. **Label the namespace** to enable guard injection:
+   ```bash
+   kubectl label namespace <namespace> janus.panoptes.io/guard-injection=enabled
+   ```
+
+2. **Create a JanusGuard** that selects pods in that namespace:
+   ```yaml
+   apiVersion: janus.como-technologies.io/v1
+   kind: JanusGuard
+   metadata:
+     name: my-guard
+     namespace: <namespace>
+   spec:
+     selector:
+       matchLabels:
+         app: my-app
+     subjects:
+       - deny: [/etc/shadow]
+         events: [open]
+     enforcing: true
+   ```
+
+3. **Deploy pods** - the webhook will automatically inject the `wait-for-guard` init container.
+
+### Disabling Injection for Specific Pods
+
+Add the annotation `janus.panoptes.io/inject: "false"` to bypass injection:
+
+```yaml
+metadata:
+  annotations:
+    janus.panoptes.io/inject: "false"
+```
+
+### Configuration
+
+| Environment Variable | Description | Default |
+|---------------------|-------------|---------|
+| `GUARD_WAIT_IMAGE` | Image for the guard-wait init container | `panoptes/guard-wait:latest` |
+| `JANUSD_ADDRESS` | Address of the janusd gRPC service | `http://janusd.panoptes-system:50052` |
+| `GUARD_MAX_WAIT_SECS` | Maximum time to wait for guard readiness | `30` |
+
+### Production Deployment
+
+The webhook requires TLS certificates and must be explicitly enabled. For complete setup instructions including:
+- cert-manager integration
+- Self-signed certificate generation
+- MutatingWebhookConfiguration deployment
+- Troubleshooting
+
+See the comprehensive guide: [WEBHOOK_DEPLOYMENT.md](../../docs/WEBHOOK_DEPLOYMENT.md)
+
+**Quick start (requires cert-manager):**
+```bash
+# Add --enable-webhook=true to operator deployment args
+kubectl patch deployment janus-operator-controller-manager -n panoptes-system --type='json' \
+  -p='[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--enable-webhook=true"}]'
+```
+
 ## Components
 
 ### Operator (This Repository)

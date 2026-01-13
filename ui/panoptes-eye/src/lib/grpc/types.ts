@@ -38,6 +38,7 @@ export enum AccessResponse {
 }
 
 // Argus FileEvent from proto
+// V2 adds optional processInfo field (empty until eBPF integration)
 export interface FileEvent {
   timestamp: { seconds: number; nanos: number } | string;
   watcherName: string;
@@ -51,16 +52,30 @@ export interface FileEvent {
   isDirectory: boolean;
   inode: number;
   tags: Record<string, string>;
+  // V2 field - will be empty for inotify until eBPF/audit integration
+  processInfo?: ProcessInfo;
 }
 
-// Janus ProcessInfo from proto
+// ProcessInfo from proto (v1 + v2 extensions)
+// V2 adds ppid, cmdline, and cwd fields
 export interface ProcessInfo {
+  // V1 fields
   pid: number;
   tid: number;
   uid: number;
   gid: number;
   comm: string;
   exe: string;
+  // V2 fields (Rust daemon only)
+  ppid?: number;
+  cmdline?: string[];
+  cwd?: string;
+}
+
+// Helper to check if ProcessInfo has v2 extended fields
+export function hasV2ProcessInfo(info: ProcessInfo | undefined): boolean {
+  if (!info) return false;
+  return info.ppid !== undefined || (info.cmdline?.length ?? 0) > 0 || !!info.cwd;
 }
 
 // Janus AccessEvent from proto
@@ -162,6 +177,7 @@ export function fileEventToUnified(event: FileEvent, id: string): UnifiedEvent {
     namespace: event.namespace,
     action: 'detected',
     containerId: event.containerId,
+    processInfo: event.processInfo, // V2 field (empty for inotify until eBPF)
     tags: event.tags,
   };
 }

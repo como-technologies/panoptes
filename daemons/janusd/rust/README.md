@@ -238,15 +238,100 @@ cargo bench
 | Audit integration | libaudit | NETLINK_AUDIT direct |
 | Testing | GoogleTest | Rust built-in |
 
-## Kernel Audit Integration
+## Security Features
 
-The daemon logs denied access events to the kernel audit log via NETLINK_AUDIT:
+### Guard Startup Race Condition Fix
+
+**Problem Addressed**: Prior implementations had a 5-20ms race condition window between
+returning `CreateGuardResponse` to the operator and actually registering fanotify marks
+with the kernel. During this window, file access was unguarded.
+
+**Solution**: Guard initialization is now **synchronous**. The `CreateGuard` RPC blocks
+until all fanotify marks are registered with the kernel. The response only returns after
+the container is actively protected.
+
+```rust
+// Guard creation flow (simplified):
+// 1. Create fanotify instance (fanotify_init)
+// 2. Register marks SYNCHRONOUSLY (fanotify_mark) - BLOCKS until complete
+// 3. Update session state with readiness info
+// 4. ONLY THEN return CreateGuardResponse
+// 5. Spawn event loop (async - marks already registered)
+```
+
+**Proto Readiness Fields** (new in v2.1):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `marks_registered` | int32 | Number of fanotify marks registered (>0 = ready) |
+| `ready_at` | Timestamp | When the guard became ready |
+| `mount_count` | int32 | Number of container mounts protected |
+
+### Process Attribution
+
+Janus provides **complete process attribution** for every file access event. When a process
+accesses a guarded file, Janus captures:
+
+| Field | Source | Description |
+|-------|--------|-------------|
+| `pid` | fanotify event | Process ID from kernel |
+| `ppid` | /proc/{pid}/stat | Parent process ID |
+| `uid` | /proc/{pid}/status | User ID |
+| `gid` | /proc/{pid}/status | Group ID |
+| `comm` | /proc/{pid}/comm | Process name (16 char max) |
+| `exe` | /proc/{pid}/exe | Full executable path |
+| `cmdline` | /proc/{pid}/cmdline | Full command line arguments |
+| `cwd` | /proc/{pid}/cwd | Current working directory |
+
+**Why Janus can capture process info**: fanotify permission events include the PID of the
+accessing process directly from the kernel. This is authoritative - the kernel knows exactly
+which process triggered the event.
+
+**Compliance Note**: Process attribution is critical for compliance frameworks (PCI-DSS,
+HIPAA, SOC2) that require knowing WHO accessed sensitive files, not just THAT they were
+accessed.
+
+### Kernel Audit Integration
+
+The daemon logs **ALL access events** (not just denied) to the kernel audit log via
+NETLINK_AUDIT. This provides a kernel-authoritative audit trail.
+
+**Audit message format**:
 
 ```
-type=JANUS_DENY msg=audit(1234567890.123:456): path="/etc/shadow" pid=1234 comm="cat" exe="/usr/bin/cat"
+# Denied access
+type=JANUS_DENY msg=audit(1234567890.123:456): path="/etc/shadow" pid=1234 uid=1000 comm="cat" exe="/usr/bin/cat"
+
+# Allowed access
+type=JANUS_ALLOW msg=audit(1234567890.124:457): path="/app/config.json" pid=5678 uid=1000 comm="node" exe="/usr/bin/node"
+
+# Audit-only (no enforcement)
+type=JANUS_AUDIT msg=audit(1234567890.125:458): path="/var/log/app.log" pid=5678 uid=1000 comm="tail" exe="/usr/bin/tail"
 ```
 
 Requires `CAP_AUDIT_WRITE` capability. Falls back to `NullAuditLogger` if unavailable.
+
+### Enforcement vs Audit Mode
+
+| Mode | `enforcing` | Description |
+|------|-------------|-------------|
+| **Enforce** | `true` | Denied patterns return EPERM to process, access blocked |
+| **Audit** | `false` | All access allowed, but events logged for review |
+
+Start with audit mode (`enforcing: false`) to test policies before enforcement.
+
+### Required Capabilities
+
+Janus requires the following Linux capabilities:
+
+| Capability | Purpose |
+|------------|---------|
+| `CAP_SYS_ADMIN` | Required for `fanotify_init()` and `fanotify_mark()` |
+| `CAP_SYS_PTRACE` | Required for reading `/proc/{pid}/*` process info |
+| `CAP_DAC_READ_SEARCH` | Bypass file read permission checks for container paths |
+| `CAP_AUDIT_WRITE` | Required for writing to kernel audit log (optional) |
+
+**Note**: Running with `--privileged` in Docker/Kubernetes grants all these capabilities.
 
 ## Kubernetes Deployment
 

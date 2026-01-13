@@ -12,6 +12,19 @@ export interface Alert {
   timestamp: string;
 }
 
+export interface ProcessInfo {
+  pid?: number;
+  tid?: number;
+  uid?: number;
+  gid?: number;
+  comm?: string;
+  exe?: string;
+  // V2 fields (Rust daemon only)
+  ppid?: number;
+  cmdline?: string[];
+  cwd?: string;
+}
+
 export interface StreamEvent {
   id: string;
   timestamp: string;
@@ -22,6 +35,8 @@ export interface StreamEvent {
   action: 'allowed' | 'denied' | 'audit' | 'detected';
   nodeName: string;
   namespace?: string;
+  // V2 field - populated by Rust daemons (Janus always, Argus with eBPF)
+  processInfo?: ProcessInfo;
 }
 
 interface EventStatsState {

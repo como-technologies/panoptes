@@ -4,6 +4,7 @@ go 1.24.6
 
 require (
 	github.com/como-technologies/panoptes/gen/go v0.0.0
+	github.com/como-technologies/panoptes/operators/common v0.0.0
 	github.com/onsi/ginkgo/v2 v2.22.0
 	github.com/onsi/gomega v1.36.1
 	github.com/prometheus/client_golang v1.22.0
@@ -15,6 +16,8 @@ require (
 )
 
 replace github.com/como-technologies/panoptes/gen/go => ../../gen/go
+
+replace github.com/como-technologies/panoptes/operators/common => ../common
 
 require (
 	cel.dev/expr v0.24.0 // indirect

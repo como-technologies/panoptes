@@ -11,6 +11,10 @@ set -euo pipefail
 CLUSTER_NAME="${CLUSTER_NAME:-panoptes-dev}"
 NAMESPACE="${NAMESPACE:-panoptes-system}"
 IMAGE_TAG="${IMAGE_TAG:-dev}"
+# Image variant selection (full=auto-detect, slim=traditional only, ebpf=eBPF only)
+IMAGE_VARIANT="${IMAGE_VARIANT:-full}"
+# Runtime mode override (auto=detect at runtime, ebpf=force eBPF, traditional=force inotify/fanotify)
+DAEMON_MODE="${DAEMON_MODE:-auto}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
@@ -66,7 +70,7 @@ build_grpc_builder() {
 
 # Build container images (full build, includes gRPC compilation)
 build_images() {
-    log_info "Building container images..."
+    log_info "Building container images (variant: ${IMAGE_VARIANT})..."
 
     cd "${ROOT_DIR}"
 
@@ -78,14 +82,39 @@ build_images() {
     log_info "Building janus-operator..."
     docker build -t "localhost/janus-operator:${IMAGE_TAG}" -f operators/janus-operator/Dockerfile .
 
-    # Argusd daemon (needs repo root as context for proto/ access)
-    # Note: First build takes 15-30 min (builds gRPC from source)
-    log_info "Building argusd (static binary from scratch)..."
-    docker build -t "localhost/argusd:${IMAGE_TAG}" -f daemons/argusd/Dockerfile .
+    # Build daemons using unified Dockerfile.rust with FEATURES build arg
+    # All variants use FROM scratch with musl static linking (~5-8 MB)
+    case "${IMAGE_VARIANT}" in
+        slim)
+            log_info "Building argusd (slim: ~5-6 MB, FROM scratch, traditional mode only)..."
+            docker build --build-arg FEATURES= -t "localhost/argusd:slim" -f daemons/argusd/Dockerfile.rust .
 
-    # Janusd daemon (needs repo root as context for proto/ access)
-    log_info "Building janusd (static binary from scratch)..."
-    docker build -t "localhost/janusd:${IMAGE_TAG}" -f daemons/janusd/Dockerfile .
+            log_info "Building janusd (slim: ~5-6 MB, FROM scratch, traditional mode only)..."
+            docker build --build-arg FEATURES= -t "localhost/janusd:slim" -f daemons/janusd/Dockerfile.rust .
+            ;;
+        ebpf)
+            log_info "Building argusd (eBPF: ~6-8 MB, FROM scratch, eBPF + inotify)..."
+            docker build --build-arg FEATURES=ebpf -t "localhost/argusd:ebpf" -f daemons/argusd/Dockerfile.rust .
+
+            log_info "Building janusd (eBPF: ~6-8 MB, FROM scratch, eBPF + fanotify)..."
+            docker build --build-arg FEATURES=ebpf -t "localhost/janusd:ebpf" -f daemons/janusd/Dockerfile.rust .
+            ;;
+        full|*)
+            log_info "Building argusd (full: ~6-8 MB, FROM scratch, eBPF + inotify with auto-detection)..."
+            docker build --build-arg FEATURES=ebpf -t "localhost/argusd:${IMAGE_TAG}" -f daemons/argusd/Dockerfile.rust .
+
+            log_info "Building janusd (full: ~6-8 MB, FROM scratch, eBPF + fanotify with auto-detection)..."
+            docker build --build-arg FEATURES=ebpf -t "localhost/janusd:${IMAGE_TAG}" -f daemons/janusd/Dockerfile.rust .
+            ;;
+    esac
+
+    # Guard-wait init container (for JanusGuard webhook injection)
+    log_info "Building guard-wait..."
+    docker build -t "localhost/guard-wait:${IMAGE_TAG}" -f tools/guard-wait/Dockerfile .
+
+    # Watcher-wait init container (for ArgusWatcher webhook injection)
+    log_info "Building watcher-wait..."
+    docker build -t "localhost/watcher-wait:${IMAGE_TAG}" -f tools/watcher-wait/Dockerfile .
 
     # Panoptes Eye UI (needs repo root as context for proto/ access)
     log_info "Building panoptes-eye..."
@@ -96,7 +125,7 @@ build_images() {
 
 # Fast build using pre-built grpc-static-builder image
 build_images_fast() {
-    log_info "Building container images (fast mode using cached gRPC builder)..."
+    log_info "Building container images (fast mode, variant: ${IMAGE_VARIANT})..."
 
     cd "${ROOT_DIR}"
 
@@ -114,17 +143,39 @@ build_images_fast() {
     log_info "Building janus-operator..."
     docker build -t "localhost/janus-operator:${IMAGE_TAG}" -f operators/janus-operator/Dockerfile .
 
-    # Argusd daemon using pre-built gRPC
-    log_info "Building argusd (using cached grpc-static-builder)..."
-    docker build -t "localhost/argusd:${IMAGE_TAG}" \
-        --build-arg BUILDKIT_INLINE_CACHE=1 \
-        -f daemons/argusd/Dockerfile .
+    # Build daemons using unified Dockerfile.rust with FEATURES build arg
+    # All variants use FROM scratch with musl static linking (~5-8 MB)
+    case "${IMAGE_VARIANT}" in
+        slim)
+            log_info "Building argusd (slim: ~5-6 MB, FROM scratch, traditional mode only)..."
+            docker build --build-arg FEATURES= -t "localhost/argusd:slim" -f daemons/argusd/Dockerfile.rust .
 
-    # Janusd daemon using pre-built gRPC
-    log_info "Building janusd (using cached grpc-static-builder)..."
-    docker build -t "localhost/janusd:${IMAGE_TAG}" \
-        --build-arg BUILDKIT_INLINE_CACHE=1 \
-        -f daemons/janusd/Dockerfile .
+            log_info "Building janusd (slim: ~5-6 MB, FROM scratch, traditional mode only)..."
+            docker build --build-arg FEATURES= -t "localhost/janusd:slim" -f daemons/janusd/Dockerfile.rust .
+            ;;
+        ebpf)
+            log_info "Building argusd (eBPF: ~6-8 MB, FROM scratch, eBPF + inotify)..."
+            docker build --build-arg FEATURES=ebpf -t "localhost/argusd:ebpf" -f daemons/argusd/Dockerfile.rust .
+
+            log_info "Building janusd (eBPF: ~6-8 MB, FROM scratch, eBPF + fanotify)..."
+            docker build --build-arg FEATURES=ebpf -t "localhost/janusd:ebpf" -f daemons/janusd/Dockerfile.rust .
+            ;;
+        full|*)
+            log_info "Building argusd (full: ~6-8 MB, FROM scratch, eBPF + inotify with auto-detection)..."
+            docker build --build-arg FEATURES=ebpf -t "localhost/argusd:${IMAGE_TAG}" -f daemons/argusd/Dockerfile.rust .
+
+            log_info "Building janusd (full: ~6-8 MB, FROM scratch, eBPF + fanotify with auto-detection)..."
+            docker build --build-arg FEATURES=ebpf -t "localhost/janusd:${IMAGE_TAG}" -f daemons/janusd/Dockerfile.rust .
+            ;;
+    esac
+
+    # Guard-wait init container (for JanusGuard webhook injection)
+    log_info "Building guard-wait..."
+    docker build -t "localhost/guard-wait:${IMAGE_TAG}" -f tools/guard-wait/Dockerfile .
+
+    # Watcher-wait init container (for ArgusWatcher webhook injection)
+    log_info "Building watcher-wait..."
+    docker build -t "localhost/watcher-wait:${IMAGE_TAG}" -f tools/watcher-wait/Dockerfile .
 
     # Panoptes Eye UI (needs repo root as context for proto/ access)
     log_info "Building panoptes-eye..."
@@ -135,12 +186,29 @@ build_images_fast() {
 
 # Load images into kind
 load_images() {
-    log_info "Loading images into kind cluster..."
+    log_info "Loading images into kind cluster (variant: ${IMAGE_VARIANT})..."
 
     kind load docker-image "localhost/argus-operator:${IMAGE_TAG}" --name "${CLUSTER_NAME}"
     kind load docker-image "localhost/janus-operator:${IMAGE_TAG}" --name "${CLUSTER_NAME}"
-    kind load docker-image "localhost/argusd:${IMAGE_TAG}" --name "${CLUSTER_NAME}"
-    kind load docker-image "localhost/janusd:${IMAGE_TAG}" --name "${CLUSTER_NAME}"
+
+    # Load daemon images with correct tag based on variant
+    case "${IMAGE_VARIANT}" in
+        slim)
+            kind load docker-image "localhost/argusd:slim" --name "${CLUSTER_NAME}"
+            kind load docker-image "localhost/janusd:slim" --name "${CLUSTER_NAME}"
+            ;;
+        ebpf)
+            kind load docker-image "localhost/argusd:ebpf" --name "${CLUSTER_NAME}"
+            kind load docker-image "localhost/janusd:ebpf" --name "${CLUSTER_NAME}"
+            ;;
+        full|*)
+            kind load docker-image "localhost/argusd:${IMAGE_TAG}" --name "${CLUSTER_NAME}"
+            kind load docker-image "localhost/janusd:${IMAGE_TAG}" --name "${CLUSTER_NAME}"
+            ;;
+    esac
+
+    kind load docker-image "localhost/guard-wait:${IMAGE_TAG}" --name "${CLUSTER_NAME}"
+    kind load docker-image "localhost/watcher-wait:${IMAGE_TAG}" --name "${CLUSTER_NAME}"
     kind load docker-image "localhost/panoptes-eye:${IMAGE_TAG}" --name "${CLUSTER_NAME}"
 
     log_info "All images loaded into kind."
@@ -194,12 +262,37 @@ deploy_stack() {
 
     cd "${ROOT_DIR}"
 
+    # NOTE: Webhook injection is disabled by default in local development.
+    # The operators require --enable-webhook=true and TLS certificates to enable webhooks.
+    # To enable webhooks, you would need to:
+    # 1. Generate TLS certificates (via cert-manager or self-signed)
+    # 2. Create a secret with the certs
+    # 3. Mount the secret in the operator deployment
+    # 4. Add --enable-webhook=true --webhook-cert-path=/certs to operator args
+    # 5. Deploy the MutatingWebhookConfiguration from config/webhook/manifests.yaml
+    #
+    # For now, pods start without waiting for protection to be active.
+    # The daemons will still monitor pods once they're running.
+
     # Deploy daemons as DaemonSets
-    log_info "Deploying daemons..."
-    sed "s|localhost/argusd:dev|localhost/argusd:${IMAGE_TAG}|g" "${SCRIPT_DIR}/argusd-daemonset.yaml" | \
+    # Use variant tag for slim/ebpf, IMAGE_TAG for full
+    log_info "Deploying daemons (variant: ${IMAGE_VARIANT})..."
+    case "${IMAGE_VARIANT}" in
+        slim)
+            DAEMON_TAG="slim"
+            ;;
+        ebpf)
+            DAEMON_TAG="ebpf"
+            ;;
+        full|*)
+            DAEMON_TAG="${IMAGE_TAG}"
+            ;;
+    esac
+
+    sed "s|localhost/argusd:dev|localhost/argusd:${DAEMON_TAG}|g" "${SCRIPT_DIR}/argusd-daemonset.yaml" | \
         sed "s|namespace: panoptes-system|namespace: ${NAMESPACE}|g" | \
         kubectl apply -f -
-    sed "s|localhost/janusd:dev|localhost/janusd:${IMAGE_TAG}|g" "${SCRIPT_DIR}/janusd-daemonset.yaml" | \
+    sed "s|localhost/janusd:dev|localhost/janusd:${DAEMON_TAG}|g" "${SCRIPT_DIR}/janusd-daemonset.yaml" | \
         sed "s|namespace: panoptes-system|namespace: ${NAMESPACE}|g" | \
         kubectl apply -f -
 
@@ -218,6 +311,11 @@ deploy_stack() {
 # Create test resources
 create_test_resources() {
     log_info "Creating test resources..."
+
+    # NOTE: Webhook injection labels are not needed when webhooks are disabled.
+    # If webhooks are enabled, uncomment the following to enable injection:
+    # kubectl label namespace default janus.panoptes.io/guard-injection=enabled --overwrite
+    # kubectl label namespace default argus.panoptes.io/watcher-injection=enabled --overwrite
 
     # Test application
     kubectl apply -f - <<EOF
@@ -388,15 +486,39 @@ Environment Variables:
     CLUSTER_NAME    Kind cluster name (default: panoptes-dev)
     NAMESPACE       Kubernetes namespace (default: panoptes-system)
     IMAGE_TAG       Container image tag (default: dev)
+    IMAGE_VARIANT   Image variant to build (default: full)
+                    full = Both modes + runtime auto-detection (~6-8 MB, FROM scratch)
+                    slim = Traditional only, no eBPF (~5-6 MB, FROM scratch)
+                    ebpf = eBPF + traditional modes (~6-8 MB, FROM scratch)
+    DAEMON_MODE     Runtime mode override for full variant (default: auto)
+                    auto        = auto-detect at runtime (eBPF if supported)
+                    ebpf        = force eBPF mode
+                    traditional = force traditional mode
 
 Examples:
-    $0 all                          # Full setup (first time, takes 20-30 min)
-    $0 build-grpc                   # Build gRPC builder image once
-    $0 build-fast && $0 load        # Fast rebuild and reload (after build-grpc)
-    IMAGE_TAG=v2.0.0 $0 build       # Build with specific tag
+    $0 all                              # Full setup (auto-detect mode at runtime)
+    IMAGE_VARIANT=slim $0 all           # Smaller images, traditional mode only
+    IMAGE_VARIANT=ebpf $0 all           # eBPF-only images (fail if unsupported)
+    $0 build-grpc                       # Build gRPC builder image once
+    $0 build-fast && $0 load            # Fast rebuild and reload
+    IMAGE_TAG=v2.0.0 $0 build           # Build with specific tag
 
-Note: First build takes 15-30 minutes to compile gRPC from source.
-      Use 'build-grpc' once, then 'build-fast' for quick iterations.
+Runtime Mode Selection (auto-detect with fallback):
+    The daemons automatically detect kernel capabilities at startup:
+    - If eBPF is supported (kernel 5.8+ with BTF): use eBPF mode
+    - Otherwise: fallback to traditional mode (inotify/fanotify)
+
+    eBPF mode features:
+    - Argus: LSM-based monitoring with full process attribution
+    - Janus: LSM-based auditing with atomic process info + deny rules
+
+    Traditional mode features:
+    - Argus: inotify-based file monitoring (no process info)
+    - Janus: fanotify-based access auditing (process info via /proc)
+
+Note: All daemon variants use musl static linking with FROM scratch base.
+      First eBPF build takes longer to compile eBPF bytecode.
+      Subsequent builds use Docker layer caching.
 EOF
 }
 

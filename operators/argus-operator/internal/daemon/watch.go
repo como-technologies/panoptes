@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	arguspb "github.com/como-technologies/panoptes/gen/go/argus/v1"
+	arguspbv2 "github.com/como-technologies/panoptes/gen/go/argus/v2"
 	argusv1 "github.com/como-technologies/panoptes/operators/argus-operator/api/v1"
 )
 
@@ -317,4 +318,60 @@ func GetNodeIP(node *corev1.Node) string {
 		}
 	}
 	return ""
+}
+
+// UpdateWatchResult contains the result of an update watch operation (v2 API).
+type UpdateWatchResult struct {
+	WatchID      string
+	Paused       bool
+	WatchedPaths int32
+}
+
+// UpdateWatch pauses or resumes an existing watch (v2 API).
+// This method uses the v2 proto which is only supported by Rust daemons.
+func (m *WatchManager) UpdateWatch(ctx context.Context, nodeIP, watcherNamespace, watcherName, podName string, pause bool) (*UpdateWatchResult, error) {
+	logger := log.FromContext(ctx).WithValues(
+		"watcher", watcherName,
+		"namespace", watcherNamespace,
+		"pod", podName,
+		"pause", pause,
+	)
+
+	conn, err := m.client.GetConnection(ctx, nodeIP)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connection: %w", err)
+	}
+
+	action := arguspbv2.UpdateAction_UPDATE_ACTION_RESUME
+	if pause {
+		action = arguspbv2.UpdateAction_UPDATE_ACTION_PAUSE
+	}
+
+	logger.V(1).Info("Updating watch state")
+
+	// Create v2 gRPC client and make the call
+	client := arguspbv2.NewArgusdServiceClient(conn)
+	req := &arguspbv2.UpdateWatchRequest{
+		WatcherName: watcherName,
+		Namespace:   watcherNamespace,
+		PodName:     podName,
+		Action:      action,
+	}
+
+	resp, err := client.UpdateWatch(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("gRPC UpdateWatch failed: %w", err)
+	}
+
+	logger.Info("Watch updated successfully",
+		"watchID", resp.WatchId,
+		"paused", resp.Paused,
+		"watchedPaths", resp.WatchedPaths,
+	)
+
+	return &UpdateWatchResult{
+		WatchID:      resp.WatchId,
+		Paused:       resp.Paused,
+		WatchedPaths: resp.WatchedPaths,
+	}, nil
 }

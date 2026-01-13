@@ -8,6 +8,12 @@ description = "Janus File Access Auditing Daemon (Rust implementation)"
 license = "Apache-2.0"
 repository = "https://github.com/como-technologies/panoptes"
 
+[features]
+default = []
+# Enable eBPF-based process attribution (solves TOCTOU race on /proc lookups)
+# Uses shared eBPF infrastructure from panoptes-common
+ebpf = ["panoptes-common/ebpf"]
+
 [dependencies]
 # Shared Panoptes utilities (container runtime, proc parsing, session management)
 panoptes-common = { path = "../../common/rust", features = ["grpc"] }
@@ -16,8 +22,8 @@ panoptes-common = { path = "../../common/rust", features = ["grpc"] }
 nix = { version = "0.29", features = ["fanotify", "fs", "signal", "poll"] }
 libc = "0.2"
 
-# Async runtime
-tokio = { version = "1", features = ["full", "sync", "fs", "signal"] }
+# Async runtime (minimal features for smaller binary)
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "fs", "signal", "io-util"] }
 tokio-stream = "0.1"
 
 # gRPC
@@ -64,6 +70,7 @@ name = "policy_evaluation"
 harness = false
 
 [profile.release]
+opt-level = "z"      # Optimize for size
 lto = true
 codegen-units = 1
 strip = true

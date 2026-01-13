@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Activity, Pause, Play, Trash2, Filter, Download, AlertCircle, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useEventStats, useEventCounts, useRecentEvents, type StreamEvent } from '@/stores/eventStats';
@@ -8,6 +8,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { SearchInput } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/select';
+import { EventDetailDialog } from '@/components/events/EventDetailDialog';
 
 const EVENT_TYPE_OPTIONS = [
   { value: 'access', label: 'Access' },
@@ -38,6 +39,7 @@ export default function EventsPage() {
   const [sources, setSources] = useState<string[]>([]);
   const [actions, setActions] = useState<string[]>([]);
   const [showFilters, setShowFilters] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<StreamEvent | null>(null);
 
   // Access event stats from Zustand store (SSR-safe)
   const eventCounts = useEventCounts();
@@ -53,23 +55,6 @@ export default function EventsPage() {
       setPausedEvents(allEvents);
     }
     setIsPaused(!isPaused);
-  };
-
-  const exportEvents = () => {
-    const csv = [
-      ['Timestamp', 'Source', 'Event Type', 'Path', 'Pod', 'Action', 'Node'].join(','),
-      ...filteredEvents.map((e) =>
-        [e.timestamp, e.source, e.eventType, `"${e.path}"`, e.podName, e.action, e.nodeName].join(',')
-      ),
-    ].join('\n');
-
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `events-${new Date().toISOString()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   const filteredEvents = events.filter((event) => {
@@ -88,6 +73,44 @@ export default function EventsPage() {
     }
     return true;
   });
+
+  // Check if any events have ProcessInfo (v2 Rust daemon data)
+  const hasProcessInfo = useMemo(() => {
+    return filteredEvents.some(
+      (e) => e.processInfo && (e.processInfo.pid || e.processInfo.comm)
+    );
+  }, [filteredEvents]);
+
+  const exportEvents = () => {
+    // Include ProcessInfo columns if any events have process data
+    const headers = ['Timestamp', 'Source', 'Event Type', 'Path', 'Pod', 'Action', 'Node'];
+    if (hasProcessInfo) {
+      headers.push('Process', 'PID', 'CWD');
+    }
+
+    const csv = [
+      headers.join(','),
+      ...filteredEvents.map((e) => {
+        const row = [e.timestamp, e.source, e.eventType, `"${e.path}"`, e.podName, e.action, e.nodeName];
+        if (hasProcessInfo) {
+          row.push(
+            e.processInfo?.comm || '',
+            e.processInfo?.pid?.toString() || '',
+            e.processInfo?.cwd ? `"${e.processInfo.cwd}"` : ''
+          );
+        }
+        return row.join(',');
+      }),
+    ].join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `events-${new Date().toISOString()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const getActionColor = (action: string) => {
     switch (action) {
@@ -246,13 +269,20 @@ export default function EventsPage() {
                     <th className="px-4 py-2 text-left font-medium">Path</th>
                     <th className="px-4 py-2 text-left font-medium">Pod</th>
                     <th className="px-4 py-2 text-left font-medium">Action</th>
+                    {hasProcessInfo && (
+                      <>
+                        <th className="px-4 py-2 text-left font-medium">Process</th>
+                        <th className="px-4 py-2 text-left font-medium">PID</th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y dark:divide-gray-700">
                   {filteredEvents.map((event) => (
                     <tr
                       key={event.id}
-                      className="hover:bg-gray-50 dark:hover:bg-gray-800/50"
+                      className="hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer"
+                      onClick={() => setSelectedEvent(event)}
                     >
                       <td className="px-4 py-2 whitespace-nowrap text-gray-500 dark:text-gray-400 font-mono text-xs">
                         {new Date(event.timestamp).toLocaleTimeString()}
@@ -274,6 +304,16 @@ export default function EventsPage() {
                           {event.action}
                         </Badge>
                       </td>
+                      {hasProcessInfo && (
+                        <>
+                          <td className="px-4 py-2 font-mono text-xs" title={event.processInfo?.exe || ''}>
+                            {event.processInfo?.comm || '-'}
+                          </td>
+                          <td className="px-4 py-2 font-mono text-xs">
+                            {event.processInfo?.pid || '-'}
+                          </td>
+                        </>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -282,6 +322,12 @@ export default function EventsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Event Detail Dialog */}
+      <EventDetailDialog
+        event={selectedEvent}
+        onClose={() => setSelectedEvent(null)}
+      />
     </div>
   );
 }

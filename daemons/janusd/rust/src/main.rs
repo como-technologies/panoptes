@@ -7,29 +7,60 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use tonic::transport::Server;
 use tonic_health::server::health_reporter;
-use panoptes_common::GlogLayer;
-use tracing::{info, Level};
+use panoptes_common::{
+    GlogLayer,
+    // Environment abstraction
+    EnvironmentDetector, LinuxEnvironmentDetector, Feature, WarningSeverity,
+    // Capability checking
+    CapabilityChecker, LinuxCapabilityChecker, JANUSD_REQUIRED_CAPS,
+    missing_capabilities_message,
+};
+#[cfg(feature = "ebpf")]
+use panoptes_common::{is_ebpf_supported, is_bpf_lsm_enabled, JANUSD_REQUIRED_CAPS_EBPF};
+use tracing::{info, warn, error, Level};
 use tracing_subscriber::prelude::*;
 
 mod audit;
+mod metrics;
+
+// Traditional mode (always compiled)
 mod dedupe;
 mod guard;
-mod metrics;
 mod policy;
 mod service;
+
+// eBPF mode (conditional compilation)
+#[cfg(feature = "ebpf")]
+mod ebpf;
+#[cfg(feature = "ebpf")]
+mod service_ebpf;
 
 use audit::create_audit_logger;
 
 pub mod proto {
+    // V1 proto types (re-exported at root for backward compatibility)
     tonic::include_proto!("janus.v1");
+
+    // V2 proto types (Rust-only features: Extended ProcessInfo, UpdateGuard/UpdatePolicy RPCs)
+    pub mod v2 {
+        tonic::include_proto!("janus.v2");
+    }
 }
 
 /// Service name for health checks (matches the gRPC service name)
-const SERVICE_NAME: &str = "janus.v1.JanusdService";
+const SERVICE_NAME_V1: &str = "janus.v1.JanusdService";
+const SERVICE_NAME_V2: &str = "janus.v2.JanusdService";
+
+/// Runtime mode selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeMode {
+    Traditional,
+    Ebpf,
+}
 
 /// Janus daemon configuration
 #[derive(Parser, Debug)]
@@ -56,6 +87,10 @@ struct Config {
     /// Log level (trace, debug, info, warn, error)
     #[arg(long, env = "LOG_LEVEL", default_value = "info")]
     log_level: String,
+
+    /// Force a specific mode (auto, ebpf, traditional)
+    #[arg(long, env = "JANUSD_MODE", default_value = "auto")]
+    mode: String,
 }
 
 impl Config {
@@ -67,6 +102,75 @@ impl Config {
             self.listen_addr
         }
     }
+}
+
+/// Log why eBPF is not supported (for debugging).
+#[cfg(feature = "ebpf")]
+fn log_ebpf_unsupported_reason() {
+    if !std::path::Path::new("/sys/kernel/btf/vmlinux").exists() {
+        warn!("BTF not available at /sys/kernel/btf/vmlinux (kernel too old or BTF disabled)");
+    }
+    if !is_bpf_lsm_enabled() {
+        warn!("BPF LSM not enabled - check /sys/kernel/security/lsm for 'bpf'");
+        warn!("Note: WSL2 kernels typically do not have BPF LSM support");
+    }
+}
+
+/// Detect which runtime mode to use
+#[cfg(feature = "ebpf")]
+fn detect_runtime_mode(config: &Config, cap_checker: &LinuxCapabilityChecker) -> RuntimeMode {
+    // Check if user forced a specific mode
+    match config.mode.to_lowercase().as_str() {
+        "ebpf" => {
+            // Only use eBPF if explicitly requested AND supported
+            if !is_ebpf_supported() {
+                warn!("eBPF mode requested but not supported - falling back to traditional");
+                log_ebpf_unsupported_reason();
+                return RuntimeMode::Traditional;
+            }
+            let missing_caps = cap_checker.check_required(JANUSD_REQUIRED_CAPS_EBPF);
+            if !missing_caps.is_empty() {
+                warn!(
+                    "eBPF mode requested but missing capabilities ({:?}) - falling back to traditional",
+                    missing_caps
+                );
+                return RuntimeMode::Traditional;
+            }
+            info!("eBPF mode explicitly enabled via --mode flag");
+            return RuntimeMode::Ebpf;
+        }
+        "traditional" | "fanotify" => {
+            info!("Traditional mode selected via --mode flag");
+            return RuntimeMode::Traditional;
+        }
+        "auto" | _ => {
+            // Auto mode: try eBPF first if supported, fall back to traditional
+            if !is_ebpf_supported() {
+                info!("Auto mode: eBPF not supported - using traditional (fanotify)");
+                log_ebpf_unsupported_reason();
+                return RuntimeMode::Traditional;
+            }
+            let missing_caps = cap_checker.check_required(JANUSD_REQUIRED_CAPS_EBPF);
+            if !missing_caps.is_empty() {
+                info!(
+                    "Auto mode: missing eBPF capabilities ({:?}) - using traditional",
+                    missing_caps
+                );
+                return RuntimeMode::Traditional;
+            }
+            info!("Auto mode: eBPF supported and capabilities present - using eBPF");
+            return RuntimeMode::Ebpf;
+        }
+    }
+}
+
+/// Detect which runtime mode to use (non-eBPF build)
+#[cfg(not(feature = "ebpf"))]
+fn detect_runtime_mode(config: &Config, _cap_checker: &LinuxCapabilityChecker) -> RuntimeMode {
+    if config.mode.to_lowercase() == "ebpf" {
+        warn!("eBPF mode requested but binary compiled without eBPF support - using traditional mode");
+    }
+    RuntimeMode::Traditional
 }
 
 #[tokio::main]
@@ -89,7 +193,66 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::filter::LevelFilter::from_level(level))
         .init();
 
-    // Determine effective listen address (--port overrides --listen-addr)
+    // ═══════════════════════════════════════════════════════════════
+    // Environment Detection & Validation
+    // ═══════════════════════════════════════════════════════════════
+    let env_detector = LinuxEnvironmentDetector::new();
+    let environment = env_detector.detect();
+
+    info!(environment = %environment, "Detected deployment environment");
+
+    // Log any environment warnings
+    for warning in env_detector.environment_warnings() {
+        match warning.severity {
+            WarningSeverity::Info => info!("[{}] {}", warning.code, warning.message),
+            WarningSeverity::Warning => warn!("[{}] {}", warning.code, warning.message),
+            WarningSeverity::Error => error!("[{}] {}", warning.code, warning.message),
+        }
+    }
+
+    // Validate required features (fanotify always needed as fallback)
+    env_detector
+        .validate_for_feature(Feature::Fanotify)
+        .context("fanotify feature validation failed")?;
+    env_detector
+        .validate_for_feature(Feature::ProcAccess)
+        .context("/proc access validation failed")?;
+
+    // ═══════════════════════════════════════════════════════════════
+    // Capability Verification (fail fast if missing base caps)
+    // ═══════════════════════════════════════════════════════════════
+    let cap_checker = LinuxCapabilityChecker::new();
+    let missing_caps = cap_checker.check_required(JANUSD_REQUIRED_CAPS);
+
+    if !missing_caps.is_empty() {
+        let msg = missing_capabilities_message(&missing_caps, "janusd");
+        error!("{}", msg);
+        anyhow::bail!("Missing required capabilities - daemon cannot start");
+    }
+
+    info!("Base capabilities verified");
+
+    // ═══════════════════════════════════════════════════════════════
+    // Runtime Mode Selection (auto-detect with fallback)
+    // ═══════════════════════════════════════════════════════════════
+    let runtime_mode = detect_runtime_mode(&config, &cap_checker);
+
+    let mode_str = match runtime_mode {
+        RuntimeMode::Ebpf => {
+            info!("eBPF mode: LSM-based file access auditing with atomic process attribution");
+            info!("Permission control via LSM hooks (deny paths supported)");
+            "ebpf (LSM hooks)"
+        }
+        RuntimeMode::Traditional => {
+            info!("Traditional mode: fanotify-based file access auditing");
+            info!("Process info via /proc lookups (TOCTOU race possible for short-lived processes)");
+            "traditional (fanotify)"
+        }
+    };
+
+    // ═══════════════════════════════════════════════════════════════
+    // Daemon Startup
+    // ═══════════════════════════════════════════════════════════════
     let listen_addr = config.effective_addr();
 
     info!(
@@ -97,6 +260,7 @@ async fn main() -> Result<()> {
         node = %config.node_name,
         listen = %listen_addr,
         max_guards = config.max_guards,
+        mode = mode_str,
         "Starting janusd"
     );
 
@@ -107,32 +271,90 @@ async fn main() -> Result<()> {
         "Audit logger initialized"
     );
 
-    // Create service
-    let janusd_service = service::JanusdServiceImpl::new(
-        config.node_name.clone(),
-        config.max_guards,
-        audit_logger,
-    );
-
     // Create health reporter
     let (mut health_reporter, health_service) = health_reporter();
 
-    // Set service as serving
-    health_reporter
-        .set_serving::<proto::janusd_service_server::JanusdServiceServer<service::JanusdServiceImpl>>()
-        .await;
+    // Start appropriate service based on runtime mode
+    #[cfg(feature = "ebpf")]
+    if runtime_mode == RuntimeMode::Ebpf {
+        let janusd_service = Arc::new(service_ebpf::JanusdServiceImpl::new(
+            config.node_name.clone(),
+            config.max_guards,
+            audit_logger,
+        ));
 
-    // Also set the named service for compatibility with grpcurl
-    health_reporter.set_service_status(SERVICE_NAME, tonic_health::ServingStatus::Serving).await;
+        // Set services as serving
+        health_reporter
+            .set_serving::<proto::janusd_service_server::JanusdServiceServer<Arc<service_ebpf::JanusdServiceImpl>>>()
+            .await;
+        health_reporter.set_service_status(SERVICE_NAME_V1, tonic_health::ServingStatus::Serving).await;
+        health_reporter
+            .set_serving::<proto::v2::janusd_service_server::JanusdServiceServer<Arc<service_ebpf::JanusdServiceImpl>>>()
+            .await;
+        health_reporter.set_service_status(SERVICE_NAME_V2, tonic_health::ServingStatus::Serving).await;
 
-    // Start gRPC server
-    info!(addr = %listen_addr, "Starting gRPC server");
+        info!(addr = %listen_addr, "Starting gRPC server (v1 + v2)");
 
-    Server::builder()
-        .add_service(health_service)
-        .add_service(proto::janusd_service_server::JanusdServiceServer::new(janusd_service))
-        .serve(listen_addr)
-        .await?;
+        Server::builder()
+            .add_service(health_service)
+            .add_service(proto::janusd_service_server::JanusdServiceServer::from_arc(janusd_service.clone()))
+            .add_service(proto::v2::janusd_service_server::JanusdServiceServer::from_arc(janusd_service))
+            .serve(listen_addr)
+            .await?;
+    } else {
+        // Traditional mode (fanotify)
+        let janusd_service = Arc::new(service::JanusdServiceImpl::new(
+            config.node_name.clone(),
+            config.max_guards,
+            audit_logger,
+        ));
+
+        health_reporter
+            .set_serving::<proto::janusd_service_server::JanusdServiceServer<Arc<service::JanusdServiceImpl>>>()
+            .await;
+        health_reporter.set_service_status(SERVICE_NAME_V1, tonic_health::ServingStatus::Serving).await;
+        health_reporter
+            .set_serving::<proto::v2::janusd_service_server::JanusdServiceServer<Arc<service::JanusdServiceImpl>>>()
+            .await;
+        health_reporter.set_service_status(SERVICE_NAME_V2, tonic_health::ServingStatus::Serving).await;
+
+        info!(addr = %listen_addr, "Starting gRPC server (v1 + v2)");
+
+        Server::builder()
+            .add_service(health_service)
+            .add_service(proto::janusd_service_server::JanusdServiceServer::from_arc(janusd_service.clone()))
+            .add_service(proto::v2::janusd_service_server::JanusdServiceServer::from_arc(janusd_service))
+            .serve(listen_addr)
+            .await?;
+    }
+
+    #[cfg(not(feature = "ebpf"))]
+    {
+        // Traditional mode only (no eBPF support compiled in)
+        let janusd_service = Arc::new(service::JanusdServiceImpl::new(
+            config.node_name.clone(),
+            config.max_guards,
+            audit_logger,
+        ));
+
+        health_reporter
+            .set_serving::<proto::janusd_service_server::JanusdServiceServer<Arc<service::JanusdServiceImpl>>>()
+            .await;
+        health_reporter.set_service_status(SERVICE_NAME_V1, tonic_health::ServingStatus::Serving).await;
+        health_reporter
+            .set_serving::<proto::v2::janusd_service_server::JanusdServiceServer<Arc<service::JanusdServiceImpl>>>()
+            .await;
+        health_reporter.set_service_status(SERVICE_NAME_V2, tonic_health::ServingStatus::Serving).await;
+
+        info!(addr = %listen_addr, "Starting gRPC server (v1 + v2)");
+
+        Server::builder()
+            .add_service(health_service)
+            .add_service(proto::janusd_service_server::JanusdServiceServer::from_arc(janusd_service.clone()))
+            .add_service(proto::v2::janusd_service_server::JanusdServiceServer::from_arc(janusd_service))
+            .serve(listen_addr)
+            .await?;
+    }
 
     Ok(())
 }

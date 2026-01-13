@@ -34,10 +34,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	argusv1 "github.com/como-technologies/panoptes/operators/argus-operator/api/v1"
 	argusv1alpha1 "github.com/como-technologies/panoptes/operators/argus-operator/api/v1alpha1"
 	"github.com/como-technologies/panoptes/operators/argus-operator/internal/controller"
+	arguswebhook "github.com/como-technologies/panoptes/operators/argus-operator/internal/webhook"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -63,6 +65,7 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
+	var enableWebhook bool
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -81,6 +84,8 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+	flag.BoolVar(&enableWebhook, "enable-webhook", false,
+		"Enable the watcher-injector webhook. Requires TLS certificates (--webhook-cert-path).")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -104,22 +109,25 @@ func main() {
 		tlsOpts = append(tlsOpts, disableHTTP2)
 	}
 
-	// Initial webhook TLS options
-	webhookTLSOpts := tlsOpts
-	webhookServerOptions := webhook.Options{
-		TLSOpts: webhookTLSOpts,
+	// Initialize webhook server only if enabled
+	var webhookServer webhook.Server
+	if enableWebhook {
+		webhookTLSOpts := tlsOpts
+		webhookServerOptions := webhook.Options{
+			TLSOpts: webhookTLSOpts,
+		}
+
+		if len(webhookCertPath) > 0 {
+			setupLog.Info("Initializing webhook certificate watcher using provided certificates",
+				"webhook-cert-path", webhookCertPath, "webhook-cert-name", webhookCertName, "webhook-cert-key", webhookCertKey)
+
+			webhookServerOptions.CertDir = webhookCertPath
+			webhookServerOptions.CertName = webhookCertName
+			webhookServerOptions.KeyName = webhookCertKey
+		}
+
+		webhookServer = webhook.NewServer(webhookServerOptions)
 	}
-
-	if len(webhookCertPath) > 0 {
-		setupLog.Info("Initializing webhook certificate watcher using provided certificates",
-			"webhook-cert-path", webhookCertPath, "webhook-cert-name", webhookCertName, "webhook-cert-key", webhookCertKey)
-
-		webhookServerOptions.CertDir = webhookCertPath
-		webhookServerOptions.CertName = webhookCertName
-		webhookServerOptions.KeyName = webhookCertKey
-	}
-
-	webhookServer := webhook.NewServer(webhookServerOptions)
 
 	// Metrics endpoint is enabled in 'config/default/kustomization.yaml'. The Metrics options configure the server.
 	// More info:
@@ -187,6 +195,17 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "ArgusWatcher")
 		os.Exit(1)
 	}
+
+	// Register watcher-wait init container injector webhook (if enabled)
+	// This webhook injects an init container into pods matching ArgusWatcher selectors
+	// to ensure inotify watches are registered before the main container starts.
+	if enableWebhook {
+		watcherInjector := arguswebhook.NewWatcherInjector(mgr.GetClient())
+		watcherInjector.Decoder = admission.NewDecoder(mgr.GetScheme())
+		mgr.GetWebhookServer().Register("/mutate-pod", &admission.Webhook{Handler: watcherInjector})
+		setupLog.Info("registered watcher-injector webhook at /mutate-pod")
+	}
+
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

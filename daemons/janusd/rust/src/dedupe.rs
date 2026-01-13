@@ -25,7 +25,7 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::guard::AccessResponse;
+use crate::audit::AccessResponse;
 
 /// Default deduplication window (100ms per C implementation).
 pub const DEFAULT_DEDUPE_WINDOW: Duration = Duration::from_millis(100);
@@ -169,31 +169,6 @@ impl DedupeCache {
     }
 }
 
-/// Trait for types that can deduplicate events.
-pub trait EventDeduplicator: Send + Sync {
-    /// Check if an event should be processed or is a duplicate.
-    fn should_process(&mut self, path: &Path, pid: i32, response: AccessResponse) -> bool;
-
-    /// Record an event after processing.
-    fn record(&mut self, path: &Path, pid: i32, response: AccessResponse);
-
-    /// Clear expired entries.
-    fn clear_expired(&mut self);
-}
-
-impl EventDeduplicator for DedupeCache {
-    fn should_process(&mut self, path: &Path, pid: i32, response: AccessResponse) -> bool {
-        DedupeCache::should_process(self, path, pid, response)
-    }
-
-    fn record(&mut self, path: &Path, pid: i32, response: AccessResponse) {
-        DedupeCache::record(self, path.to_path_buf(), pid, response)
-    }
-
-    fn clear_expired(&mut self) {
-        DedupeCache::clear_expired(self)
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -383,21 +358,6 @@ mod tests {
 
         // Second should still be a duplicate
         assert!(!cache.should_process(Path::new("/path/new"), 1234, AccessResponse::Allow));
-    }
-
-    #[test]
-    fn test_dedupe_event_deduplicator_trait() {
-        let mut cache = DedupeCache::new(64, Duration::from_millis(100));
-        let dedup: &mut dyn EventDeduplicator = &mut cache;
-
-        let path = Path::new("/etc/passwd");
-
-        // First event
-        assert!(dedup.should_process(path, 1234, AccessResponse::Allow));
-        dedup.record(path, 1234, AccessResponse::Allow);
-
-        // Same event should be duplicate
-        assert!(!dedup.should_process(path, 1234, AccessResponse::Allow));
     }
 
     #[test]

@@ -1,0 +1,14 @@
+# eBPF compilation configuration
+# Requires: rustup target add bpfel-unknown-none
+#           cargo install bpf-linker
+
+[build]
+target-dir = "../target/bpf"
+target = "bpfel-unknown-none"
+
+[unstable]
+build-std = ["core"]
+
+# Use bpf-linker for linking
+[target.bpfel-unknown-none]
+linker = "bpf-linker"

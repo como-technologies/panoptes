@@ -1,0 +1,62 @@
+# Copyright 2026 Como Technologies, LTD
+# Licensed under the Apache License, Version 2.0
+#
+# MutatingWebhookConfiguration for JanusGuard init container injection
+#
+# This webhook injects a guard-wait init container into pods that match
+# JanusGuard selectors. The init container waits for fanotify marks to be
+# registered before allowing the main container to start.
+
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: janus-guard-injector
+  labels:
+    app.kubernetes.io/name: janus-operator
+    app.kubernetes.io/component: webhook
+webhooks:
+  - name: guard-injector.janus.panoptes.io
+    clientConfig:
+      service:
+        name: janus-operator-webhook-service
+        namespace: panoptes-system
+        path: /mutate-pod
+        port: 443
+    rules:
+      - operations: ["CREATE"]
+        apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["pods"]
+    # Only apply to namespaces with this label
+    namespaceSelector:
+      matchLabels:
+        janus.panoptes.io/guard-injection: enabled
+    # Fail closed - if webhook is unavailable, reject pod creation
+    # This ensures pods don't start unprotected
+    failurePolicy: Fail
+    # Only mutate pods, don't block on webhook errors for other resources
+    matchPolicy: Equivalent
+    sideEffects: None
+    admissionReviewVersions: ["v1", "v1beta1"]
+    # Timeout for webhook call
+    timeoutSeconds: 10
+    # Reinvocation policy - don't reinvoke if other webhooks modify the pod
+    reinvocationPolicy: Never
+---
+# Service for the webhook
+apiVersion: v1
+kind: Service
+metadata:
+  name: janus-operator-webhook-service
+  namespace: panoptes-system
+  labels:
+    app.kubernetes.io/name: janus-operator
+    app.kubernetes.io/component: webhook
+spec:
+  ports:
+    - port: 443
+      targetPort: 9443
+      protocol: TCP
+      name: https
+  selector:
+    app.kubernetes.io/name: janus-operator

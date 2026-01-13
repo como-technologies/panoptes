@@ -317,10 +317,23 @@ kubectl auth can-i list pods --as=system:serviceaccount:panoptes-system:panoptes
 
 ## Next Steps
 
-1. **Add more watchers**: See `operators/argus-operator/config/samples/`
-2. **Configure alerting**: Enable PrometheusRules in Helm values
-3. **Deploy to Spectro Cloud**: Use `packs/panoptes/` for Palette deployment
-4. **Read the docs**: `docs/FUTURE_STATE.md` for roadmap
+1. **Enable webhook injection**: See [WEBHOOK_DEPLOYMENT.md](WEBHOOK_DEPLOYMENT.md) to ensure protection is active before apps start
+2. **Add more watchers**: See `operators/argus-operator/config/samples/`
+3. **Configure alerting**: Enable PrometheusRules in Helm values
+4. **Deploy to Spectro Cloud**: Use `packs/panoptes/` for Palette deployment
+5. **Read the docs**: `docs/FUTURE_STATE.md` for roadmap
+
+---
+
+## Optional: Enable Webhook Injection
+
+By default, the local deployment runs without webhooks for simplicity. In production, you should enable webhooks to ensure file monitoring is active **before** your application containers start.
+
+See [WEBHOOK_DEPLOYMENT.md](WEBHOOK_DEPLOYMENT.md) for complete instructions on:
+- Installing cert-manager for TLS certificates
+- Configuring the operators to enable webhooks
+- Deploying MutatingWebhookConfigurations
+- Enabling injection on namespaces
 
 ---
 

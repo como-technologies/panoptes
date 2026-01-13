@@ -1,0 +1,33 @@
+[package]
+name = "guard-wait"
+version = "0.1.0"
+edition = "2021"
+authors = ["Como Technologies <engineering@como.tech>"]
+description = "Init container that waits for JanusGuard readiness before allowing pod startup"
+license = "Apache-2.0"
+repository = "https://github.com/como-technologies/panoptes"
+
+[dependencies]
+# gRPC
+tonic = "0.12"
+prost = "0.13"
+prost-types = "0.13"
+
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[build-dependencies]
+tonic-build = "0.12"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

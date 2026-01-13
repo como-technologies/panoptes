@@ -135,6 +135,11 @@ message CreateGuardResponse {
 
   // enforcing indicates if the guard is actively enforcing (vs audit mode).
   bool enforcing = 7;
+
+  // marks_registered is the number of fanotify marks successfully registered.
+  // A value > 0 indicates the guard is ready and protecting containers.
+  // This is only populated when paused=false.
+  int32 marks_registered = 8;
 }
 
 // DestroyGuardRequest identifies a guard to remove.
@@ -195,6 +200,17 @@ message GuardState {
 
   // guarded_paths is the number of paths being guarded.
   int32 guarded_paths = 12;
+
+  // marks_registered indicates whether fanotify marks have been registered.
+  // When true, the guard is actively protecting containers.
+  bool marks_registered = 13;
+
+  // ready_at is the timestamp when the guard became ready (marks registered).
+  // Only set when marks_registered is true.
+  google.protobuf.Timestamp ready_at = 14;
+
+  // mount_count is the number of container mounts with active fanotify marks.
+  int32 mount_count = 15;
 }
 
 // StreamAccessEventsRequest filters the access event stream.
