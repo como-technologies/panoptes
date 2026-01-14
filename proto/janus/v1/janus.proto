@@ -5,10 +5,10 @@ syntax = "proto3";
 
 package janus.v1;
 
-option go_package = "github.com/como-technologies/panoptes/operators/janus-operator/pkg/proto/janus/v1;janusv1";
-
-import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/como-technologies/panoptes/operators/janus-operator/pkg/proto/janus/v1;janusv1";
 
 // JanusdService provides file access auditing and control capabilities
 // using fanotify to monitor and control file access in containers.
@@ -97,20 +97,20 @@ message GuardSubject {
 // FanotifyEvent represents supported fanotify event types.
 enum FanotifyEvent {
   FANOTIFY_EVENT_UNSPECIFIED = 0;
-  FANOTIFY_EVENT_ACCESS = 1;      // File was accessed
-  FANOTIFY_EVENT_OPEN = 2;        // File was opened
-  FANOTIFY_EVENT_OPEN_EXEC = 3;   // File was opened for execution
+  FANOTIFY_EVENT_ACCESS = 1; // File was accessed
+  FANOTIFY_EVENT_OPEN = 2; // File was opened
+  FANOTIFY_EVENT_OPEN_EXEC = 3; // File was opened for execution
   FANOTIFY_EVENT_CLOSE_WRITE = 4; // File opened for writing was closed
-  FANOTIFY_EVENT_CLOSE = 5;       // File was closed
+  FANOTIFY_EVENT_CLOSE = 5; // File was closed
   FANOTIFY_EVENT_ALL = 99;
 }
 
 // AccessResponse defines the action to take for file access.
 enum AccessResponse {
   ACCESS_RESPONSE_UNSPECIFIED = 0;
-  ACCESS_RESPONSE_ALLOW = 1;      // Allow the access
-  ACCESS_RESPONSE_DENY = 2;       // Deny the access
-  ACCESS_RESPONSE_AUDIT = 3;      // Allow but audit
+  ACCESS_RESPONSE_ALLOW = 1; // Allow the access
+  ACCESS_RESPONSE_DENY = 2; // Deny the access
+  ACCESS_RESPONSE_AUDIT = 3; // Allow but audit
 }
 
 // CreateGuardResponse contains the result of a guard creation.

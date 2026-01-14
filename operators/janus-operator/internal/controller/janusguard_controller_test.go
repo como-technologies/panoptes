@@ -51,7 +51,19 @@ var _ = Describe("JanusGuard Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: janusv1alpha1.JanusGuardSpec{
+						Selector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"app": "test",
+							},
+						},
+						Subjects: []janusv1alpha1.JanusGuardSubject{
+							{
+								Events: []janusv1alpha1.JanusEvent{janusv1alpha1.EventAccess},
+								Allow:  []string{"/tmp"},
+							},
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}

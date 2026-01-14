@@ -531,7 +531,7 @@ Environment Variables:
 
 WSL2 Notes:
     - Docker Desktop must be running with WSL2 integration enabled
-    - Uses pinned K8s 1.30.0 for stability
+    - Uses K8s 1.32.0 with SystemdCgroup fix for cgroup v2
     - Extended timeouts for slower WSL2 performance
     - Access UI at http://localhost:3000 from Windows browser
     - Default IMAGE_VARIANT=slim (smaller images, faster builds)

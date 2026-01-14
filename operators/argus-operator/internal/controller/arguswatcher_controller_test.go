@@ -51,7 +51,19 @@ var _ = Describe("ArgusWatcher Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: argusv1alpha1.ArgusWatcherSpec{
+						Selector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"app": "test",
+							},
+						},
+						Subjects: []argusv1alpha1.ArgusWatcherSubject{
+							{
+								Paths:  []string{"/etc"},
+								Events: []argusv1alpha1.ArgusEvent{argusv1alpha1.EventModify},
+							},
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}

@@ -5,10 +5,10 @@ syntax = "proto3";
 
 package argus.v2;
 
-option go_package = "github.com/como-technologies/panoptes/gen/go/argus/v2;argusv2";
-
-import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/como-technologies/panoptes/gen/go/argus/v2;argusv2";
 
 // ArgusdService provides file integrity monitoring capabilities
 // using inotify to watch for filesystem events in containers.
@@ -70,8 +70,8 @@ message ProcessInfo {
 // UpdateAction defines the action to take when updating a watch. (NEW in v2)
 enum UpdateAction {
   UPDATE_ACTION_UNSPECIFIED = 0;
-  UPDATE_ACTION_PAUSE = 1;   // Pause the watch (stop monitoring but keep config)
-  UPDATE_ACTION_RESUME = 2;  // Resume a paused watch
+  UPDATE_ACTION_PAUSE = 1; // Pause the watch (stop monitoring but keep config)
+  UPDATE_ACTION_RESUME = 2; // Resume a paused watch
 }
 
 // UpdateWatchRequest requests a pause or resume of an existing watch. (NEW in v2)

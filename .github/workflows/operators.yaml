@@ -47,8 +47,8 @@ jobs:
         run: make generate
         working-directory: proto
 
-      - name: Download dependencies
-        run: go mod download
+      - name: Tidy dependencies
+        run: go mod tidy
 
       - name: Run tests
         run: make test
@@ -84,8 +84,8 @@ jobs:
         run: make generate
         working-directory: proto
 
-      - name: Download dependencies
-        run: go mod download
+      - name: Tidy dependencies
+        run: go mod tidy
 
       - name: Run tests
         run: make test
