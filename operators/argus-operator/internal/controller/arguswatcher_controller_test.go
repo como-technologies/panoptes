@@ -27,7 +27,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	argusv1alpha1 "github.com/como-technologies/panoptes/operators/argus-operator/api/v1alpha1"
+	argusv2 "github.com/como-technologies/panoptes/operators/argus-operator/api/v2"
 )
 
 var _ = Describe("ArgusWatcher Controller", func() {
@@ -40,27 +40,27 @@ var _ = Describe("ArgusWatcher Controller", func() {
 			Name:      resourceName,
 			Namespace: "default", // TODO(user):Modify as needed
 		}
-		arguswatcher := &argusv1alpha1.ArgusWatcher{}
+		arguswatcher := &argusv2.ArgusWatcher{}
 
 		BeforeEach(func() {
 			By("creating the custom resource for the Kind ArgusWatcher")
 			err := k8sClient.Get(ctx, typeNamespacedName, arguswatcher)
 			if err != nil && errors.IsNotFound(err) {
-				resource := &argusv1alpha1.ArgusWatcher{
+				resource := &argusv2.ArgusWatcher{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					Spec: argusv1alpha1.ArgusWatcherSpec{
+					Spec: argusv2.ArgusWatcherSpec{
 						Selector: metav1.LabelSelector{
 							MatchLabels: map[string]string{
 								"app": "test",
 							},
 						},
-						Subjects: []argusv1alpha1.ArgusWatcherSubject{
+						Subjects: []argusv2.ArgusWatcherSubject{
 							{
 								Paths:  []string{"/etc"},
-								Events: []argusv1alpha1.ArgusEvent{argusv1alpha1.EventModify},
+								Events: []argusv2.ArgusEvent{argusv2.EventModify},
 							},
 						},
 					},
@@ -71,7 +71,7 @@ var _ = Describe("ArgusWatcher Controller", func() {
 
 		AfterEach(func() {
 			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &argusv1alpha1.ArgusWatcher{}
+			resource := &argusv2.ArgusWatcher{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			Expect(err).NotTo(HaveOccurred())
 

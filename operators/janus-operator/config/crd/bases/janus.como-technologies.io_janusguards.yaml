@@ -40,12 +40,17 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    deprecated: true
+    deprecationWarning: v1 is deprecated, migrate to v2
     name: v1
     schema:
       openAPIV3Schema:
         description: |-
           JanusGuard is the Schema for the janusguards API.
           It defines file access auditing and control rules for pods matching a selector.
+
+          Deprecated: v1 is the legacy API version. Use v2 for new deployments.
+          v1 is maintained for backward compatibility during migration only.
         properties:
           apiVersion:
             description: |-
@@ -380,7 +385,7 @@ spec:
         - spec
         type: object
     served: true
-    storage: true
+    storage: false
     subresources:
       status: {}
   - additionalPrinterColumns:
@@ -393,18 +398,27 @@ spec:
       name: Guarded
       type: integer
     - description: Total denied access attempts
-      jsonPath: .status.deniedEvents
+      jsonPath: .status.totalDeniedEvents
       name: Denied
       type: integer
+    - description: All marks registered
+      jsonPath: .status.marksRegistered
+      name: Ready
+      type: boolean
+    - description: Whether denials are enforced
+      jsonPath: .spec.enforcing
+      name: Enforcing
+      type: boolean
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
-    name: v1alpha1
+    name: v2
     schema:
       openAPIV3Schema:
         description: |-
-          JanusGuard is the Schema for the janusguards API
-          It defines file access auditing and control rules for pods matching a selector
+          JanusGuard is the Schema for the janusguards API.
+          It defines file access auditing and control rules for pods matching a selector.
+          This is the v2 API - the current recommended version for new deployments.
         properties:
           apiVersion:
             description: |-
@@ -427,19 +441,41 @@ spec:
             description: spec defines the desired state of JanusGuard
             properties:
               containerRuntime:
+                allOf:
+                - enum:
+                  - containerd
+                  - cri-o
+                  - auto
+                - enum:
+                  - containerd
+                  - cri-o
+                  - auto
                 default: auto
-                description: containerRuntime specifies which container runtime to
-                  use for PID detection
-                enum:
-                - containerd
-                - cri-o
-                - auto
+                description: |-
+                  containerRuntime specifies which container runtime to use for PID detection.
+                  Use "auto" to automatically detect the runtime.
                 type: string
+              enforcing:
+                default: true
+                description: |-
+                  enforcing indicates whether access denials are enforced.
+                  When false, denials are logged but access is allowed (dry-run mode).
+                type: boolean
               logFormat:
-                description: logFormat is the custom log format template
+                description: |-
+                  logFormat is the custom log format template for events.
+                  Supports Go template syntax with access to event fields.
+                maxLength: 1024
                 type: string
+              paused:
+                description: |-
+                  paused indicates whether guarding is paused for this resource.
+                  When true, no access control is enforced but existing guards are maintained.
+                type: boolean
               selector:
-                description: selector is the label selector for pods to guard
+                description: |-
+                  selector is the label selector for pods to guard.
+                  Only pods matching this selector will have access control applied.
                 properties:
                   matchExpressions:
                     description: matchExpressions is a list of label selector requirements.
@@ -485,22 +521,29 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
               subjects:
-                description: subjects is the list of access control targets
+                description: |-
+                  subjects is the list of access control rules to apply.
+                  Each subject defines allow/deny rules for file access.
                 items:
-                  description: JanusGuardSubject defines an access control target
-                    with allow/deny rules
+                  description: JanusGuardSubject defines file access control rules
                   properties:
                     allow:
-                      description: allow is the list of paths to allow access to
+                      description: |-
+                        allow is the list of paths to explicitly allow access to.
+                        Paths support glob patterns (e.g., "/app/**", "/etc/*.conf").
                       items:
                         type: string
+                      maxItems: 100
                       type: array
                     audit:
-                      description: audit enables kernel audit log integration
+                      description: |-
+                        audit enables kernel audit log integration.
+                        When true, events are also written to the kernel audit log.
                       type: boolean
                     autoAllowOwner:
-                      description: autoAllowOwner automatically allows access for
-                        the process owner
+                      description: |-
+                        autoAllowOwner automatically allows access for the file owner.
+                        Useful for applications that need to access their own files.
                       type: boolean
                     defaultResponse:
                       allOf:
@@ -513,16 +556,21 @@ spec:
                         - deny
                         - audit
                       default: audit
-                      description: defaultResponse is the default action when no rule
-                        matches
+                      description: defaultResponse is the action when no allow/deny
+                        rule matches.
                       type: string
                     deny:
-                      description: deny is the list of paths to deny access to
+                      description: |-
+                        deny is the list of paths to explicitly deny access to.
+                        Deny rules take precedence over allow rules.
                       items:
                         type: string
+                      maxItems: 100
                       type: array
                     events:
-                      description: events is the list of fanotify events to audit
+                      description: |-
+                        events is the list of fanotify event types to monitor.
+                        Use "all" to monitor all event types.
                       items:
                         description: JanusEvent represents a fanotify event type for
                           file access auditing
@@ -530,21 +578,26 @@ spec:
                         - access
                         - open
                         - execute
+                        - close
                         - all
                         type: string
                       minItems: 1
                       type: array
                     onlyDir:
-                      description: onlyDir restricts auditing to directories only
+                      description: onlyDir restricts monitoring to directories only.
                       type: boolean
                     tags:
                       additionalProperties:
                         type: string
-                      description: tags are custom key-value metadata for the guard
+                      description: |-
+                        tags are custom key-value metadata attached to events from this subject.
+                        Useful for categorization, compliance tracking, or alert routing.
+                      maxProperties: 20
                       type: object
                   required:
                   - events
                   type: object
+                maxItems: 20
                 minItems: 1
                 type: array
             required:
@@ -555,8 +608,9 @@ spec:
             description: status defines the observed state of JanusGuard
             properties:
               conditions:
-                description: conditions represent the current state of the JanusGuard
-                  resource
+                description: |-
+                  conditions represent the current state of the JanusGuard resource.
+                  Standard condition types: Available, Progressing, Degraded
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -615,27 +669,116 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              deniedEvents:
-                description: deniedEvents is the total count of denied access attempts
-                format: int64
-                type: integer
               guardedPods:
-                description: guardedPods is the number of pods currently being guarded
+                description: |-
+                  guardedPods is the number of pods currently being guarded.
+                  This should eventually equal observablePods when fully reconciled.
                 format: int32
                 type: integer
+              lastReconcileTime:
+                description: lastReconcileTime is when the controller last reconciled
+                  this resource.
+                format: date-time
+                type: string
+              marksRegistered:
+                description: marksRegistered indicates all fanotify marks are registered.
+                type: boolean
               observablePods:
-                description: observablePods is the number of pods matching the selector
+                description: |-
+                  observablePods is the number of pods matching the selector.
+                  This is the total number of pods that could potentially be guarded.
                 format: int32
                 type: integer
               observedGeneration:
-                description: observedGeneration is the most recent generation observed
+                description: |-
+                  observedGeneration is the most recent generation observed by the controller.
+                  Used to determine if the status is up-to-date with the spec.
                 format: int64
+                type: integer
+              podStatuses:
+                description: podStatuses contains detailed status for each guarded
+                  pod.
+                items:
+                  description: GuardedPodStatus represents the guard status for a
+                    single pod
+                  properties:
+                    allowedCount:
+                      description: allowedCount is the number of allowed access events
+                        for this pod
+                      format: int64
+                      type: integer
+                    deniedCount:
+                      description: deniedCount is the number of denied access attempts
+                        for this pod
+                      format: int64
+                      type: integer
+                    lastDenialTime:
+                      description: lastDenialTime is when the last access denial occurred
+                      format: date-time
+                      type: string
+                    marksRegistered:
+                      description: marksRegistered indicates fanotify marks are active
+                        for this pod.
+                      type: boolean
+                    mountCount:
+                      description: mountCount is the number of container mounts with
+                        active marks.
+                      format: int32
+                      type: integer
+                    name:
+                      description: name is the name of the pod being guarded
+                      type: string
+                    namespace:
+                      description: namespace is the namespace of the pod
+                      type: string
+                    nodeName:
+                      description: nodeName is the node where the pod is running
+                      type: string
+                    readyAt:
+                      description: readyAt is when guards became ready for this pod.
+                      format: date-time
+                      type: string
+                  required:
+                  - allowedCount
+                  - deniedCount
+                  - name
+                  - namespace
+                  - nodeName
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              readyAt:
+                description: readyAt is when the guard became fully ready (all marks
+                  registered).
+                format: date-time
+                type: string
+              totalAllowedEvents:
+                description: totalAllowedEvents is the total count of allowed access
+                  events since creation.
+                format: int64
+                type: integer
+              totalAuditedEvents:
+                description: totalAuditedEvents is the total count of audit-only events
+                  since creation.
+                format: int64
+                type: integer
+              totalDeniedEvents:
+                description: totalDeniedEvents is the total count of denied access
+                  attempts since creation.
+                format: int64
+                type: integer
+              totalMountCount:
+                description: totalMountCount is the total number of container mounts
+                  being guarded.
+                format: int32
                 type: integer
             type: object
         required:
         - spec
         type: object
     served: true
-    storage: false
+    storage: true
     subresources:
       status: {}

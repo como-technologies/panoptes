@@ -14,10 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package v1alpha1 contains API Schema definitions for the argus v1alpha1 API group.
+// Package v2 contains API Schema definitions for the janus v2 API group.
+// This is the current recommended version for new deployments.
+// v1 is maintained for backward compatibility during migration only.
 // +kubebuilder:object:generate=true
-// +groupName=argus.como-technologies.io
-package v1alpha1
+// +groupName=janus.como-technologies.io
+package v2
 
 import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -26,7 +28,7 @@ import (
 
 var (
 	// GroupVersion is group version used to register these objects.
-	GroupVersion = schema.GroupVersion{Group: "argus.como-technologies.io", Version: "v1alpha1"}
+	GroupVersion = schema.GroupVersion{Group: "janus.como-technologies.io", Version: "v2"}
 
 	// SchemeBuilder is used to add go types to the GroupVersionKind scheme.
 	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1
+package v2
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -153,6 +153,18 @@ type GuardedPodStatus struct {
 	// allowedCount is the number of allowed access events for this pod
 	AllowedCount int64 `json:"allowedCount"`
 
+	// marksRegistered indicates fanotify marks are active for this pod.
+	// +optional
+	MarksRegistered bool `json:"marksRegistered,omitempty"`
+
+	// readyAt is when guards became ready for this pod.
+	// +optional
+	ReadyAt *metav1.Time `json:"readyAt,omitempty"`
+
+	// mountCount is the number of container mounts with active marks.
+	// +optional
+	MountCount int32 `json:"mountCount,omitempty"`
+
 	// lastDenialTime is when the last access denial occurred
 	// +optional
 	LastDenialTime *metav1.Time `json:"lastDenialTime,omitempty"`
@@ -174,6 +186,18 @@ type JanusGuardStatus struct {
 	// This should eventually equal observablePods when fully reconciled.
 	// +optional
 	GuardedPods int32 `json:"guardedPods"`
+
+	// marksRegistered indicates all fanotify marks are registered.
+	// +optional
+	MarksRegistered bool `json:"marksRegistered,omitempty"`
+
+	// readyAt is when the guard became fully ready (all marks registered).
+	// +optional
+	ReadyAt *metav1.Time `json:"readyAt,omitempty"`
+
+	// totalMountCount is the total number of container mounts being guarded.
+	// +optional
+	TotalMountCount int32 `json:"totalMountCount,omitempty"`
 
 	// totalDeniedEvents is the total count of denied access attempts since creation.
 	// +optional
@@ -207,19 +231,18 @@ type JanusGuardStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:deprecatedversion:warning="v1 is deprecated, migrate to v2"
+// +kubebuilder:storageversion
 // +kubebuilder:resource:shortName=jg,categories=all;janus;security
 // +kubebuilder:printcolumn:name="Observable",type=integer,JSONPath=`.status.observablePods`,description="Number of pods matching selector"
 // +kubebuilder:printcolumn:name="Guarded",type=integer,JSONPath=`.status.guardedPods`,description="Number of pods being guarded"
 // +kubebuilder:printcolumn:name="Denied",type=integer,JSONPath=`.status.totalDeniedEvents`,description="Total denied access attempts"
+// +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.marksRegistered`,description="All marks registered"
 // +kubebuilder:printcolumn:name="Enforcing",type=boolean,JSONPath=`.spec.enforcing`,description="Whether denials are enforced"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // JanusGuard is the Schema for the janusguards API.
 // It defines file access auditing and control rules for pods matching a selector.
-//
-// Deprecated: v1 is the legacy API version. Use v2 for new deployments.
-// v1 is maintained for backward compatibility during migration only.
+// This is the v2 API - the current recommended version for new deployments.
 type JanusGuard struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -232,6 +255,9 @@ type JanusGuard struct {
 	// +optional
 	Status JanusGuardStatus `json:"status,omitempty"`
 }
+
+// Hub marks this type as the conversion hub.
+func (*JanusGuard) Hub() {}
 
 // +kubebuilder:object:root=true
 

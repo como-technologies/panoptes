@@ -1,7 +1,6 @@
-# DEPRECATED: v1 API is deprecated, use v2 for new deployments
-# This sample is maintained for backward compatibility during migration only.
-# See janus_v2_janusguard.yaml for the recommended v2 API version.
-apiVersion: janus.como-technologies.io/v1
+# Example JanusGuard for file access control and auditing
+# This is the recommended v2 API version for new deployments
+apiVersion: janus.como-technologies.io/v2
 kind: JanusGuard
 metadata:
   name: sensitive-data-guard

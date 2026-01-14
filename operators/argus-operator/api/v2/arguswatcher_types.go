@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1
+package v2
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -146,6 +146,14 @@ type WatchedPodStatus struct {
 	// watchDescriptors is the number of inotify watch descriptors for this pod
 	WatchDescriptors int32 `json:"watchDescriptors"`
 
+	// watchesReady indicates watches are active for this pod.
+	// +optional
+	WatchesReady bool `json:"watchesReady,omitempty"`
+
+	// readyAt is when watches became ready for this pod.
+	// +optional
+	ReadyAt *metav1.Time `json:"readyAt,omitempty"`
+
 	// lastEventTime is when the last event was received from this pod
 	// +optional
 	LastEventTime *metav1.Time `json:"lastEventTime,omitempty"`
@@ -173,6 +181,14 @@ type ArgusWatcherStatus struct {
 	// +optional
 	TotalWatchDescriptors int32 `json:"totalWatchDescriptors,omitempty"`
 
+	// watchesReady indicates all inotify watches are registered and active.
+	// +optional
+	WatchesReady bool `json:"watchesReady,omitempty"`
+
+	// readyAt is when the watcher became fully ready (all watches registered).
+	// +optional
+	ReadyAt *metav1.Time `json:"readyAt,omitempty"`
+
 	// eventsDetected is the total count of file events detected since creation.
 	// +optional
 	EventsDetected int64 `json:"eventsDetected,omitempty"`
@@ -197,19 +213,18 @@ type ArgusWatcherStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:deprecatedversion:warning="v1 is deprecated, migrate to v2"
+// +kubebuilder:storageversion
 // +kubebuilder:resource:shortName=aw,categories=all;argus;security
 // +kubebuilder:printcolumn:name="Observable",type=integer,JSONPath=`.status.observablePods`,description="Number of pods matching selector"
 // +kubebuilder:printcolumn:name="Watched",type=integer,JSONPath=`.status.watchedPods`,description="Number of pods being watched"
 // +kubebuilder:printcolumn:name="Events",type=integer,JSONPath=`.status.eventsDetected`,description="Total events detected"
+// +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.watchesReady`,description="All watches registered"
 // +kubebuilder:printcolumn:name="Paused",type=boolean,JSONPath=`.spec.paused`,description="Whether watching is paused"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // ArgusWatcher is the Schema for the arguswatchers API.
 // It defines file integrity monitoring rules for pods matching a selector.
-//
-// Deprecated: v1 is the legacy API version. Use v2 for new deployments.
-// v1 is maintained for backward compatibility during migration only.
+// This is the v2 API - the current recommended version for new deployments.
 type ArgusWatcher struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -222,6 +237,9 @@ type ArgusWatcher struct {
 	// +optional
 	Status ArgusWatcherStatus `json:"status,omitempty"`
 }
+
+// Hub marks this type as the conversion hub.
+func (*ArgusWatcher) Hub() {}
 
 // +kubebuilder:object:root=true
 

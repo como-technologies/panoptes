@@ -37,7 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	argusv1 "github.com/como-technologies/panoptes/operators/argus-operator/api/v1"
-	argusv1alpha1 "github.com/como-technologies/panoptes/operators/argus-operator/api/v1alpha1"
+	argusv2 "github.com/como-technologies/panoptes/operators/argus-operator/api/v2"
 	"github.com/como-technologies/panoptes/operators/argus-operator/internal/controller"
 	arguswebhook "github.com/como-technologies/panoptes/operators/argus-operator/internal/webhook"
 	// +kubebuilder:scaffold:imports
@@ -51,8 +51,8 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	utilruntime.Must(argusv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(argusv1.AddToScheme(scheme))
+	utilruntime.Must(argusv2.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 

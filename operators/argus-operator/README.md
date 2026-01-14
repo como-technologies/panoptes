@@ -3,7 +3,7 @@
 **Kubernetes-native File Integrity Monitoring using Linux inotify**
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](../../LICENSE)
-[![Go Version](https://img.shields.io/badge/Go-1.22+-blue.svg)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/Go-1.24+-blue.svg)](https://golang.org)
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-1.28%2B-blue.svg)](https://kubernetes.io)
 
 ## Overview
@@ -73,22 +73,22 @@ protection is in place.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Pod Startup Flow (Hardened)                   │
+│                    Pod Startup Flow (Hardened)                  │
 ├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  1. Pod CREATE request → Admission Webhook                       │
-│  2. Webhook injects watcher-wait init container                  │
-│  3. Pod scheduled, init container starts                         │
-│  4. watcher-wait polls GetWatchState RPC                         │
-│  5. Argusd creates watch SYNCHRONOUSLY (watches initialized)     │
-│  6. GetWatchState returns watches_ready=true                     │
+│                                                                 │
+│  1. Pod CREATE request → Admission Webhook                      │
+│  2. Webhook injects watcher-wait init container                 │
+│  3. Pod scheduled, init container starts                        │
+│  4. watcher-wait polls GetWatchState RPC                        │
+│  5. Argusd creates watch SYNCHRONOUSLY (watches initialized)    │
+│  6. GetWatchState returns watches_ready=true                    │
 │  7. watcher-wait exits 0 → main containers start (PROTECTED)    │
-│                                                                  │
-│  Defense layers:                                                 │
+│                                                                 │
+│  Defense layers:                                                │
 │  ✓ Synchronous watch init (watches registered before response)  │
 │  ✓ Readiness fields in proto (watches_ready, ready_at)          │
 │  ✓ Webhook + init container (blocks pod until ready)            │
-│                                                                  │
+│                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -101,7 +101,7 @@ protection is in place.
 
 2. **Create an ArgusWatcher** that selects pods in that namespace:
    ```yaml
-   apiVersion: argus.como-technologies.io/v1
+   apiVersion: argus.como-technologies.io/v2
    kind: ArgusWatcher
    metadata:
      name: my-watcher
@@ -168,9 +168,9 @@ file watches.
 - `Dockerfile` - Multi-stage build
 
 **Custom implementation:**
-- `api/v1/arguswatcher_types.go` - v1 CRD types with full spec/status
-- `api/v1alpha1/arguswatcher_types.go` - Legacy v1alpha1 types
-- `api/v1alpha1/arguswatcher_conversion.go` - Hub-spoke conversion
+- `api/v2/arguswatcher_types.go` - v2 CRD types (current, storage version)
+- `api/v1/arguswatcher_types.go` - v1 CRD types (deprecated)
+- `api/v1/arguswatcher_conversion.go` - v1 ↔ v2 conversion
 - `internal/controller/arguswatcher_controller.go` - Reconciliation logic
 - `internal/grpc/client.go` - gRPC client for argusd communication
 
@@ -183,10 +183,17 @@ See [daemons/argusd/README.md](../../daemons/argusd/README.md) for daemon docume
 
 ## CRD Reference
 
-### ArgusWatcher v1
+### API Versions
+
+| Version | Status | Description |
+|---------|--------|-------------|
+| **v2** | Current (recommended) | Storage version, use for new deployments |
+| **v1** | Deprecated | Legacy version, kept for migration only |
+
+### ArgusWatcher v2 (Recommended)
 
 ```yaml
-apiVersion: argus.como-technologies.io/v1
+apiVersion: argus.como-technologies.io/v2
 kind: ArgusWatcher
 metadata:
   name: example-watcher
@@ -282,20 +289,22 @@ status:
       message: "All pods watched successfully"
 ```
 
-### v1alpha1 to v1 Migration
+### v1 to v2 Migration
 
-The v1 API includes these improvements over v1alpha1:
+The v2 API is the current recommended version. v1 is deprecated and kept only for migration.
 
-| Feature | v1alpha1 | v1 |
-|---------|----------|-----|
-| Pausing | Not supported | `spec.paused` |
-| Per-pod status | Not supported | `status.podStatuses[]` |
-| Event counters | Not supported | `status.eventsDetected` |
-| Container runtime | `containerEngine` (docker/rkt) | `containerRuntime` (containerd/cri-o/auto) |
-| Validation | Basic | MaxItems, MaxLength, enums |
-| Conditions | Not supported | Standard Kubernetes conditions |
+| Feature | v1 (deprecated) | v2 (current) |
+|---------|-----------------|--------------|
+| Status | Deprecated | Recommended, storage version |
+| Conversion | Spoke (converts to v2) | Hub (storage) |
+| Use case | Upgrading from | New deployments |
 
-Conversion webhooks automatically handle v1alpha1 resources.
+Conversion webhooks automatically handle v1 ↔ v2 conversion. Existing v1 resources will continue to work but should be migrated to v2.
+
+**Migration steps:**
+1. Update your manifests to use `apiVersion: argus.como-technologies.io/v2`
+2. Apply the updated manifests
+3. Conversion webhooks handle the rest automatically
 
 ## Installation
 
@@ -303,7 +312,7 @@ Conversion webhooks automatically handle v1alpha1 resources.
 
 - Kubernetes 1.28+
 - containerd or CRI-O container runtime
-- Go 1.22+ (for building)
+- Go 1.24+ (for building)
 - Docker 17.03+ (for building images)
 
 ### Deploy with kubectl
@@ -405,7 +414,7 @@ The operator requires these permissions:
 ### Monitor Critical System Files
 
 ```yaml
-apiVersion: argus.como-technologies.io/v1
+apiVersion: argus.como-technologies.io/v2
 kind: ArgusWatcher
 metadata:
   name: system-files
@@ -429,7 +438,7 @@ spec:
 ### Monitor Application Configs
 
 ```yaml
-apiVersion: argus.como-technologies.io/v1
+apiVersion: argus.como-technologies.io/v2
 kind: ArgusWatcher
 metadata:
   name: app-configs
@@ -453,7 +462,7 @@ spec:
 ### Monitor with Custom Log Format
 
 ```yaml
-apiVersion: argus.como-technologies.io/v1
+apiVersion: argus.como-technologies.io/v2
 kind: ArgusWatcher
 metadata:
   name: audit-watcher
@@ -548,11 +557,11 @@ make manifests
 ```
 argus-operator/
 ├── api/
-│   ├── v1/                    # Stable v1 API (hub)
+│   ├── v2/                    # Current v2 API (hub, storage version)
 │   │   ├── arguswatcher_types.go
 │   │   ├── groupversion_info.go
 │   │   └── zz_generated.deepcopy.go
-│   └── v1alpha1/              # Legacy v1alpha1 API (spoke)
+│   └── v1/                    # Deprecated v1 API (spoke, for migration)
 │       ├── arguswatcher_types.go
 │       ├── arguswatcher_conversion.go
 │       ├── groupversion_info.go
@@ -563,7 +572,7 @@ argus-operator/
 │   ├── crd/                   # CRD manifests
 │   ├── rbac/                  # RBAC manifests
 │   ├── manager/               # Operator deployment
-│   ├── samples/               # Example CRs
+│   ├── samples/               # Example CRs (v2 recommended)
 │   └── webhook/               # Conversion webhook config
 ├── internal/
 │   ├── controller/            # Reconciliation logic

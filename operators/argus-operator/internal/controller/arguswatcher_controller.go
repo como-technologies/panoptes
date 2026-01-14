@@ -38,7 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	argusv1 "github.com/como-technologies/panoptes/operators/argus-operator/api/v1"
+	argusv2 "github.com/como-technologies/panoptes/operators/argus-operator/api/v2"
 	"github.com/como-technologies/panoptes/operators/argus-operator/internal/daemon"
 	"github.com/como-technologies/panoptes/operators/argus-operator/internal/metrics"
 )
@@ -84,7 +84,7 @@ func (r *ArgusWatcherReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	logger := logf.FromContext(ctx)
 
 	// Fetch the ArgusWatcher instance
-	var watcher argusv1.ArgusWatcher
+	var watcher argusv2.ArgusWatcher
 	if err := r.Get(ctx, req.NamespacedName, &watcher); err != nil {
 		if apierrors.IsNotFound(err) {
 			// Object was deleted, clean up metrics
@@ -198,7 +198,9 @@ func (r *ArgusWatcherReconciler) Reconcile(ctx context.Context, req ctrl.Request
 }
 
 // handleDeletion handles cleanup when the ArgusWatcher is being deleted.
-func (r *ArgusWatcherReconciler) handleDeletion(ctx context.Context, watcher *argusv1.ArgusWatcher) (ctrl.Result, error) {
+//
+//nolint:unparam // Result is always zero but signature matches reconciler pattern
+func (r *ArgusWatcherReconciler) handleDeletion(ctx context.Context, watcher *argusv2.ArgusWatcher) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
 	if controllerutil.ContainsFinalizer(watcher, FinalizerName) {
@@ -250,7 +252,7 @@ func (r *ArgusWatcherReconciler) handleDeletion(ctx context.Context, watcher *ar
 }
 
 // findMatchingPods finds all pods that match the watcher's selector.
-func (r *ArgusWatcherReconciler) findMatchingPods(ctx context.Context, watcher *argusv1.ArgusWatcher) ([]corev1.Pod, error) {
+func (r *ArgusWatcherReconciler) findMatchingPods(ctx context.Context, watcher *argusv2.ArgusWatcher) ([]corev1.Pod, error) {
 	selector, err := metav1.LabelSelectorAsSelector(&watcher.Spec.Selector)
 	if err != nil {
 		return nil, fmt.Errorf("invalid label selector: %w", err)
@@ -288,12 +290,12 @@ func (r *ArgusWatcherReconciler) findMatchingPods(ctx context.Context, watcher *
 // syncWatches uses the query-first pattern to reconcile watches.
 // It queries the daemon for actual state, compares with desired state,
 // and only makes changes when needed.
-func (r *ArgusWatcherReconciler) syncWatches(ctx context.Context, watcher *argusv1.ArgusWatcher, pods []corev1.Pod) (int32, int32, []argusv1.WatchedPodStatus, error) {
+func (r *ArgusWatcherReconciler) syncWatches(ctx context.Context, watcher *argusv2.ArgusWatcher, pods []corev1.Pod) (int32, int32, []argusv2.WatchedPodStatus, error) {
 	logger := logf.FromContext(ctx)
 
 	var watchedCount int32
 	var totalWatchDescriptors int32
-	var podStatuses []argusv1.WatchedPodStatus
+	var podStatuses []argusv2.WatchedPodStatus
 	var lastErr error
 
 	// Group pods by node
@@ -375,7 +377,7 @@ func (r *ArgusWatcherReconciler) syncWatches(ctx context.Context, watcher *argus
 				)
 				watchedCount++
 				totalWatchDescriptors += actual.WatchedPaths
-				podStatuses = append(podStatuses, argusv1.WatchedPodStatus{
+				podStatuses = append(podStatuses, argusv2.WatchedPodStatus{
 					Name:             pod.Name,
 					Namespace:        pod.Namespace,
 					NodeName:         nodeName,
@@ -401,7 +403,7 @@ func (r *ArgusWatcherReconciler) syncWatches(ctx context.Context, watcher *argus
 			if result.Success {
 				watchedCount++
 				totalWatchDescriptors += result.WatchDescriptors
-				podStatuses = append(podStatuses, argusv1.WatchedPodStatus{
+				podStatuses = append(podStatuses, argusv2.WatchedPodStatus{
 					Name:             pod.Name,
 					Namespace:        pod.Namespace,
 					NodeName:         nodeName,
@@ -426,7 +428,7 @@ func (r *ArgusWatcherReconciler) syncWatches(ctx context.Context, watcher *argus
 }
 
 // watchConfigMatches checks if the daemon's actual watch config matches the desired spec.
-func (r *ArgusWatcherReconciler) watchConfigMatches(watcher *argusv1.ArgusWatcher, actual *daemon.WatchState) bool {
+func (r *ArgusWatcherReconciler) watchConfigMatches(watcher *argusv2.ArgusWatcher, actual *daemon.WatchState) bool {
 	// Check paused state
 	if actual.Paused != watcher.Spec.Paused {
 		return false
@@ -481,7 +483,7 @@ func (r *ArgusWatcherReconciler) watchConfigMatches(watcher *argusv1.ArgusWatche
 // Note: We do NOT set LastTransitionTime explicitly - meta.SetStatusCondition()
 // will preserve the existing timestamp if the condition status hasn't changed,
 // preventing unnecessary reconciliation loops.
-func (r *ArgusWatcherReconciler) setCondition(watcher *argusv1.ArgusWatcher, conditionType string, status metav1.ConditionStatus, reason, message string) {
+func (r *ArgusWatcherReconciler) setCondition(watcher *argusv2.ArgusWatcher, conditionType string, status metav1.ConditionStatus, reason, message string) {
 	meta.SetStatusCondition(&watcher.Status.Conditions, metav1.Condition{
 		Type:               conditionType,
 		Status:             status,
@@ -517,7 +519,7 @@ func (r *ArgusWatcherReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&argusv1.ArgusWatcher{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&argusv2.ArgusWatcher{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(
 			&corev1.Pod{},
 			handler.EnqueueRequestsFromMapFunc(r.podToArgusWatcher),
@@ -534,7 +536,7 @@ func (r *ArgusWatcherReconciler) podToArgusWatcher(ctx context.Context, obj clie
 	}
 
 	// List all ArgusWatchers in the same namespace
-	var watcherList argusv1.ArgusWatcherList
+	var watcherList argusv2.ArgusWatcherList
 	if err := r.List(ctx, &watcherList, &client.ListOptions{
 		Namespace: pod.Namespace,
 	}); err != nil {

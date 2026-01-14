@@ -32,7 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	commonwebhook "github.com/como-technologies/panoptes/operators/common/webhook"
-	janusv1 "github.com/como-technologies/panoptes/operators/janus-operator/api/v1"
+	janusv2 "github.com/como-technologies/panoptes/operators/janus-operator/api/v2"
 )
 
 // GuardMatcher implements commonwebhook.ResourceMatcher for JanusGuard.
@@ -43,7 +43,7 @@ type GuardMatcher struct {
 // FindMatchingResource finds a JanusGuard that matches the given pod.
 func (m *GuardMatcher) FindMatchingResource(ctx context.Context, pod *corev1.Pod) (string, error) {
 	// List all JanusGuards in the pod's namespace
-	var guards janusv1.JanusGuardList
+	var guards janusv2.JanusGuardList
 	if err := m.Client.List(ctx, &guards, client.InNamespace(pod.Namespace)); err != nil {
 		return "", fmt.Errorf("failed to list JanusGuards: %w", err)
 	}

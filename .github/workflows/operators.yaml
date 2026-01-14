@@ -54,10 +54,10 @@ jobs:
         run: make test
 
       - name: Run linter
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v8
         with:
           working-directory: operators/argus-operator
-          version: latest
+          version: v2.5.0
 
   test-janus-operator:
     name: Test Janus Operator
@@ -91,10 +91,10 @@ jobs:
         run: make test
 
       - name: Run linter
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v8
         with:
           working-directory: operators/janus-operator
-          version: latest
+          version: v2.5.0
 
   build-argus-operator:
     name: Build Argus Operator

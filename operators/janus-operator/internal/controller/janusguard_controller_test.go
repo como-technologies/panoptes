@@ -27,7 +27,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	janusv1alpha1 "github.com/como-technologies/panoptes/operators/janus-operator/api/v1alpha1"
+	janusv2 "github.com/como-technologies/panoptes/operators/janus-operator/api/v2"
 )
 
 var _ = Describe("JanusGuard Controller", func() {
@@ -40,26 +40,26 @@ var _ = Describe("JanusGuard Controller", func() {
 			Name:      resourceName,
 			Namespace: "default", // TODO(user):Modify as needed
 		}
-		janusguard := &janusv1alpha1.JanusGuard{}
+		janusguard := &janusv2.JanusGuard{}
 
 		BeforeEach(func() {
 			By("creating the custom resource for the Kind JanusGuard")
 			err := k8sClient.Get(ctx, typeNamespacedName, janusguard)
 			if err != nil && errors.IsNotFound(err) {
-				resource := &janusv1alpha1.JanusGuard{
+				resource := &janusv2.JanusGuard{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					Spec: janusv1alpha1.JanusGuardSpec{
+					Spec: janusv2.JanusGuardSpec{
 						Selector: metav1.LabelSelector{
 							MatchLabels: map[string]string{
 								"app": "test",
 							},
 						},
-						Subjects: []janusv1alpha1.JanusGuardSubject{
+						Subjects: []janusv2.JanusGuardSubject{
 							{
-								Events: []janusv1alpha1.JanusEvent{janusv1alpha1.EventAccess},
+								Events: []janusv2.JanusEvent{janusv2.EventAccess},
 								Allow:  []string{"/tmp"},
 							},
 						},
@@ -71,7 +71,7 @@ var _ = Describe("JanusGuard Controller", func() {
 
 		AfterEach(func() {
 			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &janusv1alpha1.JanusGuard{}
+			resource := &janusv2.JanusGuard{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			Expect(err).NotTo(HaveOccurred())
 

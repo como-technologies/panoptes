@@ -428,7 +428,7 @@ impl Guard {
         AccessEvent {
             event_type: event_type.to_string(),
             path,
-            is_dir: false, // TODO: Check if path is directory
+            is_dir: std::fs::metadata(&raw_path).map(|m| m.is_dir()).unwrap_or(false),
             pid,
             response,
             matched_pattern,

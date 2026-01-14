@@ -1,6 +1,5 @@
-# DEPRECATED: v1 API is deprecated, use v2 for new deployments
-# Minimal ArgusWatcher example
-apiVersion: argus.como-technologies.io/v1
+# Minimal ArgusWatcher example (recommended v2 API)
+apiVersion: argus.como-technologies.io/v2
 kind: ArgusWatcher
 metadata:
   name: basic-watcher

@@ -36,7 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	janusv1 "github.com/como-technologies/panoptes/operators/janus-operator/api/v1"
-	janusv1alpha1 "github.com/como-technologies/panoptes/operators/janus-operator/api/v1alpha1"
+	janusv2 "github.com/como-technologies/panoptes/operators/janus-operator/api/v2"
 	"github.com/como-technologies/panoptes/operators/janus-operator/internal/controller"
 	januswebhook "github.com/como-technologies/panoptes/operators/janus-operator/internal/webhook"
 	// +kubebuilder:scaffold:imports
@@ -50,8 +50,8 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	utilruntime.Must(janusv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(janusv1.AddToScheme(scheme))
+	utilruntime.Must(janusv2.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 

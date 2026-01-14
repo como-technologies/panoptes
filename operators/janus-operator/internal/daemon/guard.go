@@ -26,8 +26,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	januspb "github.com/como-technologies/panoptes/gen/go/janus/v2"
-	janusv1 "github.com/como-technologies/panoptes/operators/janus-operator/api/v1"
+	janusv2 "github.com/como-technologies/panoptes/operators/janus-operator/api/v2"
 )
+
+// requestTimeout wraps a context with the default request timeout.
+func requestTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, DefaultRequestTimeout)
+}
 
 // GuardConfig contains configuration for creating a guard on a daemon.
 type GuardConfig struct {
@@ -39,7 +44,7 @@ type GuardConfig struct {
 	PodNamespace   string
 	ContainerIDs   []string
 	PIDs           []int32
-	Subjects       []janusv1.JanusGuardSubject
+	Subjects       []janusv2.JanusGuardSubject
 	LogFormat      string
 	Paused         bool // Whether the guard is paused
 	Enforcing      bool // Whether access denials are enforced (vs audit mode)
@@ -142,7 +147,10 @@ func (m *GuardManager) CreateGuard(ctx context.Context, config *GuardConfig) (*G
 		Enforcing:    config.Enforcing,
 	}
 
-	resp, err := client.CreateGuard(ctx, req)
+	reqCtx, cancel := requestTimeout(ctx)
+	defer cancel()
+
+	resp, err := client.CreateGuard(reqCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("gRPC CreateGuard failed: %w", err)
 	}
@@ -183,7 +191,10 @@ func (m *GuardManager) DestroyGuard(ctx context.Context, nodeIP, guardNamespace,
 		PodName:   podName,
 	}
 
-	_, err = client.DestroyGuard(ctx, req)
+	reqCtx, cancel := requestTimeout(ctx)
+	defer cancel()
+
+	_, err = client.DestroyGuard(reqCtx, req)
 	if err != nil {
 		return fmt.Errorf("gRPC DestroyGuard failed: %w", err)
 	}
@@ -212,7 +223,10 @@ func (m *GuardManager) GetGuardState(ctx context.Context, nodeIP, guardName, nam
 		Namespace: namespace,
 	}
 
-	stream, err := client.GetGuardState(ctx, req)
+	reqCtx, cancel := requestTimeout(ctx)
+	defer cancel()
+
+	stream, err := client.GetGuardState(reqCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("gRPC GetGuardState failed: %w", err)
 	}
@@ -260,7 +274,7 @@ func (m *GuardManager) GetGuardState(ctx context.Context, nodeIP, guardName, nam
 }
 
 // convertEventToProto converts a JanusEvent to the proto FanotifyEvent enum.
-func convertEventToProto(event janusv1.JanusEvent) januspb.FanotifyEvent {
+func convertEventToProto(event janusv2.JanusEvent) januspb.FanotifyEvent {
 	eventStr := strings.ToLower(string(event))
 
 	switch eventStr {
@@ -280,7 +294,7 @@ func convertEventToProto(event janusv1.JanusEvent) januspb.FanotifyEvent {
 }
 
 // convertResponseToProto converts a JanusResponse to the proto AccessResponse enum.
-func convertResponseToProto(response janusv1.JanusResponse) januspb.AccessResponse {
+func convertResponseToProto(response janusv2.JanusResponse) januspb.AccessResponse {
 	responseStr := strings.ToLower(string(response))
 
 	switch responseStr {
@@ -355,7 +369,10 @@ func (m *GuardManager) UpdateGuard(ctx context.Context, nodeIP, guardNamespace, 
 		Action:    action,
 	}
 
-	resp, err := client.UpdateGuard(ctx, req)
+	reqCtx, cancel := requestTimeout(ctx)
+	defer cancel()
+
+	resp, err := client.UpdateGuard(reqCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("gRPC UpdateGuard failed: %w", err)
 	}
@@ -411,7 +428,10 @@ func (m *GuardManager) UpdatePolicy(ctx context.Context, nodeIP, guardNamespace,
 		AllowPatterns: allowPatterns,
 	}
 
-	resp, err := client.UpdatePolicy(ctx, req)
+	reqCtx, cancel := requestTimeout(ctx)
+	defer cancel()
+
+	resp, err := client.UpdatePolicy(reqCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("gRPC UpdatePolicy failed: %w", err)
 	}

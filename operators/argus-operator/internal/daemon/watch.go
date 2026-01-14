@@ -26,8 +26,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	arguspb "github.com/como-technologies/panoptes/gen/go/argus/v2"
-	argusv1 "github.com/como-technologies/panoptes/operators/argus-operator/api/v1"
+	argusv2 "github.com/como-technologies/panoptes/operators/argus-operator/api/v2"
 )
+
+// requestTimeout wraps a context with the default request timeout.
+func requestTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, DefaultRequestTimeout)
+}
 
 // WatchConfig contains configuration for creating a watch on a daemon.
 type WatchConfig struct {
@@ -39,7 +44,7 @@ type WatchConfig struct {
 	PodNamespace     string
 	ContainerIDs     []string
 	PIDs             []int32
-	Subjects         []argusv1.ArgusWatcherSubject
+	Subjects         []argusv2.ArgusWatcherSubject
 	LogFormat        string
 	Paused           bool // Whether the watcher is paused
 }
@@ -144,7 +149,10 @@ func (m *WatchManager) CreateWatch(ctx context.Context, config *WatchConfig) (*W
 		Paused:       config.Paused,
 	}
 
-	resp, err := client.CreateWatch(ctx, req)
+	reqCtx, cancel := requestTimeout(ctx)
+	defer cancel()
+
+	resp, err := client.CreateWatch(reqCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("gRPC CreateWatch failed: %w", err)
 	}
@@ -184,7 +192,10 @@ func (m *WatchManager) DestroyWatch(ctx context.Context, nodeIP, watcherNamespac
 		PodName:     podName,
 	}
 
-	_, err = client.DestroyWatch(ctx, req)
+	reqCtx, cancel := requestTimeout(ctx)
+	defer cancel()
+
+	_, err = client.DestroyWatch(reqCtx, req)
 	if err != nil {
 		return fmt.Errorf("gRPC DestroyWatch failed: %w", err)
 	}
@@ -213,7 +224,10 @@ func (m *WatchManager) GetWatchState(ctx context.Context, nodeIP, watcherName, n
 		Namespace:   namespace,
 	}
 
-	stream, err := client.GetWatchState(ctx, req)
+	reqCtx, cancel := requestTimeout(ctx)
+	defer cancel()
+
+	stream, err := client.GetWatchState(reqCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("gRPC GetWatchState failed: %w", err)
 	}
@@ -261,7 +275,7 @@ func (m *WatchManager) GetWatchState(ctx context.Context, nodeIP, watcherName, n
 }
 
 // convertEventToProto converts an ArgusEvent to the proto InotifyEvent enum.
-func convertEventToProto(event argusv1.ArgusEvent) arguspb.InotifyEvent {
+func convertEventToProto(event argusv2.ArgusEvent) arguspb.InotifyEvent {
 	// Normalize event string (lowercase, remove underscores)
 	eventStr := strings.ToLower(string(event))
 	eventStr = strings.ReplaceAll(eventStr, "_", "")
@@ -357,7 +371,10 @@ func (m *WatchManager) UpdateWatch(ctx context.Context, nodeIP, watcherNamespace
 		Action:      action,
 	}
 
-	resp, err := client.UpdateWatch(ctx, req)
+	reqCtx, cancel := requestTimeout(ctx)
+	defer cancel()
+
+	resp, err := client.UpdateWatch(reqCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("gRPC UpdateWatch failed: %w", err)
 	}

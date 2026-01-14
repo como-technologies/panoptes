@@ -344,7 +344,7 @@ EOF
 
     # ArgusWatcher
     kubectl apply -f - <<EOF
-apiVersion: argus.como-technologies.io/v1
+apiVersion: argus.como-technologies.io/v2
 kind: ArgusWatcher
 metadata:
   name: test-watcher
@@ -367,7 +367,7 @@ EOF
 
     # JanusGuard
     kubectl apply -f - <<EOF
-apiVersion: janus.como-technologies.io/v1
+apiVersion: janus.como-technologies.io/v2
 kind: JanusGuard
 metadata:
   name: test-guard

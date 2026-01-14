@@ -1,5 +1,9 @@
 ## Append samples of your project ##
 resources:
-- argus_v1alpha1_arguswatcher.yaml
+# Recommended v2 API (current)
+- argus_v2_arguswatcher.yaml
+- argus_v2_arguswatcher_minimal.yaml
+# Deprecated v1 API (for migration only)
 - argus_v1_arguswatcher.yaml
+- argus_v1_arguswatcher_minimal.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

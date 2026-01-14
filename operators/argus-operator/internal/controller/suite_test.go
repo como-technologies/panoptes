@@ -32,7 +32,8 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	argusv1alpha1 "github.com/como-technologies/panoptes/operators/argus-operator/api/v1alpha1"
+	argusv1 "github.com/como-technologies/panoptes/operators/argus-operator/api/v1"
+	argusv2 "github.com/como-technologies/panoptes/operators/argus-operator/api/v2"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -59,7 +60,9 @@ var _ = BeforeSuite(func() {
 	ctx, cancel = context.WithCancel(context.TODO())
 
 	var err error
-	err = argusv1alpha1.AddToScheme(scheme.Scheme)
+	err = argusv1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+	err = argusv2.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	// +kubebuilder:scaffold:scheme

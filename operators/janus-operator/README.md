@@ -3,7 +3,7 @@
 **Kubernetes-native File Access Auditing and Enforcement using Linux fanotify**
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](../../LICENSE)
-[![Go Version](https://img.shields.io/badge/Go-1.22+-blue.svg)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/Go-1.24+-blue.svg)](https://golang.org)
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-1.28%2B-blue.svg)](https://kubernetes.io)
 
 ## Overview
@@ -92,22 +92,22 @@ protection is in place.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Pod Startup Flow (Hardened)                   │
+│                    Pod Startup Flow (Hardened)                  │
 ├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  1. Pod CREATE request → Admission Webhook                       │
-│  2. Webhook injects guard-wait init container                    │
-│  3. Pod scheduled, init container starts                         │
-│  4. guard-wait polls GetGuardState RPC                           │
-│  5. Janusd creates guard SYNCHRONOUSLY (marks registered)        │
-│  6. GetGuardState returns marks_registered=true                  │
+│                                                                 │
+│  1. Pod CREATE request → Admission Webhook                      │
+│  2. Webhook injects guard-wait init container                   │
+│  3. Pod scheduled, init container starts                        │
+│  4. guard-wait polls GetGuardState RPC                          │
+│  5. Janusd creates guard SYNCHRONOUSLY (marks registered)       │
+│  6. GetGuardState returns marks_registered=true                 │
 │  7. guard-wait exits 0 → main containers start (PROTECTED)      │
-│                                                                  │
-│  Defense layers:                                                 │
-│  ✓ Synchronous guard init (fanotify marks before response)     │
+│                                                                 │
+│  Defense layers:                                                │
+│  ✓ Synchronous guard init (fanotify marks before response)      │
 │  ✓ Readiness fields in proto (marks_registered, ready_at)       │
 │  ✓ Webhook + init container (blocks pod until ready)            │
-│                                                                  │
+│                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -120,7 +120,7 @@ protection is in place.
 
 2. **Create a JanusGuard** that selects pods in that namespace:
    ```yaml
-   apiVersion: janus.como-technologies.io/v1
+   apiVersion: janus.como-technologies.io/v2
    kind: JanusGuard
    metadata:
      name: my-guard
@@ -188,9 +188,9 @@ file access guards.
 - `Dockerfile` - Multi-stage build
 
 **Custom implementation:**
-- `api/v1/janusguard_types.go` - v1 CRD types with full spec/status
-- `api/v1alpha1/janusguard_types.go` - Legacy v1alpha1 types
-- `api/v1alpha1/janusguard_conversion.go` - Hub-spoke conversion
+- `api/v2/janusguard_types.go` - v2 CRD types (current, storage version)
+- `api/v1/janusguard_types.go` - v1 CRD types (deprecated)
+- `api/v1/janusguard_conversion.go` - v1 ↔ v2 conversion
 - `internal/controller/janusguard_controller.go` - Reconciliation logic
 - `internal/grpc/client.go` - gRPC client for janusd communication
 
@@ -204,10 +204,17 @@ See [daemons/janusd/README.md](../../daemons/janusd/README.md) for daemon docume
 
 ## CRD Reference
 
-### JanusGuard v1
+### API Versions
+
+| Version | Status | Description |
+|---------|--------|-------------|
+| **v2** | Current (recommended) | Storage version, use for new deployments |
+| **v1** | Deprecated | Legacy version, kept for migration only |
+
+### JanusGuard v2 (Recommended)
 
 ```yaml
-apiVersion: janus.como-technologies.io/v1
+apiVersion: janus.como-technologies.io/v2
 kind: JanusGuard
 metadata:
   name: example-guard
@@ -309,21 +316,22 @@ status:
       message: "All pods guarded successfully"
 ```
 
-### v1alpha1 to v1 Migration
+### v1 to v2 Migration
 
-The v1 API includes these improvements over v1alpha1:
+The v2 API is the current recommended version. v1 is deprecated and kept only for migration.
 
-| Feature | v1alpha1 | v1 |
-|---------|----------|-----|
-| Pausing | Not supported | `spec.paused` |
-| Dry-run mode | Not supported | `spec.enforcing` |
-| Per-pod status | Not supported | `status.podStatuses[]` |
-| Event counters | Not supported | `status.totalDeniedEvents`, `status.totalAuditedEvents` |
-| Container runtime | `containerEngine` (docker/rkt) | `containerRuntime` (containerd/cri-o/auto) |
-| Validation | Basic | MaxItems, MaxLength, enums |
-| Conditions | Not supported | Standard Kubernetes conditions |
+| Feature | v1 (deprecated) | v2 (current) |
+|---------|-----------------|--------------|
+| Status | Deprecated | Recommended, storage version |
+| Conversion | Spoke (converts to v2) | Hub (storage) |
+| Use case | Upgrading from | New deployments |
 
-Conversion webhooks automatically handle v1alpha1 resources.
+Conversion webhooks automatically handle v1 ↔ v2 conversion. Existing v1 resources will continue to work but should be migrated to v2.
+
+**Migration steps:**
+1. Update your manifests to use `apiVersion: janus.como-technologies.io/v2`
+2. Apply the updated manifests
+3. Conversion webhooks handle the rest automatically
 
 ## Enforcement Modes
 
@@ -332,6 +340,8 @@ Conversion webhooks automatically handle v1alpha1 resources.
 In enforcing mode, Janus actively blocks access to denied paths:
 
 ```yaml
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
 spec:
   enforcing: true
   subjects:
@@ -348,6 +358,8 @@ kernel blocks the access. The process receives `EPERM` (Permission denied).
 In audit-only mode, Janus logs all access events without blocking:
 
 ```yaml
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
 spec:
   enforcing: false
   subjects:
@@ -369,7 +381,7 @@ Access attempts are logged but not blocked. Useful for:
 - Kubernetes 1.28+
 - containerd or CRI-O container runtime
 - Linux kernel 5.x+ (for full fanotify support)
-- Go 1.22+ (for building)
+- Go 1.24+ (for building)
 - Docker 17.03+ (for building images)
 
 ### Deploy with kubectl
@@ -502,7 +514,7 @@ spec:
 ### Protect Sensitive System Files
 
 ```yaml
-apiVersion: janus.como-technologies.io/v1
+apiVersion: janus.como-technologies.io/v2
 kind: JanusGuard
 metadata:
   name: protect-system
@@ -530,7 +542,7 @@ spec:
 ### Audit Database Access
 
 ```yaml
-apiVersion: janus.como-technologies.io/v1
+apiVersion: janus.como-technologies.io/v2
 kind: JanusGuard
 metadata:
   name: audit-database
@@ -552,7 +564,7 @@ spec:
 ### Restrict Container to Specific Paths
 
 ```yaml
-apiVersion: janus.como-technologies.io/v1
+apiVersion: janus.como-technologies.io/v2
 kind: JanusGuard
 metadata:
   name: app-sandbox
@@ -662,11 +674,11 @@ make manifests
 ```
 janus-operator/
 ├── api/
-│   ├── v1/                    # Stable v1 API (hub)
+│   ├── v2/                    # Current v2 API (hub, storage version)
 │   │   ├── janusguard_types.go
 │   │   ├── groupversion_info.go
 │   │   └── zz_generated.deepcopy.go
-│   └── v1alpha1/              # Legacy v1alpha1 API (spoke)
+│   └── v1/                    # Deprecated v1 API (spoke, for migration)
 │       ├── janusguard_types.go
 │       ├── janusguard_conversion.go
 │       ├── groupversion_info.go
@@ -677,7 +689,7 @@ janus-operator/
 │   ├── crd/                   # CRD manifests
 │   ├── rbac/                  # RBAC manifests
 │   ├── manager/               # Operator deployment
-│   ├── samples/               # Example CRs
+│   ├── samples/               # Example CRs (v2 recommended)
 │   └── webhook/               # Conversion webhook config
 ├── internal/
 │   ├── controller/            # Reconciliation logic

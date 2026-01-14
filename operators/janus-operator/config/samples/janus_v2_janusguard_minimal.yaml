@@ -1,6 +1,5 @@
-# DEPRECATED: v1 API is deprecated, use v2 for new deployments
-# Minimal JanusGuard example
-apiVersion: janus.como-technologies.io/v1
+# Minimal JanusGuard example (recommended v2 API)
+apiVersion: janus.como-technologies.io/v2
 kind: JanusGuard
 metadata:
   name: basic-guard

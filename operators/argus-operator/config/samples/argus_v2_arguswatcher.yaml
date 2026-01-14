@@ -1,7 +1,6 @@
-# DEPRECATED: v1 API is deprecated, use v2 for new deployments
-# This sample is maintained for backward compatibility during migration only.
-# See argus_v2_arguswatcher.yaml for the recommended v2 API version.
-apiVersion: argus.como-technologies.io/v1
+# Example ArgusWatcher for monitoring critical system files
+# This is the recommended v2 API version for new deployments
+apiVersion: argus.como-technologies.io/v2
 kind: ArgusWatcher
 metadata:
   name: critical-files-watcher

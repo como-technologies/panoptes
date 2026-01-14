@@ -38,7 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	janusv1 "github.com/como-technologies/panoptes/operators/janus-operator/api/v1"
+	janusv2 "github.com/como-technologies/panoptes/operators/janus-operator/api/v2"
 	"github.com/como-technologies/panoptes/operators/janus-operator/internal/daemon"
 	"github.com/como-technologies/panoptes/operators/janus-operator/internal/metrics"
 )
@@ -84,7 +84,7 @@ func (r *JanusGuardReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	logger := logf.FromContext(ctx)
 
 	// Fetch the JanusGuard instance
-	var guard janusv1.JanusGuard
+	var guard janusv2.JanusGuard
 	if err := r.Get(ctx, req.NamespacedName, &guard); err != nil {
 		if apierrors.IsNotFound(err) {
 			metrics.DeleteGuardMetrics(req.Name, req.Namespace)
@@ -187,7 +187,9 @@ func (r *JanusGuardReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 }
 
 // handleDeletion handles cleanup when the JanusGuard is being deleted.
-func (r *JanusGuardReconciler) handleDeletion(ctx context.Context, guard *janusv1.JanusGuard) (ctrl.Result, error) {
+//
+//nolint:unparam // Result is always zero but signature matches reconciler pattern
+func (r *JanusGuardReconciler) handleDeletion(ctx context.Context, guard *janusv2.JanusGuard) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
 	if controllerutil.ContainsFinalizer(guard, FinalizerName) {
@@ -233,7 +235,7 @@ func (r *JanusGuardReconciler) handleDeletion(ctx context.Context, guard *janusv
 }
 
 // findMatchingPods finds all pods that match the guard's selector.
-func (r *JanusGuardReconciler) findMatchingPods(ctx context.Context, guard *janusv1.JanusGuard) ([]corev1.Pod, error) {
+func (r *JanusGuardReconciler) findMatchingPods(ctx context.Context, guard *janusv2.JanusGuard) ([]corev1.Pod, error) {
 	selector, err := metav1.LabelSelectorAsSelector(&guard.Spec.Selector)
 	if err != nil {
 		return nil, fmt.Errorf("invalid label selector: %w", err)
@@ -269,11 +271,11 @@ func (r *JanusGuardReconciler) findMatchingPods(ctx context.Context, guard *janu
 // syncGuards uses the query-first pattern to reconcile guards.
 // It queries the daemon for actual state, compares with desired state,
 // and only makes changes when needed.
-func (r *JanusGuardReconciler) syncGuards(ctx context.Context, guard *janusv1.JanusGuard, pods []corev1.Pod) (int32, []janusv1.GuardedPodStatus, error) {
+func (r *JanusGuardReconciler) syncGuards(ctx context.Context, guard *janusv2.JanusGuard, pods []corev1.Pod) (int32, []janusv2.GuardedPodStatus, error) {
 	logger := logf.FromContext(ctx)
 
 	var guardedCount int32
-	var podStatuses []janusv1.GuardedPodStatus
+	var podStatuses []janusv2.GuardedPodStatus
 	var lastErr error
 
 	// Group pods by node
@@ -355,7 +357,7 @@ func (r *JanusGuardReconciler) syncGuards(ctx context.Context, guard *janusv1.Ja
 					"guardedPaths", actual.GuardedPaths,
 				)
 				guardedCount++
-				podStatuses = append(podStatuses, janusv1.GuardedPodStatus{
+				podStatuses = append(podStatuses, janusv2.GuardedPodStatus{
 					Name:         pod.Name,
 					Namespace:    pod.Namespace,
 					NodeName:     nodeName,
@@ -381,7 +383,7 @@ func (r *JanusGuardReconciler) syncGuards(ctx context.Context, guard *janusv1.Ja
 
 			if result.Success {
 				guardedCount++
-				podStatuses = append(podStatuses, janusv1.GuardedPodStatus{
+				podStatuses = append(podStatuses, janusv2.GuardedPodStatus{
 					Name:         pod.Name,
 					Namespace:    pod.Namespace,
 					NodeName:     nodeName,
@@ -407,7 +409,7 @@ func (r *JanusGuardReconciler) syncGuards(ctx context.Context, guard *janusv1.Ja
 }
 
 // guardConfigMatches checks if the daemon's actual guard config matches the desired spec.
-func (r *JanusGuardReconciler) guardConfigMatches(guard *janusv1.JanusGuard, actual *daemon.GuardState) bool {
+func (r *JanusGuardReconciler) guardConfigMatches(guard *janusv2.JanusGuard, actual *daemon.GuardState) bool {
 	// Check paused state
 	if actual.Paused != guard.Spec.Paused {
 		return false
@@ -463,7 +465,7 @@ func (r *JanusGuardReconciler) guardConfigMatches(guard *janusv1.JanusGuard, act
 // Note: We do NOT set LastTransitionTime explicitly - meta.SetStatusCondition()
 // will preserve the existing timestamp if the condition status hasn't changed,
 // preventing unnecessary reconciliation loops.
-func (r *JanusGuardReconciler) setCondition(guard *janusv1.JanusGuard, conditionType string, status metav1.ConditionStatus, reason, message string) {
+func (r *JanusGuardReconciler) setCondition(guard *janusv2.JanusGuard, conditionType string, status metav1.ConditionStatus, reason, message string) {
 	meta.SetStatusCondition(&guard.Status.Conditions, metav1.Condition{
 		Type:               conditionType,
 		Status:             status,
@@ -497,7 +499,7 @@ func (r *JanusGuardReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&janusv1.JanusGuard{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&janusv2.JanusGuard{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(
 			&corev1.Pod{},
 			handler.EnqueueRequestsFromMapFunc(r.podToJanusGuard),
@@ -513,7 +515,7 @@ func (r *JanusGuardReconciler) podToJanusGuard(ctx context.Context, obj client.O
 		return nil
 	}
 
-	var guardList janusv1.JanusGuardList
+	var guardList janusv2.JanusGuardList
 	if err := r.List(ctx, &guardList, &client.ListOptions{
 		Namespace: pod.Namespace,
 	}); err != nil {

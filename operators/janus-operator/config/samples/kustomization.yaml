@@ -1,5 +1,9 @@
 ## Append samples of your project ##
 resources:
-- janus_v1alpha1_janusguard.yaml
+# Recommended v2 API (current)
+- janus_v2_janusguard.yaml
+- janus_v2_janusguard_minimal.yaml
+# Deprecated v1 API (for migration only)
 - janus_v1_janusguard.yaml
+- janus_v1_janusguard_minimal.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

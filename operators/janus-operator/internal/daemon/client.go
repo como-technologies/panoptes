@@ -32,9 +32,6 @@ const (
 	// DefaultDaemonPort is the default gRPC port for janusd
 	DefaultDaemonPort = 50052
 
-	// DefaultConnectTimeout is the default timeout for connecting to daemons
-	DefaultConnectTimeout = 5 * time.Second
-
 	// DefaultRequestTimeout is the default timeout for gRPC requests
 	DefaultRequestTimeout = 10 * time.Second
 )
@@ -79,15 +76,11 @@ func (c *Client) GetConnection(ctx context.Context, nodeIP string) (*grpc.Client
 
 	logger.V(1).Info("Connecting to janusd", "target", target)
 
-	dialCtx, cancel := context.WithTimeout(ctx, DefaultConnectTimeout)
-	defer cancel()
-
-	conn, err := grpc.DialContext(dialCtx, target,
+	conn, err := grpc.NewClient(target,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to janusd at %s: %w", target, err)
+		return nil, fmt.Errorf("failed to create client for janusd at %s: %w", target, err)
 	}
 
 	c.connections[nodeIP] = conn

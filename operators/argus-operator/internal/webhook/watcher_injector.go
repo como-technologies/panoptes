@@ -31,7 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	argusv1 "github.com/como-technologies/panoptes/operators/argus-operator/api/v1"
+	argusv2 "github.com/como-technologies/panoptes/operators/argus-operator/api/v2"
 	commonwebhook "github.com/como-technologies/panoptes/operators/common/webhook"
 )
 
@@ -43,7 +43,7 @@ type WatcherMatcher struct {
 // FindMatchingResource finds an ArgusWatcher that matches the given pod.
 func (m *WatcherMatcher) FindMatchingResource(ctx context.Context, pod *corev1.Pod) (string, error) {
 	// List all ArgusWatchers in the pod's namespace
-	var watchers argusv1.ArgusWatcherList
+	var watchers argusv2.ArgusWatcherList
 	if err := m.Client.List(ctx, &watchers, client.InNamespace(pod.Namespace)); err != nil {
 		return "", fmt.Errorf("failed to list ArgusWatchers: %w", err)
 	}
