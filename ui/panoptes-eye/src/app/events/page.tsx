@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { Activity, Pause, Play, Trash2, Filter, Download, AlertCircle, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useEventStats, useEventCounts, useRecentEvents, type StreamEvent } from '@/stores/eventStats';
@@ -8,6 +8,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { SearchInput } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/select';
+import { ColumnSelector, type ColumnOption } from '@/components/ui/column-selector';
 import { EventDetailDialog } from '@/components/events/EventDetailDialog';
 
 const EVENT_TYPE_OPTIONS = [
@@ -30,6 +31,23 @@ const ACTION_OPTIONS = [
   { value: 'audit', label: 'Audit' },
 ];
 
+// Column definitions for the event table
+const ALL_COLUMNS: ColumnOption[] = [
+  { id: 'time', label: 'Time', alwaysOn: true },
+  { id: 'source', label: 'Source' },
+  { id: 'event', label: 'Event' },
+  { id: 'path', label: 'Path', alwaysOn: true },
+  { id: 'pod', label: 'Pod' },
+  { id: 'action', label: 'Action' },
+  { id: 'node', label: 'Node' },
+  { id: 'namespace', label: 'Namespace' },
+  { id: 'process', label: 'Process' },
+  { id: 'pid', label: 'PID' },
+];
+
+// Default visible columns (no Process/PID by default)
+const DEFAULT_VISIBLE_COLUMNS = ['time', 'source', 'event', 'path', 'pod', 'action'];
+
 export default function EventsPage() {
   // Get events from global store (populated by EventStreamSubscriber in providers.tsx)
   const allEvents = useRecentEvents();
@@ -40,6 +58,7 @@ export default function EventsPage() {
   const [actions, setActions] = useState<string[]>([]);
   const [showFilters, setShowFilters] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<StreamEvent | null>(null);
+  const [visibleColumns, setVisibleColumns] = useState<string[]>(DEFAULT_VISIBLE_COLUMNS);
 
   // Access event stats from Zustand store (SSR-safe)
   const eventCounts = useEventCounts();
@@ -74,32 +93,67 @@ export default function EventsPage() {
     return true;
   });
 
-  // Check if any events have ProcessInfo (v2 Rust daemon data)
-  const hasProcessInfo = useMemo(() => {
-    return filteredEvents.some(
-      (e) => e.processInfo && (e.processInfo.pid || e.processInfo.comm)
-    );
-  }, [filteredEvents]);
+  // Helper to check if a column is visible
+  const isColumnVisible = (columnId: string) => visibleColumns.includes(columnId);
 
   const exportEvents = () => {
-    // Include ProcessInfo columns if any events have process data
-    const headers = ['Timestamp', 'Source', 'Event Type', 'Path', 'Pod', 'Action', 'Node'];
-    if (hasProcessInfo) {
-      headers.push('Process', 'PID', 'CWD');
-    }
+    // Build headers based on visible columns
+    const columnToHeader: Record<string, string> = {
+      time: 'Timestamp',
+      source: 'Source',
+      event: 'Event Type',
+      path: 'Path',
+      pod: 'Pod',
+      action: 'Action',
+      node: 'Node',
+      namespace: 'Namespace',
+      process: 'Process',
+      pid: 'PID',
+    };
+
+    const headers = visibleColumns.map((col) => columnToHeader[col] || col);
 
     const csv = [
       headers.join(','),
       ...filteredEvents.map((e) => {
-        const row = [e.timestamp, e.source, e.eventType, `"${e.path}"`, e.podName, e.action, e.nodeName];
-        if (hasProcessInfo) {
-          row.push(
-            e.processInfo?.comm || '',
-            e.processInfo?.pid?.toString() || '',
-            e.processInfo?.cwd ? `"${e.processInfo.cwd}"` : ''
-          );
+        const values: string[] = [];
+        for (const col of visibleColumns) {
+          switch (col) {
+            case 'time':
+              values.push(e.timestamp);
+              break;
+            case 'source':
+              values.push(e.source);
+              break;
+            case 'event':
+              values.push(e.eventType);
+              break;
+            case 'path':
+              values.push(`"${e.path}"`);
+              break;
+            case 'pod':
+              values.push(e.podName);
+              break;
+            case 'action':
+              values.push(e.action);
+              break;
+            case 'node':
+              values.push(e.nodeName);
+              break;
+            case 'namespace':
+              values.push(e.namespace || '');
+              break;
+            case 'process':
+              values.push(e.processInfo?.comm || '');
+              break;
+            case 'pid':
+              values.push(e.processInfo?.pid?.toString() || '');
+              break;
+            default:
+              values.push('');
+          }
         }
-        return row.join(',');
+        return values.join(',');
       }),
     ].join('\n');
 
@@ -190,6 +244,11 @@ export default function EventsPage() {
           <Trash2 className="h-4 w-4 mr-2" />
           Clear
         </Button>
+        <ColumnSelector
+          columns={ALL_COLUMNS}
+          visible={visibleColumns}
+          onChange={setVisibleColumns}
+        />
         <Button variant="outline" size="sm" onClick={exportEvents} disabled={events.length === 0}>
           <Download className="h-4 w-4 mr-2" />
           Export
@@ -263,17 +322,35 @@ export default function EventsPage() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 dark:bg-gray-800/50 sticky top-0">
                   <tr>
-                    <th className="px-4 py-2 text-left font-medium">Time</th>
-                    <th className="px-4 py-2 text-left font-medium">Source</th>
-                    <th className="px-4 py-2 text-left font-medium">Event</th>
-                    <th className="px-4 py-2 text-left font-medium">Path</th>
-                    <th className="px-4 py-2 text-left font-medium">Pod</th>
-                    <th className="px-4 py-2 text-left font-medium">Action</th>
-                    {hasProcessInfo && (
-                      <>
-                        <th className="px-4 py-2 text-left font-medium">Process</th>
-                        <th className="px-4 py-2 text-left font-medium">PID</th>
-                      </>
+                    {isColumnVisible('time') && (
+                      <th className="px-4 py-2 text-left font-medium">Time</th>
+                    )}
+                    {isColumnVisible('source') && (
+                      <th className="px-4 py-2 text-left font-medium">Source</th>
+                    )}
+                    {isColumnVisible('event') && (
+                      <th className="px-4 py-2 text-left font-medium">Event</th>
+                    )}
+                    {isColumnVisible('path') && (
+                      <th className="px-4 py-2 text-left font-medium">Path</th>
+                    )}
+                    {isColumnVisible('pod') && (
+                      <th className="px-4 py-2 text-left font-medium">Pod</th>
+                    )}
+                    {isColumnVisible('action') && (
+                      <th className="px-4 py-2 text-left font-medium">Action</th>
+                    )}
+                    {isColumnVisible('node') && (
+                      <th className="px-4 py-2 text-left font-medium">Node</th>
+                    )}
+                    {isColumnVisible('namespace') && (
+                      <th className="px-4 py-2 text-left font-medium">Namespace</th>
+                    )}
+                    {isColumnVisible('process') && (
+                      <th className="px-4 py-2 text-left font-medium">Process</th>
+                    )}
+                    {isColumnVisible('pid') && (
+                      <th className="px-4 py-2 text-left font-medium">PID</th>
                     )}
                   </tr>
                 </thead>
@@ -284,35 +361,57 @@ export default function EventsPage() {
                       className="hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer"
                       onClick={() => setSelectedEvent(event)}
                     >
-                      <td className="px-4 py-2 whitespace-nowrap text-gray-500 dark:text-gray-400 font-mono text-xs">
-                        {new Date(event.timestamp).toLocaleTimeString()}
-                      </td>
-                      <td className="px-4 py-2">
-                        <Badge variant={event.source === 'argus' ? 'argus' : 'janus'}>
-                          {event.source}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-2 capitalize">{event.eventType}</td>
-                      <td className="px-4 py-2 font-mono text-xs max-w-xs truncate" title={event.path}>
-                        {event.path}
-                      </td>
-                      <td className="px-4 py-2 text-gray-500 dark:text-gray-400">
-                        {event.podName}
-                      </td>
-                      <td className="px-4 py-2">
-                        <Badge variant={getActionColor(event.action) as 'active' | 'error' | 'warning'}>
-                          {event.action}
-                        </Badge>
-                      </td>
-                      {hasProcessInfo && (
-                        <>
-                          <td className="px-4 py-2 font-mono text-xs" title={event.processInfo?.exe || ''}>
-                            {event.processInfo?.comm || '-'}
-                          </td>
-                          <td className="px-4 py-2 font-mono text-xs">
-                            {event.processInfo?.pid || '-'}
-                          </td>
-                        </>
+                      {isColumnVisible('time') && (
+                        <td className="px-4 py-2 whitespace-nowrap text-gray-500 dark:text-gray-400 font-mono text-xs">
+                          {new Date(event.timestamp).toLocaleTimeString()}
+                        </td>
+                      )}
+                      {isColumnVisible('source') && (
+                        <td className="px-4 py-2">
+                          <Badge variant={event.source === 'argus' ? 'argus' : 'janus'}>
+                            {event.source}
+                          </Badge>
+                        </td>
+                      )}
+                      {isColumnVisible('event') && (
+                        <td className="px-4 py-2 capitalize">{event.eventType}</td>
+                      )}
+                      {isColumnVisible('path') && (
+                        <td className="px-4 py-2 font-mono text-xs max-w-xs truncate" title={event.path}>
+                          {event.path}
+                        </td>
+                      )}
+                      {isColumnVisible('pod') && (
+                        <td className="px-4 py-2 text-gray-500 dark:text-gray-400">
+                          {event.podName}
+                        </td>
+                      )}
+                      {isColumnVisible('action') && (
+                        <td className="px-4 py-2">
+                          <Badge variant={getActionColor(event.action) as 'active' | 'error' | 'warning'}>
+                            {event.action}
+                          </Badge>
+                        </td>
+                      )}
+                      {isColumnVisible('node') && (
+                        <td className="px-4 py-2 text-gray-500 dark:text-gray-400">
+                          {event.nodeName}
+                        </td>
+                      )}
+                      {isColumnVisible('namespace') && (
+                        <td className="px-4 py-2 text-gray-500 dark:text-gray-400">
+                          {event.namespace || '-'}
+                        </td>
+                      )}
+                      {isColumnVisible('process') && (
+                        <td className="px-4 py-2 font-mono text-xs" title={event.processInfo?.exe || ''}>
+                          {event.processInfo?.comm || '-'}
+                        </td>
+                      )}
+                      {isColumnVisible('pid') && (
+                        <td className="px-4 py-2 font-mono text-xs">
+                          {event.processInfo?.pid || '-'}
+                        </td>
                       )}
                     </tr>
                   ))}
