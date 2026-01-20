@@ -1,13 +1,17 @@
-# Compliance preset - PCI-DSS, SOC2, HIPAA ready configuration
-# Enhanced logging and auditing for compliance requirements
+# SOC 2 Compliance Preset
+# SOC 2 Type II Trust Services Criteria monitoring
 #
-# This preset enables the three most common compliance frameworks.
-# For individual framework presets, see:
-# - pci-dss.yaml
-# - hipaa.yaml
-# - soc2.yaml
-# - cis-kubernetes.yaml
-# - full-compliance.yaml (all frameworks)
+# Criteria covered:
+# - CC6.1: Logical Access Security
+# - CC6.2: Access Authorization
+# - CC6.3: Access Removal
+# - CC7.1: System Operations
+# - CC7.2: System Monitoring
+# - CC7.3: Incident Detection
+#
+# Usage:
+#   1. Select this preset when creating a cluster profile
+#   2. Label in-scope pods: kubectl label pod <name> soc2/scope=in-scope
 
 components:
   argus:
@@ -17,22 +21,8 @@ components:
   dashboard:
     enabled: true
 
-# Enable compliance templates for PCI-DSS, HIPAA, and SOC2
+# Enable SOC 2 compliance templates
 compliance:
-  pciDss:
-    enabled: true
-    namespace: ""
-    enforcing: false
-    podSelector:
-      pci-dss/scope: "in-scope"
-
-  hipaa:
-    enabled: true
-    namespace: ""
-    enforcing: false
-    podSelector:
-      hipaa/scope: "ephi"
-
   soc2:
     enabled: true
     namespace: ""
@@ -40,7 +30,7 @@ compliance:
     podSelector:
       soc2/scope: "in-scope"
 
-# Enhanced resource limits for compliance workloads
+# Enhanced resources for compliance workloads
 argus:
   controller:
     resources:
@@ -77,21 +67,20 @@ janus:
         cpu: 500m
         memory: 256Mi
 
-# Full observability stack for audit trails
+# Enhanced observability for SOC 2 audits
 observability:
   prometheus:
     enabled: true
     serviceMonitor:
       enabled: true
-      interval: 15s  # More frequent scraping
+      interval: 15s
   opentelemetry:
     enabled: true
-    endpoint: "otel-collector.monitoring:4317"
   grafana:
     dashboards:
       enabled: true
 
-# All alerting rules enabled with lower thresholds
+# All alerting rules enabled
 alerting:
   enabled: true
   rules:
@@ -100,7 +89,7 @@ alerting:
       severity: critical
     highEventRate:
       enabled: true
-      threshold: 50  # Lower threshold for compliance
+      threshold: 50
       severity: warning
     unauthorizedAccess:
       enabled: true

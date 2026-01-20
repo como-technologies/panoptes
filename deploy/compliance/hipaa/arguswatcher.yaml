@@ -1,0 +1,116 @@
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: hipaa-fim
+  labels:
+    app.kubernetes.io/name: hipaa-fim
+    app.kubernetes.io/component: fim
+    app.kubernetes.io/part-of: panoptes
+    compliance: hipaa
+    panoptes.io/template: hipaa-fim
+  annotations:
+    panoptes.io/description: "HIPAA File Integrity Monitoring"
+    hipaa/requirements: "164.312(b), 164.312(c)(1), 164.308(a)(1)"
+spec:
+  selector:
+    matchLabels:
+      hipaa/scope: "ephi"
+
+  subjects:
+    # 164.312(c)(1) - Data Integrity
+    - paths:
+        - /var/log
+      events:
+        - modify
+        - delete
+        - create
+      recursive: true
+      maxDepth: 5
+      ignore:
+        - "*.gz"
+        - "*.old"
+      tags:
+        requirement: "164.312(c)(1)"
+        severity: high
+        category: audit-logs
+
+    # System files affecting ePHI access
+    - paths:
+        - /etc/passwd
+        - /etc/shadow
+        - /etc/group
+        - /etc/sudoers
+      events:
+        - modify
+        - delete
+        - attrib
+      tags:
+        requirement: "164.312(d)"
+        severity: critical
+        category: user-accounts
+
+    # Authentication configuration
+    - paths:
+        - /etc/pam.d
+        - /etc/security
+        - /etc/nsswitch.conf
+      events:
+        - all
+      recursive: true
+      tags:
+        requirement: "164.312(d)"
+        severity: critical
+        category: authentication
+
+    # Application configuration
+    - paths:
+        - /app/config
+        - /etc/app
+        - /opt/app/config
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 3
+      tags:
+        requirement: "164.308(a)(1)"
+        severity: high
+        category: app-config
+
+    # SSL/TLS certificates
+    - paths:
+        - /etc/ssl
+        - /etc/pki
+        - /app/certs
+      events:
+        - all
+      recursive: true
+      tags:
+        requirement: "164.312(e)(1)"
+        severity: critical
+        category: encryption
+
+    # Database configuration files
+    - paths:
+        - /var/lib/postgresql
+        - /var/lib/mysql
+        - /etc/postgresql
+        - /etc/mysql
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 3
+      ignore:
+        - "*.pid"
+        - "*.sock"
+      tags:
+        requirement: "164.312(c)(1)"
+        severity: high
+        category: database-config
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json

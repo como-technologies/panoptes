@@ -6,17 +6,8 @@
 //! These tests verify the end-to-end functionality of the janusd daemon,
 //! including policy evaluation, deduplication, and audit logging.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
-
-use tempfile::TempDir;
-
-/// Test helper to create a temporary directory structure.
-fn create_test_dir() -> TempDir {
-    tempfile::tempdir().expect("Failed to create temp dir")
-}
 
 #[cfg(test)]
 mod policy_evaluation_tests {
@@ -24,6 +15,7 @@ mod policy_evaluation_tests {
 
     /// Access response types matching the daemon's internal representation.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[allow(dead_code)]
     enum AccessResponse {
         Allow,
         Deny,
@@ -269,6 +261,7 @@ mod deduplication_tests {
 
     /// Access response for deduplication testing.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[allow(dead_code)]
     enum AccessResponse {
         Allow,
         Deny,

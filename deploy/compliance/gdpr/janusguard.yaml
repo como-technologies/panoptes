@@ -1,0 +1,97 @@
+# GDPR Access Control and Auditing
+# Articles: 30, 32, 33
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: gdpr-access
+  labels:
+    compliance: gdpr
+    panoptes.io/template: gdpr-access
+  annotations:
+    panoptes.io/description: "GDPR Access Control and Auditing"
+    gdpr/articles: "30, 32, 33"
+spec:
+  selector:
+    matchLabels:
+      gdpr/scope: "personal-data"
+
+  subjects:
+    # Article 30: Personal data access auditing
+    - allow:
+        - /app/data
+        - /var/lib/app/data
+        - /data
+      events:
+        - access
+        - open
+        - modify
+      audit: true
+      tags:
+        article: "30"
+        severity: high
+        category: personal-data-access
+
+    # Article 32(1)(b): Credential protection
+    - deny:
+        - /etc/shadow
+        - /etc/gshadow
+        - /root/.ssh
+      allow:
+        - /etc/passwd
+        - /etc/group
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        article: "32(1)(b)"
+        severity: critical
+        category: credential-protection
+
+    # Article 32: Kubernetes secrets
+    - deny:
+        - /var/run/secrets
+      events:
+        - access
+        - open
+      autoAllowOwner: true
+      defaultResponse: deny
+      audit: true
+      tags:
+        article: "32"
+        severity: critical
+        category: k8s-secrets
+
+    # Article 30: Data export auditing
+    - allow:
+        - /backup
+        - /export
+        - /var/backup
+      events:
+        - all
+      audit: true
+      tags:
+        article: "30"
+        severity: high
+        category: data-export
+
+    # Article 32(1)(d): Data transfer tool auditing
+    - deny:
+        - /usr/bin/curl
+        - /usr/bin/wget
+        - /usr/bin/scp
+        - /usr/bin/rsync
+      events:
+        - execute
+      defaultResponse: audit
+      audit: true
+      tags:
+        article: "32(1)(d)"
+        severity: medium
+        category: data-transfer-tools
+
+  containerRuntime: auto
+  enforcing: false
+  paused: false
+  logFormat: json

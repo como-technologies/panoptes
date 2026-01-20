@@ -1,0 +1,71 @@
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: pci-dss-access
+  labels:
+    app.kubernetes.io/name: pci-dss-access
+    app.kubernetes.io/component: access-control
+    app.kubernetes.io/part-of: panoptes
+    compliance: pci-dss
+    panoptes.io/template: pci-dss-access
+  annotations:
+    panoptes.io/description: "PCI-DSS Access Control and Auditing"
+    pci-dss/requirements: "7.1, 10.2"
+spec:
+  selector:
+    matchLabels:
+      pci-dss/scope: "in-scope"
+
+  subjects:
+    # Requirement 7.1 - Limit access to system components
+    - deny:
+        - /etc/shadow
+        - /etc/gshadow
+        - /etc/sudoers
+        - /root/.ssh/id_*
+        - /root/.ssh/authorized_keys
+      allow:
+        - /etc/passwd
+        - /etc/group
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        requirement: "7.1"
+        severity: critical
+        category: credential-access
+
+    # Kubernetes secrets protection
+    - deny:
+        - /var/run/secrets/kubernetes.io
+      events:
+        - access
+        - open
+      autoAllowOwner: true
+      defaultResponse: deny
+      audit: true
+      tags:
+        requirement: "7.1"
+        severity: critical
+        category: k8s-secrets
+
+    # Requirement 10.2 - Audit trail logging
+    - allow:
+        - /app/data
+        - /var/lib/app
+      events:
+        - access
+        - open
+        - modify
+      audit: true
+      tags:
+        requirement: "10.2"
+        severity: high
+        category: data-access
+
+  containerRuntime: auto
+  enforcing: false
+  paused: false
+  logFormat: json

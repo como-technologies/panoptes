@@ -1,0 +1,150 @@
+# Full Compliance Preset
+# Enables all compliance frameworks simultaneously
+#
+# This preset is suitable for environments that need to meet
+# multiple compliance requirements (e.g., healthcare payment processing
+# that requires both HIPAA and PCI-DSS compliance).
+#
+# Frameworks enabled:
+# - Base Security (general security baseline)
+# - PCI-DSS (payment card industry)
+# - HIPAA (healthcare)
+# - SOC 2 (service organizations)
+# - CIS Kubernetes (Kubernetes hardening)
+# - NIST 800-53 (FISMA/FedRAMP)
+# - GDPR (EU data protection)
+#
+# Usage:
+#   1. Select this preset when creating a cluster profile
+#   2. Label pods with appropriate compliance labels:
+#      - security.panoptes.io/monitored=true (base security)
+#      - pci-dss/scope=in-scope (PCI-DSS)
+#      - hipaa/scope=ephi (HIPAA)
+#      - soc2/scope=in-scope (SOC 2)
+#      - cis/scope=kubernetes-audit (CIS K8s)
+#      - nist-800-53/scope=moderate (NIST 800-53)
+#      - gdpr/scope=personal-data (GDPR)
+
+components:
+  argus:
+    enabled: true
+  janus:
+    enabled: true
+  dashboard:
+    enabled: true
+
+# Enable ALL compliance templates
+compliance:
+  baseSecurity:
+    enabled: true
+    namespace: ""
+    enforcing: false
+    podSelector:
+      security.panoptes.io/monitored: "true"
+
+  pciDss:
+    enabled: true
+    namespace: ""
+    enforcing: false
+    podSelector:
+      pci-dss/scope: "in-scope"
+
+  hipaa:
+    enabled: true
+    namespace: ""
+    enforcing: false
+    podSelector:
+      hipaa/scope: "ephi"
+
+  soc2:
+    enabled: true
+    namespace: ""
+    enforcing: false
+    podSelector:
+      soc2/scope: "in-scope"
+
+  cisKubernetes:
+    enabled: true
+    namespace: ""
+    enforcing: true
+    podSelector:
+      cis/scope: "kubernetes-audit"
+
+  nist80053:
+    enabled: true
+    namespace: ""
+    enforcing: false
+    podSelector:
+      nist-800-53/scope: "moderate"
+
+  gdpr:
+    enabled: true
+    namespace: ""
+    enforcing: false
+    podSelector:
+      gdpr/scope: "personal-data"
+
+# Maximum resources for full compliance workloads
+argus:
+  controller:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 512Mi
+      limits:
+        cpu: 2000m
+        memory: 1Gi
+  daemon:
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+
+janus:
+  controller:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 512Mi
+      limits:
+        cpu: 2000m
+        memory: 1Gi
+  daemon:
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+
+# Full observability stack
+observability:
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 15s
+  opentelemetry:
+    enabled: true
+  grafana:
+    dashboards:
+      enabled: true
+
+# All alerting rules with stricter thresholds
+alerting:
+  enabled: true
+  rules:
+    criticalFileModified:
+      enabled: true
+      severity: critical
+    highEventRate:
+      enabled: true
+      threshold: 25  # Lower threshold for full compliance
+      severity: warning
+    unauthorizedAccess:
+      enabled: true
+      severity: critical

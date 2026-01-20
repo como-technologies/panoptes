@@ -1,0 +1,97 @@
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: base-security-access
+  labels:
+    app.kubernetes.io/name: base-security-access
+    app.kubernetes.io/component: access-control
+    app.kubernetes.io/part-of: panoptes
+    panoptes.io/template: base-security
+  annotations:
+    panoptes.io/description: "Base Security Access Control"
+spec:
+  selector:
+    matchLabels:
+      security.panoptes.io/monitored: "true"
+
+  subjects:
+    # Protect shadow files
+    - deny:
+        - /etc/shadow
+        - /etc/gshadow
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        severity: critical
+        category: credential-access
+
+    # Protect SSH private keys
+    - deny:
+        - /root/.ssh/id_*
+        - /root/.ssh/authorized_keys
+        - /home/*/.ssh/id_*
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        severity: critical
+        category: ssh-keys
+
+    # Kubernetes secrets - allow owner only
+    - deny:
+        - /var/run/secrets/kubernetes.io
+      events:
+        - access
+        - open
+      autoAllowOwner: true
+      defaultResponse: deny
+      audit: true
+      tags:
+        severity: critical
+        category: k8s-secrets
+
+    # Audit suspicious tool usage
+    - deny:
+        - /usr/bin/curl
+        - /usr/bin/wget
+        - /usr/bin/nc
+        - /usr/bin/ncat
+        - /usr/bin/netcat
+        - /usr/bin/nmap
+        - /usr/bin/socat
+      allow: []
+      events:
+        - execute
+      defaultResponse: audit
+      audit: true
+      tags:
+        severity: high
+        category: suspicious-tools
+
+    # Audit package manager usage
+    - deny:
+        - /usr/bin/apt
+        - /usr/bin/apt-get
+        - /usr/bin/yum
+        - /usr/bin/dnf
+        - /usr/bin/apk
+        - /usr/bin/pip
+        - /usr/bin/pip3
+        - /usr/bin/npm
+      events:
+        - execute
+      defaultResponse: audit
+      audit: true
+      tags:
+        severity: medium
+        category: package-managers
+
+  containerRuntime: auto
+  enforcing: false
+  paused: false
+  logFormat: json

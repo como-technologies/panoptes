@@ -1,0 +1,99 @@
+# NIST 800-53 Access Control and Auditing
+# Controls: AU-2, AU-3, AU-6, AC-6
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: nist-access
+  labels:
+    compliance: nist-800-53
+    panoptes.io/template: nist-access
+  annotations:
+    panoptes.io/description: "NIST 800-53 Access Control and Auditing"
+    nist/controls: "AU-2, AU-3, AU-6, AC-6"
+spec:
+  selector:
+    matchLabels:
+      nist-800-53/scope: "moderate"
+
+  subjects:
+    # AC-6: Credential file access control
+    - deny:
+        - /etc/shadow
+        - /etc/gshadow
+        - /etc/sudoers.d
+      allow:
+        - /etc/passwd
+        - /etc/group
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        control: "AC-6"
+        severity: critical
+        category: credential-access
+
+    # AU-2: Audit log access
+    - allow:
+        - /var/log
+        - /var/audit
+      events:
+        - access
+        - open
+        - modify
+      audit: true
+      tags:
+        control: "AU-2"
+        severity: high
+        category: audit-log-access
+
+    # AC-6: SSH key protection
+    - deny:
+        - /root/.ssh/id_*
+        - /root/.ssh/authorized_keys
+        - /home/*/.ssh/id_*
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        control: "AC-6"
+        severity: critical
+        category: ssh-keys
+
+    # AU-2: Kubernetes secrets
+    - deny:
+        - /var/run/secrets/kubernetes.io
+      events:
+        - access
+        - open
+      autoAllowOwner: true
+      defaultResponse: audit
+      audit: true
+      tags:
+        control: "AU-2"
+        severity: high
+        category: k8s-secrets
+
+    # AC-6: Network tool restrictions
+    - deny:
+        - /usr/bin/curl
+        - /usr/bin/wget
+        - /usr/bin/nc
+        - /usr/bin/nmap
+        - /usr/bin/tcpdump
+      events:
+        - execute
+      defaultResponse: audit
+      audit: true
+      tags:
+        control: "AC-6"
+        severity: high
+        category: network-tools
+
+  containerRuntime: auto
+  enforcing: false
+  paused: false
+  logFormat: json

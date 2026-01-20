@@ -1,0 +1,125 @@
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: base-security-fim
+  labels:
+    app.kubernetes.io/name: base-security-fim
+    app.kubernetes.io/component: fim
+    app.kubernetes.io/part-of: panoptes
+    panoptes.io/template: base-security
+  annotations:
+    panoptes.io/description: "Base Security File Integrity Monitoring"
+spec:
+  selector:
+    matchLabels:
+      security.panoptes.io/monitored: "true"
+
+  subjects:
+    # Critical system files
+    - paths:
+        - /etc/passwd
+        - /etc/shadow
+        - /etc/group
+        - /etc/gshadow
+        - /etc/sudoers
+      events:
+        - modify
+        - delete
+        - create
+        - attrib
+      tags:
+        severity: critical
+        category: user-accounts
+
+    # Sudoers directory
+    - paths:
+        - /etc/sudoers.d
+      events:
+        - all
+      recursive: true
+      tags:
+        severity: critical
+        category: sudo-config
+
+    # SSH configuration
+    - paths:
+        - /etc/ssh
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      tags:
+        severity: critical
+        category: ssh-config
+
+    # Root SSH keys
+    - paths:
+        - /root/.ssh
+      events:
+        - all
+      recursive: true
+      tags:
+        severity: critical
+        category: ssh-keys
+
+    # System log integrity
+    - paths:
+        - /var/log
+      events:
+        - delete
+        - modify
+      recursive: true
+      maxDepth: 2
+      ignore:
+        - "*.gz"
+        - "*.old"
+        - "*.[0-9]"
+        - "lastlog"
+        - "wtmp"
+        - "btmp"
+      tags:
+        severity: high
+        category: audit-logs
+
+    # PAM authentication modules
+    - paths:
+        - /etc/pam.d
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      tags:
+        severity: critical
+        category: authentication
+
+    # Cron jobs
+    - paths:
+        - /etc/cron.d
+        - /etc/crontab
+        - /var/spool/cron
+      events:
+        - all
+      recursive: true
+      tags:
+        severity: high
+        category: scheduled-tasks
+
+    # System services
+    - paths:
+        - /etc/systemd/system
+        - /etc/init.d
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 2
+      tags:
+        severity: high
+        category: system-services
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json

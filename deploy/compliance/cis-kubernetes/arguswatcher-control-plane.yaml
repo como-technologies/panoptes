@@ -1,0 +1,84 @@
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: cis-k8s-control-plane
+  labels:
+    app.kubernetes.io/name: cis-k8s-control-plane
+    app.kubernetes.io/component: fim
+    app.kubernetes.io/part-of: panoptes
+    compliance: cis-kubernetes
+    panoptes.io/template: cis-k8s-control-plane
+  annotations:
+    panoptes.io/description: "CIS Kubernetes Control Plane Monitoring"
+    cis/benchmark: "v1.8"
+    cis/sections: "1.1, 1.2"
+spec:
+  selector:
+    matchLabels:
+      cis/scope: "kubernetes-audit"
+
+  subjects:
+    # 1.1.1-1.1.21 - Control plane configuration files
+    - paths:
+        - /etc/kubernetes/manifests
+        - /etc/kubernetes/pki
+      events:
+        - modify
+        - create
+        - delete
+        - attrib
+      recursive: true
+      tags:
+        benchmark: "CIS 1.1"
+        severity: critical
+        category: control-plane-manifests
+
+    # API server and controller configuration
+    - paths:
+        - /etc/kubernetes/admin.conf
+        - /etc/kubernetes/controller-manager.conf
+        - /etc/kubernetes/scheduler.conf
+      events:
+        - modify
+        - delete
+        - attrib
+      tags:
+        benchmark: "CIS 1.1"
+        severity: critical
+        category: kubeconfig
+
+    # etcd data directory
+    - paths:
+        - /var/lib/etcd
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 2
+      ignore:
+        - "*.snap"
+        - "*.wal"
+      tags:
+        benchmark: "CIS 1.1"
+        severity: critical
+        category: etcd-data
+
+    # Container runtime configuration
+    - paths:
+        - /etc/containerd
+        - /etc/crio
+        - /etc/docker
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      tags:
+        benchmark: "CIS 1.2"
+        severity: high
+        category: container-runtime
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json

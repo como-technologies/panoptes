@@ -1,13 +1,15 @@
-# Compliance preset - PCI-DSS, SOC2, HIPAA ready configuration
-# Enhanced logging and auditing for compliance requirements
+# PCI-DSS Compliance Preset
+# Payment Card Industry Data Security Standard monitoring
 #
-# This preset enables the three most common compliance frameworks.
-# For individual framework presets, see:
-# - pci-dss.yaml
-# - hipaa.yaml
-# - soc2.yaml
-# - cis-kubernetes.yaml
-# - full-compliance.yaml (all frameworks)
+# Requirements covered:
+# - 10.5.5: File integrity monitoring on logs
+# - 10.2.x: Audit trail logging
+# - 7.1: Access control enforcement
+# - 11.5: Change detection on critical files
+#
+# Usage:
+#   1. Select this preset when creating a cluster profile
+#   2. Label in-scope pods: kubectl label pod <name> pci-dss/scope=in-scope
 
 components:
   argus:
@@ -17,7 +19,7 @@ components:
   dashboard:
     enabled: true
 
-# Enable compliance templates for PCI-DSS, HIPAA, and SOC2
+# Enable PCI-DSS compliance templates
 compliance:
   pciDss:
     enabled: true
@@ -26,21 +28,7 @@ compliance:
     podSelector:
       pci-dss/scope: "in-scope"
 
-  hipaa:
-    enabled: true
-    namespace: ""
-    enforcing: false
-    podSelector:
-      hipaa/scope: "ephi"
-
-  soc2:
-    enabled: true
-    namespace: ""
-    enforcing: false
-    podSelector:
-      soc2/scope: "in-scope"
-
-# Enhanced resource limits for compliance workloads
+# Enhanced resources for compliance workloads
 argus:
   controller:
     resources:
@@ -77,21 +65,20 @@ janus:
         cpu: 500m
         memory: 256Mi
 
-# Full observability stack for audit trails
+# Enhanced observability for PCI audits
 observability:
   prometheus:
     enabled: true
     serviceMonitor:
       enabled: true
-      interval: 15s  # More frequent scraping
+      interval: 15s
   opentelemetry:
     enabled: true
-    endpoint: "otel-collector.monitoring:4317"
   grafana:
     dashboards:
       enabled: true
 
-# All alerting rules enabled with lower thresholds
+# All alerting rules enabled
 alerting:
   enabled: true
   rules:
@@ -100,7 +87,7 @@ alerting:
       severity: critical
     highEventRate:
       enabled: true
-      threshold: 50  # Lower threshold for compliance
+      threshold: 50
       severity: warning
     unauthorizedAccess:
       enabled: true

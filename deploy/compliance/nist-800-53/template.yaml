@@ -1,0 +1,272 @@
+# NIST 800-53 Compliance Monitoring Template
+# Panoptes file integrity and access auditing for federal information systems
+#
+# Requirements covered:
+# - SI-7: Software, firmware, and information integrity
+# - SI-7(1): Integrity verification using cryptographic mechanisms
+# - AU-2: Audit events
+# - AU-3: Content of audit records
+# - AU-6: Audit review, analysis, and reporting
+#
+# Applicable to: FISMA Moderate and High baselines, FedRAMP
+#
+# Usage:
+#   1. Label your pods: kubectl label pod <name> nist-800-53/scope=moderate
+#   2. Apply this template: kubectl apply -f nist-800-53.yaml
+#   3. Verify: kubectl get aw,jg -l compliance=nist-800-53
+---
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: nist-fim
+  labels:
+    compliance: nist-800-53
+    panoptes.io/template: nist-fim
+  annotations:
+    panoptes.io/description: "NIST 800-53 File Integrity Monitoring"
+    nist/controls: "SI-7, SI-7(1), SI-7(2)"
+spec:
+  # Target federal information system workloads
+  selector:
+    matchLabels:
+      nist-800-53/scope: "moderate"
+
+  subjects:
+    # SI-7: Software and Information Integrity
+    # "Employ integrity verification tools to detect unauthorized changes"
+    - paths:
+        - /usr/bin
+        - /usr/sbin
+        - /bin
+        - /sbin
+      events:
+        - modify
+        - create
+        - delete
+        - attrib
+      recursive: true
+      ignore:
+        - "*.pyc"
+        - "__pycache__"
+      tags:
+        control: "SI-7"
+        severity: critical
+        category: system-binaries
+
+    # SI-7(1): Integrity Checks - Configuration files
+    - paths:
+        - /etc/passwd
+        - /etc/shadow
+        - /etc/group
+        - /etc/gshadow
+        - /etc/sudoers
+      events:
+        - modify
+        - delete
+        - attrib
+      tags:
+        control: "SI-7(1)"
+        severity: critical
+        category: user-accounts
+
+    # SI-7: System configuration integrity
+    - paths:
+        - /etc/ssh
+        - /etc/pam.d
+        - /etc/security
+        - /etc/nsswitch.conf
+      events:
+        - all
+      recursive: true
+      tags:
+        control: "SI-7"
+        severity: critical
+        category: authentication-config
+
+    # AU-2/AU-3: Audit log integrity
+    - paths:
+        - /var/log
+      events:
+        - modify
+        - delete
+        - create
+      recursive: true
+      maxDepth: 3
+      ignore:
+        - "*.gz"
+        - "*.old"
+        - "*.[0-9]"
+      tags:
+        control: "AU-2"
+        severity: high
+        category: audit-logs
+
+    # SI-7: Application binaries and libraries
+    - paths:
+        - /usr/lib
+        - /lib
+        - /lib64
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 3
+      ignore:
+        - "*.pyc"
+        - "*.cache"
+      tags:
+        control: "SI-7"
+        severity: high
+        category: system-libraries
+
+    # SI-7: Kernel modules
+    - paths:
+        - /lib/modules
+        - /etc/modprobe.d
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      tags:
+        control: "SI-7"
+        severity: critical
+        category: kernel-modules
+
+    # SI-7: Boot configuration
+    - paths:
+        - /boot
+        - /etc/grub.d
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 2
+      tags:
+        control: "SI-7"
+        severity: critical
+        category: boot-config
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json
+
+---
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: nist-access
+  labels:
+    compliance: nist-800-53
+    panoptes.io/template: nist-access
+  annotations:
+    panoptes.io/description: "NIST 800-53 Access Control and Auditing"
+    nist/controls: "AU-2, AU-3, AU-6, AC-6"
+spec:
+  # Target federal information system workloads
+  selector:
+    matchLabels:
+      nist-800-53/scope: "moderate"
+
+  subjects:
+    # AU-2/AU-3: Generate audit records for security-relevant events
+    # "Record and examine activity in information systems"
+
+    # AC-6: Least Privilege - Credential file access
+    - deny:
+        - /etc/shadow
+        - /etc/gshadow
+        - /etc/sudoers.d
+      allow:
+        - /etc/passwd
+        - /etc/group
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        control: "AC-6"
+        severity: critical
+        category: credential-access
+
+    # AU-2: Audit sensitive directory access
+    - allow:
+        - /var/log
+        - /var/audit
+      events:
+        - access
+        - open
+        - modify
+      audit: true
+      tags:
+        control: "AU-2"
+        severity: high
+        category: audit-log-access
+
+    # AC-6: SSH key access control
+    - deny:
+        - /root/.ssh/id_*
+        - /root/.ssh/authorized_keys
+        - /home/*/.ssh/id_*
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        control: "AC-6"
+        severity: critical
+        category: ssh-keys
+
+    # AU-2: Kubernetes secrets access
+    - deny:
+        - /var/run/secrets/kubernetes.io
+      events:
+        - access
+        - open
+      autoAllowOwner: true
+      defaultResponse: audit
+      audit: true
+      tags:
+        control: "AU-2"
+        severity: high
+        category: k8s-secrets
+
+    # SI-7: System binary execution auditing
+    - allow:
+        - /usr/bin
+        - /usr/sbin
+        - /bin
+        - /sbin
+      events:
+        - execute
+      audit: true
+      tags:
+        control: "SI-7"
+        severity: medium
+        category: binary-execution
+
+    # AC-6: Network tool restrictions
+    - deny:
+        - /usr/bin/curl
+        - /usr/bin/wget
+        - /usr/bin/nc
+        - /usr/bin/nmap
+        - /usr/bin/tcpdump
+      events:
+        - execute
+      defaultResponse: audit
+      audit: true
+      tags:
+        control: "AC-6"
+        severity: high
+        category: network-tools
+
+  containerRuntime: auto
+  # Start in audit-only mode for federal systems
+  enforcing: false
+  paused: false
+  logFormat: json

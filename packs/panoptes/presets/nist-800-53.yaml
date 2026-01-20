@@ -1,13 +1,18 @@
-# Compliance preset - PCI-DSS, SOC2, HIPAA ready configuration
-# Enhanced logging and auditing for compliance requirements
+# NIST 800-53 Compliance Preset
+# Federal Information Security Controls (FISMA/FedRAMP)
 #
-# This preset enables the three most common compliance frameworks.
-# For individual framework presets, see:
-# - pci-dss.yaml
-# - hipaa.yaml
-# - soc2.yaml
-# - cis-kubernetes.yaml
-# - full-compliance.yaml (all frameworks)
+# Controls covered:
+# - SI-7: Software, firmware, and information integrity
+# - SI-7(1): Integrity verification using cryptographic mechanisms
+# - SI-7(2): Automated response to integrity violations
+# - AU-2: Audit events - determine auditable events
+# - AU-3: Content of audit records
+# - AU-6: Audit review, analysis, and reporting
+# - AC-6: Least privilege access control
+#
+# Usage:
+#   1. Select this preset when creating a cluster profile
+#   2. Label in-scope pods: kubectl label pod <name> nist-800-53/scope=moderate
 
 components:
   argus:
@@ -17,30 +22,16 @@ components:
   dashboard:
     enabled: true
 
-# Enable compliance templates for PCI-DSS, HIPAA, and SOC2
+# Enable NIST 800-53 compliance templates
 compliance:
-  pciDss:
+  nist80053:
     enabled: true
     namespace: ""
     enforcing: false
     podSelector:
-      pci-dss/scope: "in-scope"
+      nist-800-53/scope: "moderate"
 
-  hipaa:
-    enabled: true
-    namespace: ""
-    enforcing: false
-    podSelector:
-      hipaa/scope: "ephi"
-
-  soc2:
-    enabled: true
-    namespace: ""
-    enforcing: false
-    podSelector:
-      soc2/scope: "in-scope"
-
-# Enhanced resource limits for compliance workloads
+# Enhanced resources for compliance workloads
 argus:
   controller:
     resources:
@@ -77,21 +68,20 @@ janus:
         cpu: 500m
         memory: 256Mi
 
-# Full observability stack for audit trails
+# Enhanced observability for federal audits
 observability:
   prometheus:
     enabled: true
     serviceMonitor:
       enabled: true
-      interval: 15s  # More frequent scraping
+      interval: 15s
   opentelemetry:
     enabled: true
-    endpoint: "otel-collector.monitoring:4317"
   grafana:
     dashboards:
       enabled: true
 
-# All alerting rules enabled with lower thresholds
+# All alerting rules enabled
 alerting:
   enabled: true
   rules:
@@ -100,7 +90,7 @@ alerting:
       severity: critical
     highEventRate:
       enabled: true
-      threshold: 50  # Lower threshold for compliance
+      threshold: 50
       severity: warning
     unauthorizedAccess:
       enabled: true

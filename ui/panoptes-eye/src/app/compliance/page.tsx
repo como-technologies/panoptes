@@ -12,23 +12,48 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { ResourceCreationDialog, type ResourceCreationConfig } from '@/components/resources/ResourceCreationDialog';
 
-// Mapping of framework IDs to their template files
-const frameworkTemplates: Record<string, { file: string; description: string }> = {
+// Mapping of framework IDs to their template files and labels
+const frameworkTemplates: Record<string, {
+  file: string;
+  description: string;
+  label: string;
+  labelValue: string;
+}> = {
   'pci-dss': {
-    file: 'pci-dss.yaml',
+    file: 'pci-dss/template.yaml',
     description: 'PCI-DSS 3.2.1/4.0 monitoring for payment card data environments',
+    label: 'pci-dss/scope',
+    labelValue: 'in-scope',
   },
   'hipaa': {
-    file: 'hipaa.yaml',
+    file: 'hipaa/template.yaml',
     description: 'HIPAA Security Rule monitoring for healthcare environments',
+    label: 'hipaa/scope',
+    labelValue: 'ephi',
   },
   'soc2': {
-    file: 'soc2.yaml',
+    file: 'soc2/template.yaml',
     description: 'SOC 2 Trust Services Criteria monitoring',
+    label: 'soc2/scope',
+    labelValue: 'in-scope',
   },
   'cis': {
-    file: 'cis-kubernetes.yaml',
+    file: 'cis-kubernetes/template.yaml',
     description: 'CIS Kubernetes Benchmark v1.8 monitoring',
+    label: 'cis/scope',
+    labelValue: 'kubernetes-audit',
+  },
+  'nist-800-53': {
+    file: 'nist-800-53/template.yaml',
+    description: 'NIST 800-53 monitoring for federal information systems (FISMA/FedRAMP)',
+    label: 'nist-800-53/scope',
+    labelValue: 'moderate',
+  },
+  'gdpr': {
+    file: 'gdpr/template.yaml',
+    description: 'GDPR monitoring for EU personal data protection requirements',
+    label: 'gdpr/scope',
+    labelValue: 'personal-data',
   },
 };
 
@@ -285,7 +310,13 @@ export default function CompliancePage() {
   const getKubectlCommand = (frameworkId: string) => {
     const template = frameworkTemplates[frameworkId];
     if (!template) return '';
-    return `kubectl apply -f https://raw.githubusercontent.com/CoMo-Technologies/panoptes/main/docs/compliance-templates/${template.file}`;
+    return `kubectl apply -f \\\n  https://raw.githubusercontent.com/Como-Technologies/panoptes/main/deploy/compliance/${template.file}`;
+  };
+
+  const getLabelCommand = (frameworkId: string) => {
+    const template = frameworkTemplates[frameworkId];
+    if (!template) return '';
+    return `kubectl label pods -l app=myapp ${template.label}=${template.labelValue}`;
   };
 
   const copyToClipboard = async (text: string) => {
@@ -495,31 +526,33 @@ export default function CompliancePage() {
             {templateDialog.frameworkId && frameworkTemplates[templateDialog.frameworkId]?.description}
           </DialogDescription>
         </DialogHeader>
-        <div className="mt-4">
-          <p className="text-sm font-medium mb-2">Apply with kubectl:</p>
-          <div className="relative">
-            <pre className="bg-gray-100 dark:bg-gray-900 p-3 rounded text-xs overflow-x-auto">
-              {templateDialog.frameworkId && getKubectlCommand(templateDialog.frameworkId)}
-            </pre>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="absolute top-1 right-1"
-              onClick={() => templateDialog.frameworkId && copyToClipboard(getKubectlCommand(templateDialog.frameworkId))}
-            >
-              {copied ? (
-                <Check className="h-4 w-4 text-green-500" />
-              ) : (
-                <Copy className="h-4 w-4" />
-              )}
-            </Button>
+        <div className="mt-4 space-y-4">
+          <div>
+            <p className="text-sm font-medium mb-2">1. Apply the template:</p>
+            <div className="relative">
+              <pre className="bg-gray-100 dark:bg-gray-900 p-3 rounded text-xs whitespace-pre-wrap break-all">
+                {templateDialog.frameworkId && getKubectlCommand(templateDialog.frameworkId)}
+              </pre>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="absolute top-1 right-1"
+                onClick={() => templateDialog.frameworkId && copyToClipboard(getKubectlCommand(templateDialog.frameworkId))}
+              >
+                {copied ? (
+                  <Check className="h-4 w-4 text-green-500" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
           </div>
-          <p className="text-xs text-gray-500 mt-3">
-            After applying, label your pods to start monitoring:
-          </p>
-          <pre className="bg-gray-100 dark:bg-gray-900 p-2 rounded text-xs mt-1">
-            kubectl label pods -l app=myapp {templateDialog.frameworkId}/scope=in-scope
-          </pre>
+          <div>
+            <p className="text-sm font-medium mb-2">2. Label your pods to start monitoring:</p>
+            <pre className="bg-gray-100 dark:bg-gray-900 p-3 rounded text-xs whitespace-pre-wrap break-all">
+              {templateDialog.frameworkId && getLabelCommand(templateDialog.frameworkId)}
+            </pre>
+          </div>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={closeTemplateDialog}>

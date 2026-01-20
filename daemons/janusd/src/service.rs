@@ -1063,7 +1063,7 @@ mod tests {
     async fn test_janusd_service_new() {
         use crate::audit::NullAuditLogger;
         let audit: Arc<dyn AuditLogger> = Arc::new(NullAuditLogger);
-        let service = JanusdServiceImpl::new("test-node".to_string(), 100, audit);
+        let service = JanusdServiceImpl::new("test-node".to_string(), "test-cluster".to_string(), 100, audit);
         assert_eq!(service.max_guards, 100);
     }
 

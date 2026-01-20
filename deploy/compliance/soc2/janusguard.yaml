@@ -1,0 +1,88 @@
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: soc2-access
+  labels:
+    app.kubernetes.io/name: soc2-access
+    app.kubernetes.io/component: access-control
+    app.kubernetes.io/part-of: panoptes
+    compliance: soc2
+    panoptes.io/template: soc2-access
+  annotations:
+    panoptes.io/description: "SOC 2 Access Control and Auditing"
+    soc2/criteria: "CC6.1, CC6.2, CC7.3"
+spec:
+  selector:
+    matchLabels:
+      soc2/scope: "in-scope"
+
+  subjects:
+    # CC6.1 - Logical Access Security
+    - deny:
+        - /etc/shadow
+        - /etc/gshadow
+        - /root/.ssh/id_*
+        - /root/.ssh/authorized_keys
+      allow:
+        - /etc/passwd
+        - /etc/group
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        criteria: "CC6.1"
+        severity: critical
+        category: credential-access
+
+    # CC6.2 - Access Authorization
+    - deny:
+        - /var/run/secrets
+      events:
+        - access
+        - open
+      autoAllowOwner: true
+      defaultResponse: deny
+      audit: true
+      tags:
+        criteria: "CC6.2"
+        severity: critical
+        category: k8s-secrets
+
+    # Audit executable access for security tools
+    - deny:
+        - /usr/bin/curl
+        - /usr/bin/wget
+        - /usr/bin/nc
+        - /usr/bin/ncat
+        - /usr/bin/netcat
+        - /usr/bin/base64
+      events:
+        - execute
+      defaultResponse: audit
+      audit: true
+      tags:
+        criteria: "CC7.3"
+        severity: high
+        category: suspicious-tools
+
+    # CC7.3 - Incident Detection
+    - allow:
+        - /app/data
+        - /var/lib/app
+        - /data
+      events:
+        - access
+        - open
+        - modify
+      audit: true
+      tags:
+        criteria: "CC7.3"
+        severity: medium
+        category: data-access
+
+  containerRuntime: auto
+  enforcing: false
+  paused: false
+  logFormat: json

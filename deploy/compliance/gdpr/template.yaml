@@ -1,0 +1,266 @@
+# GDPR Compliance Monitoring Template
+# Panoptes file integrity and access auditing for EU personal data protection
+#
+# Requirements covered:
+# - Article 5(1)(e): Storage limitation - data kept no longer than necessary
+# - Article 30: Records of processing activities
+# - Article 32: Security of processing - integrity and confidentiality
+# - Article 33: Notification of personal data breach (detection support)
+#
+# Note: GDPR compliance requires organizational measures beyond technical controls.
+# This template supports the technical monitoring aspects.
+#
+# Usage:
+#   1. Label pods handling personal data: kubectl label pod <name> gdpr/scope=personal-data
+#   2. Apply this template: kubectl apply -f gdpr.yaml
+#   3. Verify: kubectl get aw,jg -l compliance=gdpr
+---
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: gdpr-fim
+  labels:
+    compliance: gdpr
+    panoptes.io/template: gdpr-fim
+  annotations:
+    panoptes.io/description: "GDPR File Integrity Monitoring"
+    gdpr/articles: "32, 33"
+spec:
+  # Target pods processing personal data
+  selector:
+    matchLabels:
+      gdpr/scope: "personal-data"
+
+  subjects:
+    # Article 32(1)(b): Ensure ongoing integrity of processing systems
+    # Monitor system files that could affect data integrity
+    - paths:
+        - /etc/passwd
+        - /etc/shadow
+        - /etc/group
+        - /etc/sudoers
+      events:
+        - modify
+        - delete
+        - attrib
+      tags:
+        article: "32(1)(b)"
+        severity: critical
+        category: user-accounts
+
+    # Article 32: Security of processing - configuration integrity
+    - paths:
+        - /etc/ssh
+        - /etc/pam.d
+        - /etc/security
+      events:
+        - all
+      recursive: true
+      tags:
+        article: "32"
+        severity: critical
+        category: authentication
+
+    # Article 30/33: Records of processing - audit log integrity
+    - paths:
+        - /var/log
+      events:
+        - modify
+        - delete
+        - create
+      recursive: true
+      maxDepth: 3
+      ignore:
+        - "*.gz"
+        - "*.old"
+        - "*.[0-9]"
+      tags:
+        article: "30"
+        severity: high
+        category: audit-logs
+
+    # Article 32: Application configuration integrity
+    - paths:
+        - /app/config
+        - /etc/app
+        - /opt/app/config
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 3
+      tags:
+        article: "32"
+        severity: high
+        category: app-config
+
+    # Article 32(1)(a): Encryption configuration (pseudonymisation/encryption)
+    - paths:
+        - /etc/ssl
+        - /etc/pki
+        - /app/certs
+      events:
+        - all
+      recursive: true
+      tags:
+        article: "32(1)(a)"
+        severity: critical
+        category: encryption-config
+
+    # Article 32: Database configuration (data storage integrity)
+    - paths:
+        - /var/lib/postgresql
+        - /var/lib/mysql
+        - /etc/postgresql
+        - /etc/mysql
+        - /etc/redis
+        - /etc/mongodb
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 2
+      ignore:
+        - "*.pid"
+        - "*.sock"
+      tags:
+        article: "32"
+        severity: high
+        category: database-config
+
+    # Article 33: Breach detection support - critical system changes
+    - paths:
+        - /etc/cron.d
+        - /etc/crontab
+        - /var/spool/cron
+      events:
+        - all
+      recursive: true
+      tags:
+        article: "33"
+        severity: high
+        category: scheduled-tasks
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json
+
+---
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: gdpr-access
+  labels:
+    compliance: gdpr
+    panoptes.io/template: gdpr-access
+  annotations:
+    panoptes.io/description: "GDPR Access Control and Auditing"
+    gdpr/articles: "30, 32, 33"
+spec:
+  # Target pods processing personal data
+  selector:
+    matchLabels:
+      gdpr/scope: "personal-data"
+
+  subjects:
+    # Article 30: Records of processing activities
+    # Audit access to personal data directories
+    - allow:
+        - /app/data
+        - /var/lib/app/data
+        - /data
+      events:
+        - access
+        - open
+        - modify
+      audit: true
+      tags:
+        article: "30"
+        severity: high
+        category: personal-data-access
+
+    # Article 32(1)(b): Ensure confidentiality of processing
+    # Protect credential stores
+    - deny:
+        - /etc/shadow
+        - /etc/gshadow
+        - /root/.ssh
+      allow:
+        - /etc/passwd
+        - /etc/group
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        article: "32(1)(b)"
+        severity: critical
+        category: credential-protection
+
+    # Article 32: Kubernetes secrets (may contain encryption keys, credentials)
+    - deny:
+        - /var/run/secrets
+      events:
+        - access
+        - open
+      autoAllowOwner: true
+      defaultResponse: deny
+      audit: true
+      tags:
+        article: "32"
+        severity: critical
+        category: k8s-secrets
+
+    # Article 30/33: Backup and export directories (data portability, breach detection)
+    - allow:
+        - /backup
+        - /export
+        - /var/backup
+        - /tmp/export
+      events:
+        - all
+      audit: true
+      tags:
+        article: "30"
+        severity: high
+        category: data-export
+
+    # Article 32(1)(d): Process for testing security measures
+    # Audit execution of potentially dangerous tools
+    - deny:
+        - /usr/bin/curl
+        - /usr/bin/wget
+        - /usr/bin/scp
+        - /usr/bin/rsync
+      events:
+        - execute
+      defaultResponse: audit
+      audit: true
+      tags:
+        article: "32(1)(d)"
+        severity: medium
+        category: data-transfer-tools
+
+    # Article 33: Breach notification support
+    # Audit access to sensitive configuration that could indicate breach
+    - allow:
+        - /etc/ssh
+        - /etc/ssl
+      events:
+        - access
+        - open
+        - modify
+      audit: true
+      tags:
+        article: "33"
+        severity: high
+        category: security-config-access
+
+  containerRuntime: auto
+  # Start in audit-only mode
+  enforcing: false
+  paused: false
+  logFormat: json

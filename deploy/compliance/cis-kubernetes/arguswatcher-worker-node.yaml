@@ -1,0 +1,80 @@
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: cis-k8s-worker-node
+  labels:
+    app.kubernetes.io/name: cis-k8s-worker-node
+    app.kubernetes.io/component: fim
+    app.kubernetes.io/part-of: panoptes
+    compliance: cis-kubernetes
+    panoptes.io/template: cis-k8s-worker-node
+  annotations:
+    panoptes.io/description: "CIS Kubernetes Worker Node Monitoring"
+    cis/benchmark: "v1.8"
+    cis/sections: "4.1, 4.2"
+spec:
+  selector:
+    matchLabels:
+      cis/scope: "kubernetes-audit"
+
+  subjects:
+    # 4.1.1-4.1.10 - Worker node configuration files
+    - paths:
+        - /etc/kubernetes/kubelet.conf
+        - /var/lib/kubelet/config.yaml
+        - /var/lib/kubelet/kubeconfig
+      events:
+        - modify
+        - delete
+        - attrib
+      tags:
+        benchmark: "CIS 4.1"
+        severity: critical
+        category: kubelet-config
+
+    # 4.2.x - Kubelet service configuration
+    - paths:
+        - /etc/systemd/system/kubelet.service
+        - /etc/systemd/system/kubelet.service.d
+        - /usr/lib/systemd/system/kubelet.service
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      tags:
+        benchmark: "CIS 4.2"
+        severity: critical
+        category: kubelet-service
+
+    # CNI configuration
+    - paths:
+        - /etc/cni/net.d
+        - /opt/cni/bin
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      tags:
+        benchmark: "CIS 4.1"
+        severity: high
+        category: cni-config
+
+    # Kubelet PKI
+    - paths:
+        - /var/lib/kubelet/pki
+      events:
+        - modify
+        - create
+        - delete
+        - attrib
+      recursive: true
+      tags:
+        benchmark: "CIS 4.1"
+        severity: critical
+        category: kubelet-pki
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json

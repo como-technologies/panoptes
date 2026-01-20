@@ -1,0 +1,116 @@
+# GDPR File Integrity Monitoring
+# Articles: 32, 33
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: gdpr-fim
+  labels:
+    compliance: gdpr
+    panoptes.io/template: gdpr-fim
+  annotations:
+    panoptes.io/description: "GDPR File Integrity Monitoring"
+    gdpr/articles: "32, 33"
+spec:
+  selector:
+    matchLabels:
+      gdpr/scope: "personal-data"
+
+  subjects:
+    # Article 32(1)(b): User account integrity
+    - paths:
+        - /etc/passwd
+        - /etc/shadow
+        - /etc/group
+        - /etc/sudoers
+      events:
+        - modify
+        - delete
+        - attrib
+      tags:
+        article: "32(1)(b)"
+        severity: critical
+        category: user-accounts
+
+    # Article 32: Authentication configuration
+    - paths:
+        - /etc/ssh
+        - /etc/pam.d
+        - /etc/security
+      events:
+        - all
+      recursive: true
+      tags:
+        article: "32"
+        severity: critical
+        category: authentication
+
+    # Article 30: Audit log integrity
+    - paths:
+        - /var/log
+      events:
+        - modify
+        - delete
+        - create
+      recursive: true
+      maxDepth: 3
+      ignore:
+        - "*.gz"
+        - "*.old"
+        - "*.[0-9]"
+      tags:
+        article: "30"
+        severity: high
+        category: audit-logs
+
+    # Article 32: Application configuration
+    - paths:
+        - /app/config
+        - /etc/app
+        - /opt/app/config
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 3
+      tags:
+        article: "32"
+        severity: high
+        category: app-config
+
+    # Article 32(1)(a): Encryption configuration
+    - paths:
+        - /etc/ssl
+        - /etc/pki
+        - /app/certs
+      events:
+        - all
+      recursive: true
+      tags:
+        article: "32(1)(a)"
+        severity: critical
+        category: encryption-config
+
+    # Article 32: Database configuration
+    - paths:
+        - /var/lib/postgresql
+        - /var/lib/mysql
+        - /etc/postgresql
+        - /etc/mysql
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 2
+      ignore:
+        - "*.pid"
+        - "*.sock"
+      tags:
+        article: "32"
+        severity: high
+        category: database-config
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json

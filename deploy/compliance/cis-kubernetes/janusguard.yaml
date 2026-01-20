@@ -1,0 +1,69 @@
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: cis-k8s-secrets
+  labels:
+    app.kubernetes.io/name: cis-k8s-secrets
+    app.kubernetes.io/component: access-control
+    app.kubernetes.io/part-of: panoptes
+    compliance: cis-kubernetes
+    panoptes.io/template: cis-k8s-secrets
+  annotations:
+    panoptes.io/description: "CIS Kubernetes Secrets Access Control"
+    cis/benchmark: "v1.8"
+    cis/sections: "5.1, 5.4"
+spec:
+  selector:
+    matchLabels:
+      cis/scope: "kubernetes-audit"
+
+  subjects:
+    # 5.1.6 - Service Account Token mounting
+    - deny:
+        - /var/run/secrets/kubernetes.io/serviceaccount
+      events:
+        - access
+        - open
+      autoAllowOwner: true
+      defaultResponse: audit
+      audit: true
+      tags:
+        benchmark: "CIS 5.1.6"
+        severity: high
+        category: serviceaccount-tokens
+
+    # 5.4.1 - Sensitive host paths
+    - deny:
+        - /etc/kubernetes
+        - /var/lib/kubelet
+        - /var/lib/etcd
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        benchmark: "CIS 5.4"
+        severity: critical
+        category: host-path-access
+
+    # Container runtime sockets
+    - deny:
+        - /var/run/docker.sock
+        - /var/run/containerd/containerd.sock
+        - /var/run/crio/crio.sock
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        benchmark: "CIS 5.4"
+        severity: critical
+        category: runtime-socket
+
+  containerRuntime: auto
+  # Enforcing recommended for runtime socket protection
+  enforcing: true
+  paused: false
+  logFormat: json

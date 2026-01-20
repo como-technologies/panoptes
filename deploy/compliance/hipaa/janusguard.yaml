@@ -1,0 +1,83 @@
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: hipaa-access
+  labels:
+    app.kubernetes.io/name: hipaa-access
+    app.kubernetes.io/component: access-control
+    app.kubernetes.io/part-of: panoptes
+    compliance: hipaa
+    panoptes.io/template: hipaa-access
+  annotations:
+    panoptes.io/description: "HIPAA Access Control and Auditing"
+    hipaa/requirements: "164.312(b), 164.312(d)"
+spec:
+  selector:
+    matchLabels:
+      hipaa/scope: "ephi"
+
+  subjects:
+    # 164.312(b) - Audit Controls
+    - allow:
+        - /app/data
+        - /var/lib/app/data
+        - /data
+      events:
+        - access
+        - open
+        - modify
+      audit: true
+      tags:
+        requirement: "164.312(b)"
+        severity: high
+        category: ephi-access
+
+    # 164.312(d) - Person/Entity Authentication
+    - deny:
+        - /etc/shadow
+        - /etc/gshadow
+        - /root/.ssh
+      allow:
+        - /etc/passwd
+        - /etc/group
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        requirement: "164.312(d)"
+        severity: critical
+        category: credential-access
+
+    # Kubernetes secrets
+    - deny:
+        - /var/run/secrets
+      events:
+        - access
+        - open
+      autoAllowOwner: true
+      defaultResponse: deny
+      audit: true
+      tags:
+        requirement: "164.312(d)"
+        severity: critical
+        category: k8s-secrets
+
+    # Backup and export directories
+    - allow:
+        - /backup
+        - /export
+        - /var/backup
+      events:
+        - all
+      audit: true
+      tags:
+        requirement: "164.312(b)"
+        severity: high
+        category: backup-access
+
+  containerRuntime: auto
+  enforcing: false
+  paused: false
+  logFormat: json

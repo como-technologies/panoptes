@@ -139,3 +139,55 @@ alerting:
       threshold: 100
     unauthorizedAccess:
       enabled: true
+
+# Compliance Templates
+# Enable pre-configured compliance monitoring for specific frameworks
+compliance:
+  baseSecurity:
+    enabled: false
+    namespace: ""  # Uses release namespace if empty
+    enforcing: false
+    podSelector:
+      security.panoptes.io/monitored: "true"
+
+  pciDss:
+    enabled: false
+    namespace: ""
+    enforcing: false
+    podSelector:
+      pci-dss/scope: "in-scope"
+
+  hipaa:
+    enabled: false
+    namespace: ""
+    enforcing: false
+    podSelector:
+      hipaa/scope: "ephi"
+
+  soc2:
+    enabled: false
+    namespace: ""
+    enforcing: false
+    podSelector:
+      soc2/scope: "in-scope"
+
+  cisKubernetes:
+    enabled: false
+    namespace: ""
+    enforcing: true  # CIS recommends enforcement for runtime sockets
+    podSelector:
+      cis/scope: "kubernetes-audit"
+
+  nist80053:
+    enabled: false
+    namespace: ""
+    enforcing: false
+    podSelector:
+      nist-800-53/scope: "moderate"
+
+  gdpr:
+    enabled: false
+    namespace: ""
+    enforcing: false
+    podSelector:
+      gdpr/scope: "personal-data"
