@@ -86,6 +86,10 @@ struct Config {
     /// Force a specific mode (auto, ebpf, traditional)
     #[arg(long, env = "JANUSD_MODE", default_value = "auto")]
     mode: String,
+
+    /// Cluster name for multi-cluster deployments
+    #[arg(long, env = "PANOPTES_CLUSTER_NAME", default_value = "")]
+    cluster_name: String,
 }
 
 impl Config {
@@ -253,6 +257,7 @@ async fn main() -> Result<()> {
     info!(
         version = "2.0.0",
         node = %config.node_name,
+        cluster = %config.cluster_name,
         listen = %listen_addr,
         max_guards = config.max_guards,
         mode = mode_str,
@@ -274,6 +279,7 @@ async fn main() -> Result<()> {
     if runtime_mode == RuntimeMode::Ebpf {
         let janusd_service = Arc::new(service_ebpf::JanusdServiceImpl::new(
             config.node_name.clone(),
+            config.cluster_name.clone(),
             config.max_guards,
             audit_logger,
         ));
@@ -295,6 +301,7 @@ async fn main() -> Result<()> {
         // Traditional mode (fanotify)
         let janusd_service = Arc::new(service::JanusdServiceImpl::new(
             config.node_name.clone(),
+            config.cluster_name.clone(),
             config.max_guards,
             audit_logger,
         ));
@@ -318,6 +325,7 @@ async fn main() -> Result<()> {
         // Traditional mode only (no eBPF support compiled in)
         let janusd_service = Arc::new(service::JanusdServiceImpl::new(
             config.node_name.clone(),
+            config.cluster_name.clone(),
             config.max_guards,
             audit_logger,
         ));

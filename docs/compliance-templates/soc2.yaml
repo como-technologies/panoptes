@@ -1,0 +1,253 @@
+# SOC 2 Type II Trust Services Criteria Compliance Template
+# Panoptes file integrity and access auditing for service organizations
+#
+# Requirements covered:
+# - CC6.1: Logical Access Security - Access security over protected assets
+# - CC6.2: Access Authorization - New user registration and authorization
+# - CC6.3: Access Removal - Timely removal of access
+# - CC7.1: System Operations - Detection of harmful software
+# - CC7.2: System Monitoring - Monitor system components for anomalies
+# - CC7.3: Incident Detection - Evaluate security events
+#
+# Usage:
+#   1. Label monitored pods: kubectl label pod <name> soc2/scope=in-scope
+#   2. Apply this template: kubectl apply -f soc2.yaml
+#   3. Verify: kubectl get aw,jg -l compliance=soc2
+---
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: soc2-fim
+  labels:
+    compliance: soc2
+    panoptes.io/template: soc2-fim
+  annotations:
+    panoptes.io/description: "SOC 2 File Integrity Monitoring"
+    soc2/criteria: "CC7.1, CC7.2, CC7.3"
+spec:
+  # Target pods in SOC 2 scope
+  selector:
+    matchLabels:
+      soc2/scope: "in-scope"
+
+  subjects:
+    # CC7.2 - System Monitoring
+    # "Monitor system components for anomalies that are indicative of malicious acts"
+    - paths:
+        - /var/log
+      events:
+        - modify
+        - delete
+        - create
+      recursive: true
+      maxDepth: 5
+      ignore:
+        - "*.gz"
+        - "*.old"
+        - "*.[0-9]"
+      tags:
+        criteria: "CC7.2"
+        severity: high
+        category: audit-logs
+
+    # CC6.1/CC6.2 - Logical Access Security
+    # Monitor changes to access control mechanisms
+    - paths:
+        - /etc/passwd
+        - /etc/shadow
+        - /etc/group
+        - /etc/gshadow
+        - /etc/sudoers
+      events:
+        - modify
+        - delete
+        - create
+        - attrib
+      tags:
+        criteria: "CC6.1"
+        severity: critical
+        category: user-accounts
+
+    # Access control configuration
+    - paths:
+        - /etc/sudoers.d
+        - /etc/pam.d
+        - /etc/security
+      events:
+        - all
+      recursive: true
+      tags:
+        criteria: "CC6.2"
+        severity: critical
+        category: access-control
+
+    # CC7.1 - System Operations
+    # Detect unauthorized software changes
+    - paths:
+        - /usr/bin
+        - /usr/sbin
+        - /usr/local/bin
+        - /bin
+        - /sbin
+      events:
+        - modify
+        - create
+        - delete
+      tags:
+        criteria: "CC7.1"
+        severity: high
+        category: system-binaries
+
+    # SSH and remote access configuration
+    - paths:
+        - /etc/ssh
+        - /root/.ssh
+        - /home/*/.ssh
+      events:
+        - all
+      recursive: true
+      tags:
+        criteria: "CC6.1"
+        severity: critical
+        category: remote-access
+
+    # System services and startup
+    - paths:
+        - /etc/systemd/system
+        - /etc/init.d
+        - /etc/cron.d
+        - /etc/crontab
+        - /var/spool/cron
+      events:
+        - all
+      recursive: true
+      maxDepth: 3
+      tags:
+        criteria: "CC7.1"
+        severity: high
+        category: system-services
+
+    # Application configuration
+    - paths:
+        - /app/config
+        - /etc/app
+        - /opt/app
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 3
+      tags:
+        criteria: "CC7.2"
+        severity: medium
+        category: app-config
+
+    # SSL/TLS certificates
+    - paths:
+        - /etc/ssl/certs
+        - /etc/ssl/private
+        - /etc/pki
+      events:
+        - all
+      recursive: true
+      tags:
+        criteria: "CC6.1"
+        severity: critical
+        category: certificates
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json
+
+---
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: soc2-access
+  labels:
+    compliance: soc2
+    panoptes.io/template: soc2-access
+  annotations:
+    panoptes.io/description: "SOC 2 Access Control and Auditing"
+    soc2/criteria: "CC6.1, CC6.2, CC7.3"
+spec:
+  # Target pods in SOC 2 scope
+  selector:
+    matchLabels:
+      soc2/scope: "in-scope"
+
+  subjects:
+    # CC6.1 - Logical Access Security
+    # "Implements logical access security software over protected information assets"
+    - deny:
+        - /etc/shadow
+        - /etc/gshadow
+        - /root/.ssh/id_*
+        - /root/.ssh/authorized_keys
+      allow:
+        - /etc/passwd
+        - /etc/group
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        criteria: "CC6.1"
+        severity: critical
+        category: credential-access
+
+    # CC6.2 - Access Authorization
+    # Protect Kubernetes secrets and credentials
+    - deny:
+        - /var/run/secrets
+      events:
+        - access
+        - open
+      autoAllowOwner: true
+      defaultResponse: deny
+      audit: true
+      tags:
+        criteria: "CC6.2"
+        severity: critical
+        category: k8s-secrets
+
+    # Audit executable access for security tools
+    - deny:
+        - /usr/bin/curl
+        - /usr/bin/wget
+        - /usr/bin/nc
+        - /usr/bin/ncat
+        - /usr/bin/netcat
+        - /usr/bin/base64
+      events:
+        - execute
+      defaultResponse: audit
+      audit: true
+      tags:
+        criteria: "CC7.3"
+        severity: high
+        category: suspicious-tools
+
+    # CC7.3 - Incident Detection
+    # Audit all data access for incident investigation
+    - allow:
+        - /app/data
+        - /var/lib/app
+        - /data
+      events:
+        - access
+        - open
+        - modify
+      audit: true
+      tags:
+        criteria: "CC7.3"
+        severity: medium
+        category: data-access
+
+  containerRuntime: auto
+  # Start in audit-only mode
+  enforcing: false
+  paused: false
+  logFormat: json

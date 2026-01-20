@@ -150,6 +150,11 @@ fn session_to_guard_state(session: &Session<GuardSessionState>) -> GuardState {
 
 /// Janus daemon gRPC service implementation.
 pub struct JanusdServiceImpl {
+    /// Node name.
+    #[allow(dead_code)]
+    node_name: String,
+    /// Cluster name for multi-cluster deployments.
+    cluster_name: String,
     max_guards: usize,
     sessions: SessionMap<GuardSessionState>,
     /// Event broadcaster for streaming proto events to UI clients.
@@ -178,9 +183,10 @@ impl JanusdServiceImpl {
     /// # Arguments
     ///
     /// * `node_name` - Kubernetes node name for this daemon
+    /// * `cluster_name` - Cluster name for multi-cluster deployments
     /// * `max_guards` - Maximum number of concurrent guards allowed
     /// * `audit` - Audit logger for writing to kernel audit log
-    pub fn new(node_name: String, max_guards: usize, audit: Arc<dyn AuditLogger>) -> Self {
+    pub fn new(node_name: String, cluster_name: String, max_guards: usize, audit: Arc<dyn AuditLogger>) -> Self {
         let runtime: Option<Box<dyn ContainerRuntime>> = detect_runtime();
 
         if let Some(ref rt) = runtime {
@@ -190,6 +196,8 @@ impl JanusdServiceImpl {
         }
 
         Self {
+            node_name: node_name.clone(),
+            cluster_name,
             max_guards,
             sessions: new_session_map(),
             broadcaster: EventBroadcaster::new(10000),
@@ -358,6 +366,7 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
         let pod_name_clone = req.pod_name.clone();
         let container_id_clone = req.container_ids.first().cloned().unwrap_or_default();
         let node_name_clone = req.node_name.clone();
+        let cluster_name_clone = self.cluster_name.clone();
         tokio::spawn(async move {
             while let Some(event) = event_rx.recv().await {
                 // 1. METRICS - Always record (for observability, regardless of pattern match)
@@ -501,6 +510,8 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
                         is_directory: event.is_dir,
                         tags: HashMap::new(),
                         audit_logged: false,
+                        // Multi-cluster identification
+                        cluster_name: cluster_name_clone.clone(),
                     };
 
                     // Broadcast to all connected stream clients

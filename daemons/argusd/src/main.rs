@@ -81,6 +81,10 @@ struct Config {
     /// Force a specific mode (auto, ebpf, traditional)
     #[arg(long, env = "ARGUSD_MODE", default_value = "auto")]
     mode: String,
+
+    /// Cluster name for multi-cluster deployments
+    #[arg(long, env = "PANOPTES_CLUSTER_NAME", default_value = "")]
+    cluster_name: String,
 }
 
 impl Config {
@@ -247,6 +251,7 @@ async fn main() -> Result<()> {
     info!(
         version = "2.0.0",
         node = %config.node_name,
+        cluster = %config.cluster_name,
         listen = %listen_addr,
         max_watches = config.max_watches,
         mode = mode_str,
@@ -261,6 +266,7 @@ async fn main() -> Result<()> {
     if runtime_mode == RuntimeMode::Ebpf {
         let argusd_service = Arc::new(service_ebpf::ArgusdServiceImpl::new(
             config.node_name.clone(),
+            config.cluster_name.clone(),
             config.max_watches,
         ));
 
@@ -281,6 +287,7 @@ async fn main() -> Result<()> {
         // Traditional mode (inotify)
         let argusd_service = Arc::new(service::ArgusdServiceImpl::new(
             config.node_name.clone(),
+            config.cluster_name.clone(),
             config.max_watches,
         ));
 
@@ -303,6 +310,7 @@ async fn main() -> Result<()> {
         // Traditional mode only (no eBPF support compiled in)
         let argusd_service = Arc::new(service::ArgusdServiceImpl::new(
             config.node_name.clone(),
+            config.cluster_name.clone(),
             config.max_watches,
         ));
 

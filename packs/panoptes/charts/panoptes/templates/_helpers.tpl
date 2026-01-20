@@ -94,3 +94,11 @@ Dashboard labels
 {{ include "panoptes.labels" . }}
 app.kubernetes.io/component: dashboard
 {{- end }}
+
+{{/*
+Daemon environment variables for multi-cluster support
+*/}}
+{{- define "panoptes.daemon.clusterEnv" -}}
+- name: PANOPTES_CLUSTER_NAME
+  value: {{ .Values.global.cluster.name | default "" | quote }}
+{{- end }}

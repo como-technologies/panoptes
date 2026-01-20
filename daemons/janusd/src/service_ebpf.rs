@@ -130,6 +130,8 @@ fn session_to_guard_state(session: &Session<EbpfGuardSessionState>) -> GuardStat
 /// Janus daemon gRPC service implementation (eBPF mode).
 pub struct JanusdServiceImpl {
     node_name: String,
+    /// Cluster name for multi-cluster deployments.
+    cluster_name: String,
     max_guards: usize,
     sessions: SessionMap<EbpfGuardSessionState>,
     broadcaster: EventBroadcaster<AccessEvent>,
@@ -154,7 +156,7 @@ impl SessionManager<EbpfGuardSessionState> for JanusdServiceImpl {
 
 impl JanusdServiceImpl {
     /// Create a new Janusd service instance (eBPF mode).
-    pub fn new(node_name: String, max_guards: usize, audit: Arc<dyn AuditLogger>) -> Self {
+    pub fn new(node_name: String, cluster_name: String, max_guards: usize, audit: Arc<dyn AuditLogger>) -> Self {
         let runtime: Option<Box<dyn ContainerRuntime>> = detect_runtime();
 
         if let Some(ref rt) = runtime {
@@ -165,6 +167,7 @@ impl JanusdServiceImpl {
 
         Self {
             node_name: node_name.clone(),
+            cluster_name,
             max_guards,
             sessions: new_session_map(),
             broadcaster: EventBroadcaster::new(10000),
@@ -222,6 +225,7 @@ impl JanusdServiceImpl {
         let broadcaster = self.broadcaster.clone();
         let sessions = self.sessions.clone();
         let node_name = self.node_name.clone();
+        let cluster_name = self.cluster_name.clone();
         let audit = self.audit.clone();
 
         tokio::spawn(async move {
@@ -383,6 +387,8 @@ impl JanusdServiceImpl {
                         is_directory: false,
                         tags: HashMap::new(),
                         audit_logged: true,
+                        // Multi-cluster identification
+                        cluster_name: cluster_name.clone(),
                     };
 
                     let _ = broadcaster.send(proto_event);

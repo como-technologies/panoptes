@@ -76,6 +76,8 @@ export interface ArgusEvent {
   fileName: string;
   isDirectory: boolean;
   tags?: Record<string, string>;
+  /** Cluster name for multi-cluster deployments */
+  clusterName?: string;
 }
 
 // For creating/updating watchers

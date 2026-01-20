@@ -337,9 +337,9 @@ Use Palette's built-in gateway for secure access without public ingress.
 
 ## 9. Multi-Cluster Monitoring
 
-### Central Observability Pattern
+### Cluster Identification
 
-Deploy a central monitoring cluster with Prometheus/Grafana, then configure each Panoptes deployment to export metrics:
+Each cluster needs a unique identifier for multi-cluster aggregation. Configure this in your pack values:
 
 ```yaml
 # Per-cluster values override
@@ -348,7 +348,30 @@ global:
     name: "prod-east-1"        # Unique cluster identifier
     environment: "production"
     region: "us-east-1"
+```
 
+### Palette Macro Auto-Injection
+
+Use Spectro Cloud Palette system macros to automatically inject cluster identity:
+
+```yaml
+# Automatic cluster naming via Palette macros
+global:
+  cluster:
+    name: "{{ .spectro.system.cluster.name }}"
+    # Or combine with project: "{{ .spectro.system.project.name }}-{{ .spectro.system.cluster.name }}"
+```
+
+Available Palette macros:
+- `{{ .spectro.system.cluster.name }}` - Cluster name from Palette
+- `{{ .spectro.system.cluster.uid }}` - Unique cluster UID
+- `{{ .spectro.system.project.name }}` - Project name
+
+### Central Observability Pattern
+
+Deploy a central monitoring cluster with Prometheus/Grafana, then configure each Panoptes deployment to export metrics:
+
+```yaml
 observability:
   opentelemetry:
     enabled: true
@@ -362,7 +385,7 @@ observability:
 
 ### Cluster Labeling
 
-All metrics are automatically labeled with cluster identity:
+All metrics and events are automatically labeled with cluster identity:
 
 ```promql
 # Query events across all clusters
@@ -373,6 +396,8 @@ sum by (cluster) (
 # Filter to specific cluster
 argus_events_total{cluster="prod-east-1"}
 ```
+
+For detailed multi-cluster setup including Prometheus federation, see [Multi-Cluster Guide](guides/multi-cluster.md).
 
 ---
 

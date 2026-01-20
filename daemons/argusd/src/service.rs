@@ -99,6 +99,8 @@ pub struct ArgusdServiceImpl {
     /// Node name.
     #[allow(dead_code)]
     node_name: String,
+    /// Cluster name for multi-cluster deployments.
+    cluster_name: String,
     /// Maximum number of watches per session.
     max_watches: usize,
     /// Active watch sessions (using generic session management).
@@ -124,7 +126,7 @@ impl SessionManager<WatchSessionState> for ArgusdServiceImpl {
 
 impl ArgusdServiceImpl {
     /// Create a new ArgusdService instance.
-    pub fn new(node_name: String, max_watches: usize) -> Self {
+    pub fn new(node_name: String, cluster_name: String, max_watches: usize) -> Self {
         let runtime: Option<Box<dyn ContainerRuntime>> = detect_runtime();
 
         if let Some(ref rt) = runtime {
@@ -135,6 +137,7 @@ impl ArgusdServiceImpl {
 
         Self {
             node_name: node_name.clone(),
+            cluster_name,
             max_watches,
             sessions: new_session_map(),
             broadcaster: EventBroadcaster::new(10000),
@@ -399,6 +402,7 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
                                 let session_clone = session_arc.clone();
                                 let container_id_clone = container_id.clone();
                                 let node_name = req.node_name.clone();
+                                let cluster_name = self.cluster_name.clone();
 
                                 // Store watcher and event_tx in session for UpdateWatch
                                 {
@@ -428,6 +432,8 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
                                             tags: HashMap::new(),
                                             // Argus (inotify) doesn't provide process info - only Janus (fanotify) does
                                             process_info: None,
+                                            // Multi-cluster identification
+                                            cluster_name: cluster_name.clone(),
                                         };
                                         drop(session);
 
@@ -781,8 +787,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_service_creation() {
-        let service = ArgusdServiceImpl::new("test-node".to_string(), 1000);
+        let service = ArgusdServiceImpl::new("test-node".to_string(), "test-cluster".to_string(), 1000);
         assert_eq!(service.node_name, "test-node");
+        assert_eq!(service.cluster_name, "test-cluster");
         assert_eq!(service.max_watches, 1000);
     }
 
@@ -802,6 +809,7 @@ mod tests {
             inode: 0,
             tags: HashMap::new(),
             process_info: None, // Argus (inotify) doesn't provide process info
+            cluster_name: "test-cluster".to_string(),
         };
 
         assert_eq!(event.filter_name(), "test-watcher");

@@ -1,0 +1,217 @@
+# HIPAA Security Rule Compliance Monitoring Template
+# Panoptes file integrity and access auditing for healthcare environments
+#
+# Requirements covered:
+# - 164.312(b): Audit Controls - Record and examine activity
+# - 164.312(c)(1): Data Integrity - Protect ePHI from improper alteration
+# - 164.312(d): Person/Entity Authentication - Verify identity
+# - 164.308(a)(1): Security Management Process - Prevent, detect, contain violations
+#
+# Usage:
+#   1. Label your ePHI-handling pods: kubectl label pod <name> hipaa/scope=ephi
+#   2. Apply this template: kubectl apply -f hipaa.yaml
+#   3. Verify: kubectl get aw,jg -l compliance=hipaa
+---
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: hipaa-fim
+  labels:
+    compliance: hipaa
+    panoptes.io/template: hipaa-fim
+  annotations:
+    panoptes.io/description: "HIPAA File Integrity Monitoring"
+    hipaa/requirements: "164.312(b), 164.312(c)(1), 164.308(a)(1)"
+spec:
+  # Target pods handling ePHI
+  selector:
+    matchLabels:
+      hipaa/scope: "ephi"
+
+  subjects:
+    # 164.312(c)(1) - Data Integrity
+    # "Protect ePHI from improper alteration or destruction"
+    - paths:
+        - /var/log
+      events:
+        - modify
+        - delete
+        - create
+      recursive: true
+      maxDepth: 5
+      ignore:
+        - "*.gz"
+        - "*.old"
+      tags:
+        requirement: "164.312(c)(1)"
+        severity: high
+        category: audit-logs
+
+    # System files that could affect ePHI access
+    - paths:
+        - /etc/passwd
+        - /etc/shadow
+        - /etc/group
+        - /etc/sudoers
+      events:
+        - modify
+        - delete
+        - attrib
+      tags:
+        requirement: "164.312(d)"
+        severity: critical
+        category: user-accounts
+
+    # Authentication configuration
+    - paths:
+        - /etc/pam.d
+        - /etc/security
+        - /etc/nsswitch.conf
+      events:
+        - all
+      recursive: true
+      tags:
+        requirement: "164.312(d)"
+        severity: critical
+        category: authentication
+
+    # Application configuration
+    - paths:
+        - /app/config
+        - /etc/app
+        - /opt/app/config
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 3
+      tags:
+        requirement: "164.308(a)(1)"
+        severity: high
+        category: app-config
+
+    # SSL/TLS certificates (encryption in transit)
+    - paths:
+        - /etc/ssl
+        - /etc/pki
+        - /app/certs
+      events:
+        - all
+      recursive: true
+      tags:
+        requirement: "164.312(e)(1)"
+        severity: critical
+        category: encryption
+
+    # Database configuration files
+    - paths:
+        - /var/lib/postgresql
+        - /var/lib/mysql
+        - /etc/postgresql
+        - /etc/mysql
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 3
+      ignore:
+        - "*.pid"
+        - "*.sock"
+      tags:
+        requirement: "164.312(c)(1)"
+        severity: high
+        category: database-config
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json
+
+---
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: hipaa-access
+  labels:
+    compliance: hipaa
+    panoptes.io/template: hipaa-access
+  annotations:
+    panoptes.io/description: "HIPAA Access Control and Auditing"
+    hipaa/requirements: "164.312(b), 164.312(d)"
+spec:
+  # Target pods handling ePHI
+  selector:
+    matchLabels:
+      hipaa/scope: "ephi"
+
+  subjects:
+    # 164.312(b) - Audit Controls
+    # "Record and examine activity in information systems containing ePHI"
+
+    # Audit all data directory access (customize for your ePHI paths)
+    - allow:
+        - /app/data
+        - /var/lib/app/data
+        - /data
+      events:
+        - access
+        - open
+        - modify
+      audit: true
+      tags:
+        requirement: "164.312(b)"
+        severity: high
+        category: ephi-access
+
+    # 164.312(d) - Person/Entity Authentication
+    # Protect credential stores
+    - deny:
+        - /etc/shadow
+        - /etc/gshadow
+        - /root/.ssh
+      allow:
+        - /etc/passwd
+        - /etc/group
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        requirement: "164.312(d)"
+        severity: critical
+        category: credential-access
+
+    # Kubernetes secrets (may contain ePHI credentials)
+    - deny:
+        - /var/run/secrets
+      events:
+        - access
+        - open
+      autoAllowOwner: true
+      defaultResponse: deny
+      audit: true
+      tags:
+        requirement: "164.312(d)"
+        severity: critical
+        category: k8s-secrets
+
+    # Backup and export directories
+    - allow:
+        - /backup
+        - /export
+        - /var/backup
+      events:
+        - all
+      audit: true
+      tags:
+        requirement: "164.312(b)"
+        severity: high
+        category: backup-access
+
+  containerRuntime: auto
+  # Start in audit-only mode
+  enforcing: false
+  paused: false
+  logFormat: json

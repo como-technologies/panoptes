@@ -37,6 +37,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
+        - name: PANOPTES_CLUSTER_NAME
+          value: ""  # Set via Helm values or Spectro Cloud Palette macros
         volumeMounts:
         - name: host-root
           mountPath: /host

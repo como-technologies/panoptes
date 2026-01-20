@@ -1,0 +1,204 @@
+# PCI-DSS 3.2.1 / 4.0 Compliance Monitoring Template
+# Panoptes file integrity and access auditing for payment card environments
+#
+# Requirements covered:
+# - 10.5.5: File integrity monitoring on logs
+# - 10.2.x: Audit trail logging
+# - 10.6: Security alert review
+# - 7.1: Access control enforcement
+# - 11.5: Change detection on critical files
+#
+# Usage:
+#   1. Label your in-scope pods: kubectl label pod <name> pci-dss/scope=in-scope
+#   2. Apply this template: kubectl apply -f pci-dss.yaml
+#   3. Verify: kubectl get aw,jg -l compliance=pci-dss
+---
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: pci-dss-fim
+  labels:
+    compliance: pci-dss
+    panoptes.io/template: pci-dss-fim
+  annotations:
+    panoptes.io/description: "PCI-DSS File Integrity Monitoring"
+    pci-dss/requirements: "10.5.5, 11.5"
+spec:
+  # Target pods in PCI-DSS scope
+  selector:
+    matchLabels:
+      pci-dss/scope: "in-scope"
+
+  subjects:
+    # Requirement 10.5.5 - FIM on log files
+    # "Use file integrity monitoring or change-detection software on logs"
+    - paths:
+        - /var/log
+      events:
+        - modify
+        - delete
+        - create
+        - moved_from
+        - moved_to
+      recursive: true
+      maxDepth: 5
+      ignore:
+        - "*.gz"      # Rotated logs
+        - "*.old"
+        - "*.[0-9]"   # Numbered rotations
+      tags:
+        requirement: "10.5.5"
+        severity: high
+        category: log-integrity
+
+    # Requirement 11.5 - Critical system files
+    # "Deploy a change-detection mechanism to alert personnel"
+    - paths:
+        - /etc/passwd
+        - /etc/shadow
+        - /etc/group
+        - /etc/gshadow
+        - /etc/sudoers
+      events:
+        - modify
+        - delete
+        - attrib
+      tags:
+        requirement: "11.5"
+        severity: critical
+        category: user-accounts
+
+    # System configuration files
+    - paths:
+        - /etc/sudoers.d
+        - /etc/pam.d
+        - /etc/security
+      events:
+        - all
+      recursive: true
+      maxDepth: 2
+      tags:
+        requirement: "11.5"
+        severity: critical
+        category: authentication
+
+    # SSH configuration
+    - paths:
+        - /etc/ssh
+        - /root/.ssh
+      events:
+        - all
+      recursive: true
+      tags:
+        requirement: "11.5"
+        severity: critical
+        category: ssh-config
+
+    # System binaries
+    - paths:
+        - /usr/bin
+        - /usr/sbin
+        - /usr/local/bin
+        - /usr/local/sbin
+      events:
+        - modify
+        - create
+        - delete
+      tags:
+        requirement: "11.5"
+        severity: high
+        category: system-binaries
+
+    # Init and service configuration
+    - paths:
+        - /etc/systemd
+        - /etc/init.d
+        - /etc/cron.d
+        - /etc/crontab
+      events:
+        - all
+      recursive: true
+      maxDepth: 3
+      tags:
+        requirement: "11.5"
+        severity: high
+        category: system-services
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json
+
+---
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: pci-dss-access
+  labels:
+    compliance: pci-dss
+    panoptes.io/template: pci-dss-access
+  annotations:
+    panoptes.io/description: "PCI-DSS Access Control and Auditing"
+    pci-dss/requirements: "7.1, 10.2"
+spec:
+  # Target pods in PCI-DSS scope
+  selector:
+    matchLabels:
+      pci-dss/scope: "in-scope"
+
+  subjects:
+    # Requirement 7.1 - Limit access to system components
+    # Deny access to sensitive credential files
+    - deny:
+        - /etc/shadow
+        - /etc/gshadow
+        - /etc/sudoers
+        - /root/.ssh/id_*
+        - /root/.ssh/authorized_keys
+      allow:
+        - /etc/passwd
+        - /etc/group
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        requirement: "7.1"
+        severity: critical
+        category: credential-access
+
+    # Kubernetes secrets protection
+    - deny:
+        - /var/run/secrets/kubernetes.io
+      events:
+        - access
+        - open
+      autoAllowOwner: true
+      defaultResponse: deny
+      audit: true
+      tags:
+        requirement: "7.1"
+        severity: critical
+        category: k8s-secrets
+
+    # Requirement 10.2 - Audit trail logging
+    # Audit all access to cardholder data directories (customize paths)
+    - allow:
+        - /app/data
+        - /var/lib/app
+      events:
+        - access
+        - open
+        - modify
+      audit: true
+      tags:
+        requirement: "10.2"
+        severity: high
+        category: data-access
+
+  containerRuntime: auto
+  # Start in audit-only mode for initial deployment
+  # Set to true after validating no false positives
+  enforcing: false
+  paused: false
+  logFormat: json

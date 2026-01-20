@@ -319,6 +319,11 @@ message FileEvent {
   // process_info contains information about the process that triggered the event. (NEW in v2)
   // Note: This will be empty until eBPF/audit integration is implemented.
   optional ProcessInfo process_info = 13;
+
+  // cluster_name identifies the cluster where this event originated. (NEW in v2)
+  // Used for multi-cluster aggregation and Prometheus federation.
+  // Populated from PANOPTES_CLUSTER_NAME environment variable.
+  string cluster_name = 14;
 }
 
 // GetMetricsRequest specifies what metrics to retrieve.

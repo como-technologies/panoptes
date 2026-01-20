@@ -69,6 +69,8 @@ export interface JanusAuditEvent {
   processName?: string;
   processId?: number;
   tags?: Record<string, string>;
+  /** Cluster name for multi-cluster deployments */
+  clusterName?: string;
 }
 
 // For creating/updating guards

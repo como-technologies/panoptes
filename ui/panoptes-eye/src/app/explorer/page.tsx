@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Folder, File, FileSymlink, ChevronRight, ChevronDown, Search, RefreshCw, Home, Plus } from 'lucide-react';
+import { Folder, File, FileSymlink, ChevronRight, ChevronDown, Search, RefreshCw, Home, Eye, Shield } from 'lucide-react';
 import Link from 'next/link';
 import { usePods } from '@/hooks/useK8s';
 import { Button } from '@/components/ui/button';
@@ -151,13 +151,14 @@ export default function ExplorerPage() {
     setSelectedPath(entry.path);
   }, []);
 
-  const addToWatcher = () => {
+  const addToResource = (type: 'watcher' | 'guard') => {
     if (selectedEntry) {
-      // Navigate to watcher creation with pre-filled path
+      // Navigate to resource creation with pre-filled path
       const params = new URLSearchParams({
         path: selectedEntry.path,
         namespace,
         selector: labelSelector,
+        type,
       });
       window.location.href = `/watchers/new?${params}`;
     }
@@ -321,10 +322,14 @@ export default function ExplorerPage() {
                       <p className="text-sm">{new Date(selectedEntry.modTime).toLocaleString()}</p>
                     </div>
                   )}
-                  <div className="pt-4 border-t dark:border-gray-700">
-                    <Button onClick={addToWatcher} className="w-full">
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add to Watcher
+                  <div className="pt-4 border-t dark:border-gray-700 space-y-2">
+                    <Button onClick={() => addToResource('watcher')} className="w-full">
+                      <Eye className="h-4 w-4 mr-2" />
+                      Watch Changes
+                    </Button>
+                    <Button onClick={() => addToResource('guard')} variant="outline" className="w-full">
+                      <Shield className="h-4 w-4 mr-2" />
+                      Guard Access
                     </Button>
                   </div>
                 </div>

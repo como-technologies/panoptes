@@ -1,14 +1,36 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { CheckCircle, XCircle, AlertTriangle, HelpCircle, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
+import { CheckCircle, XCircle, AlertTriangle, HelpCircle, RefreshCw, ChevronDown, ChevronRight, Download, FileText, Copy, Check, Wrench } from 'lucide-react';
 import { useWatchers, useGuards } from '@/hooks/useK8s';
 import { complianceFrameworks, evaluateAllFrameworks, getOverallScore } from '@/lib/compliance';
-import type { ComplianceStatus, FrameworkResult } from '@/types/compliance';
+import type { ComplianceStatus, FrameworkResult, ComplianceCheck } from '@/types/compliance';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { ResourceCreationDialog, type ResourceCreationConfig } from '@/components/resources/ResourceCreationDialog';
+
+// Mapping of framework IDs to their template files
+const frameworkTemplates: Record<string, { file: string; description: string }> = {
+  'pci-dss': {
+    file: 'pci-dss.yaml',
+    description: 'PCI-DSS 3.2.1/4.0 monitoring for payment card data environments',
+  },
+  'hipaa': {
+    file: 'hipaa.yaml',
+    description: 'HIPAA Security Rule monitoring for healthcare environments',
+  },
+  'soc2': {
+    file: 'soc2.yaml',
+    description: 'SOC 2 Trust Services Criteria monitoring',
+  },
+  'cis': {
+    file: 'cis-kubernetes.yaml',
+    description: 'CIS Kubernetes Benchmark v1.8 monitoring',
+  },
+};
 
 function StatusIcon({ status }: { status: ComplianceStatus }) {
   switch (status) {
@@ -88,10 +110,12 @@ function ScoreRing({ score, size = 120 }: { score: number; size?: number }) {
   );
 }
 
-function FrameworkCard({ result, isExpanded, onToggle }: {
+function FrameworkCard({ result, isExpanded, onToggle, onViewTemplate, onApplyFix }: {
   result: FrameworkResult;
   isExpanded: boolean;
   onToggle: () => void;
+  onViewTemplate: () => void;
+  onApplyFix: (check: ComplianceCheck) => void;
 }) {
   return (
     <Card>
@@ -110,6 +134,17 @@ function FrameworkCard({ result, isExpanded, onToggle }: {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                onViewTemplate();
+              }}
+            >
+              <FileText className="h-4 w-4 mr-1" />
+              Template
+            </Button>
             {isExpanded ? (
               <ChevronDown className="h-5 w-5 text-gray-400" />
             ) : (
@@ -134,6 +169,30 @@ function FrameworkCard({ result, isExpanded, onToggle }: {
                   </div>
                   <p className="text-sm text-gray-500 mt-1">{r.check.description}</p>
                   <p className="text-xs text-blue-500 mt-1">{r.check.requirement}</p>
+                  {(r.status === 'fail' || r.status === 'warning') && (
+                    <div className="mt-2 p-2 bg-amber-50 dark:bg-amber-900/20 rounded border border-amber-200 dark:border-amber-800">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <p className="text-xs font-medium text-amber-800 dark:text-amber-200">Remediation:</p>
+                          <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">{r.check.remediation}</p>
+                        </div>
+                        {r.check.remediationAction && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="shrink-0 text-xs h-7 px-2"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onApplyFix(r.check);
+                            }}
+                          >
+                            <Wrench className="h-3 w-3 mr-1" />
+                            Apply Fix
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -185,6 +244,15 @@ export default function CompliancePage() {
     complianceFrameworks.map(f => f.id)
   );
   const [expandedFramework, setExpandedFramework] = useState<string | null>(null);
+  const [templateDialog, setTemplateDialog] = useState<{ open: boolean; frameworkId: string | null }>({
+    open: false,
+    frameworkId: null,
+  });
+  const [copied, setCopied] = useState(false);
+  const [remediationDialog, setRemediationDialog] = useState<{
+    open: boolean;
+    config: ResourceCreationConfig | null;
+  }>({ open: false, config: null });
 
   const isLoading = watchersLoading || guardsLoading;
 
@@ -202,6 +270,113 @@ export default function CompliancePage() {
   const handleRefresh = () => {
     refetchWatchers();
     refetchGuards();
+  };
+
+  const openTemplateDialog = (frameworkId: string) => {
+    setTemplateDialog({ open: true, frameworkId });
+    setCopied(false);
+  };
+
+  const closeTemplateDialog = () => {
+    setTemplateDialog({ open: false, frameworkId: null });
+    setCopied(false);
+  };
+
+  const getKubectlCommand = (frameworkId: string) => {
+    const template = frameworkTemplates[frameworkId];
+    if (!template) return '';
+    return `kubectl apply -f https://raw.githubusercontent.com/CoMo-Technologies/panoptes/main/docs/compliance-templates/${template.file}`;
+  };
+
+  const copyToClipboard = async (text: string) => {
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleApplyFix = (check: ComplianceCheck) => {
+    if (!check.remediationAction) return;
+    const action = check.remediationAction;
+    setRemediationDialog({
+      open: true,
+      config: {
+        resourceType: action.resourceType,
+        name: action.suggestedName,
+        selector: action.suggestedSelector,
+        subjects: action.subjects,
+        enforcing: action.enforcing,
+      },
+    });
+  };
+
+  const closeRemediationDialog = () => {
+    setRemediationDialog({ open: false, config: null });
+  };
+
+  const handleRemediationSuccess = () => {
+    // Refresh data to update compliance status
+    refetchWatchers();
+    refetchGuards();
+  };
+
+  const exportReport = (format: 'json' | 'csv') => {
+    const timestamp = new Date().toISOString();
+
+    if (format === 'json') {
+      const report = {
+        generatedAt: timestamp,
+        overallScore,
+        frameworks: filteredResults.map((r) => ({
+          id: r.framework.id,
+          name: r.framework.name,
+          score: r.score,
+          passCount: r.passCount,
+          failCount: r.failCount,
+          warningCount: r.warningCount,
+          checks: r.results.map((check) => ({
+            id: check.check.id,
+            name: check.check.name,
+            requirement: check.check.requirement,
+            status: check.status,
+            remediation: check.status !== 'pass' ? check.check.remediation : undefined,
+          })),
+        })),
+      };
+
+      const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `compliance-report-${timestamp.split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } else {
+      const rows = [
+        ['Framework', 'Check ID', 'Check Name', 'Requirement', 'Status', 'Remediation'],
+      ];
+
+      for (const result of filteredResults) {
+        for (const check of result.results) {
+          rows.push([
+            result.framework.name,
+            check.check.id,
+            check.check.name,
+            check.check.requirement,
+            check.status,
+            check.status !== 'pass' ? check.check.remediation : '',
+          ]);
+        }
+      }
+
+      const csv = rows.map((row) => row.map((cell) => `"${cell.replace(/"/g, '""')}"`).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `compliance-report-${timestamp.split('T')[0]}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
   };
 
   if (isLoading) {
@@ -237,10 +412,20 @@ export default function CompliancePage() {
             Security compliance status against common frameworks
           </p>
         </div>
-        <Button variant="outline" onClick={handleRefresh}>
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => exportReport('json')}>
+            <Download className="h-4 w-4 mr-2" />
+            JSON
+          </Button>
+          <Button variant="outline" onClick={() => exportReport('csv')}>
+            <Download className="h-4 w-4 mr-2" />
+            CSV
+          </Button>
+          <Button variant="outline" onClick={handleRefresh}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -290,6 +475,8 @@ export default function CompliancePage() {
             onToggle={() => setExpandedFramework(
               expandedFramework === result.framework.id ? null : result.framework.id
             )}
+            onViewTemplate={() => openTemplateDialog(result.framework.id)}
+            onApplyFix={handleApplyFix}
           />
         ))}
       </div>
@@ -299,6 +486,55 @@ export default function CompliancePage() {
           <p className="text-gray-500">Select at least one framework to view compliance status</p>
         </Card>
       )}
+
+      {/* Template Dialog */}
+      <Dialog open={templateDialog.open} onClose={closeTemplateDialog}>
+        <DialogHeader>
+          <DialogTitle>Apply Compliance Template</DialogTitle>
+          <DialogDescription>
+            {templateDialog.frameworkId && frameworkTemplates[templateDialog.frameworkId]?.description}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="mt-4">
+          <p className="text-sm font-medium mb-2">Apply with kubectl:</p>
+          <div className="relative">
+            <pre className="bg-gray-100 dark:bg-gray-900 p-3 rounded text-xs overflow-x-auto">
+              {templateDialog.frameworkId && getKubectlCommand(templateDialog.frameworkId)}
+            </pre>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="absolute top-1 right-1"
+              onClick={() => templateDialog.frameworkId && copyToClipboard(getKubectlCommand(templateDialog.frameworkId))}
+            >
+              {copied ? (
+                <Check className="h-4 w-4 text-green-500" />
+              ) : (
+                <Copy className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+          <p className="text-xs text-gray-500 mt-3">
+            After applying, label your pods to start monitoring:
+          </p>
+          <pre className="bg-gray-100 dark:bg-gray-900 p-2 rounded text-xs mt-1">
+            kubectl label pods -l app=myapp {templateDialog.frameworkId}/scope=in-scope
+          </pre>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={closeTemplateDialog}>
+            Close
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Remediation Dialog */}
+      <ResourceCreationDialog
+        open={remediationDialog.open}
+        onClose={closeRemediationDialog}
+        initialConfig={remediationDialog.config || undefined}
+        onSuccess={handleRemediationSuccess}
+      />
     </div>
   );
 }

@@ -1,0 +1,252 @@
+# CIS Kubernetes Benchmark v1.8 Compliance Template
+# Panoptes file integrity monitoring for Kubernetes security hardening
+#
+# Requirements covered:
+# - 1.1.x: Control plane configuration files
+# - 1.2.x: API server configuration
+# - 4.1.x: Worker node configuration files
+# - 4.2.x: Kubelet configuration
+# - 5.1.x: RBAC and service accounts
+# - 5.7.x: General policies
+#
+# Note: Apply this to system/monitoring pods that have access to node filesystems
+#
+# Usage:
+#   1. Label monitoring pods: kubectl label pod <name> cis/scope=kubernetes-audit
+#   2. Apply this template: kubectl apply -f cis-kubernetes.yaml
+#   3. Verify: kubectl get aw,jg -l compliance=cis-kubernetes
+---
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: cis-k8s-control-plane
+  labels:
+    compliance: cis-kubernetes
+    panoptes.io/template: cis-k8s-control-plane
+  annotations:
+    panoptes.io/description: "CIS Kubernetes Control Plane Monitoring"
+    cis/benchmark: "v1.8"
+    cis/sections: "1.1, 1.2"
+spec:
+  # Target pods with node filesystem access (monitoring agents, security tools)
+  selector:
+    matchLabels:
+      cis/scope: "kubernetes-audit"
+
+  subjects:
+    # 1.1.1-1.1.21 - Control plane configuration files
+    # "Ensure API server pod specification permissions are restrictive"
+    - paths:
+        - /etc/kubernetes/manifests
+        - /etc/kubernetes/pki
+      events:
+        - modify
+        - create
+        - delete
+        - attrib
+      recursive: true
+      tags:
+        benchmark: "CIS 1.1"
+        severity: critical
+        category: control-plane-manifests
+
+    # API server and controller configuration
+    - paths:
+        - /etc/kubernetes/admin.conf
+        - /etc/kubernetes/controller-manager.conf
+        - /etc/kubernetes/scheduler.conf
+      events:
+        - modify
+        - delete
+        - attrib
+      tags:
+        benchmark: "CIS 1.1"
+        severity: critical
+        category: kubeconfig
+
+    # etcd data directory
+    - paths:
+        - /var/lib/etcd
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 2
+      ignore:
+        - "*.snap"
+        - "*.wal"
+      tags:
+        benchmark: "CIS 1.1"
+        severity: critical
+        category: etcd-data
+
+    # Container runtime configuration
+    - paths:
+        - /etc/containerd
+        - /etc/crio
+        - /etc/docker
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      tags:
+        benchmark: "CIS 1.2"
+        severity: high
+        category: container-runtime
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json
+
+---
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: cis-k8s-worker-node
+  labels:
+    compliance: cis-kubernetes
+    panoptes.io/template: cis-k8s-worker-node
+  annotations:
+    panoptes.io/description: "CIS Kubernetes Worker Node Monitoring"
+    cis/benchmark: "v1.8"
+    cis/sections: "4.1, 4.2"
+spec:
+  # Target pods with node filesystem access
+  selector:
+    matchLabels:
+      cis/scope: "kubernetes-audit"
+
+  subjects:
+    # 4.1.1-4.1.10 - Worker node configuration files
+    - paths:
+        - /etc/kubernetes/kubelet.conf
+        - /var/lib/kubelet/config.yaml
+        - /var/lib/kubelet/kubeconfig
+      events:
+        - modify
+        - delete
+        - attrib
+      tags:
+        benchmark: "CIS 4.1"
+        severity: critical
+        category: kubelet-config
+
+    # 4.2.x - Kubelet service configuration
+    - paths:
+        - /etc/systemd/system/kubelet.service
+        - /etc/systemd/system/kubelet.service.d
+        - /usr/lib/systemd/system/kubelet.service
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      tags:
+        benchmark: "CIS 4.2"
+        severity: critical
+        category: kubelet-service
+
+    # CNI configuration
+    - paths:
+        - /etc/cni/net.d
+        - /opt/cni/bin
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      tags:
+        benchmark: "CIS 4.1"
+        severity: high
+        category: cni-config
+
+    # Kubelet PKI
+    - paths:
+        - /var/lib/kubelet/pki
+      events:
+        - modify
+        - create
+        - delete
+        - attrib
+      recursive: true
+      tags:
+        benchmark: "CIS 4.1"
+        severity: critical
+        category: kubelet-pki
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json
+
+---
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: cis-k8s-secrets
+  labels:
+    compliance: cis-kubernetes
+    panoptes.io/template: cis-k8s-secrets
+  annotations:
+    panoptes.io/description: "CIS Kubernetes Secrets Access Control"
+    cis/benchmark: "v1.8"
+    cis/sections: "5.1, 5.4"
+spec:
+  # Target application workloads
+  selector:
+    matchLabels:
+      cis/scope: "kubernetes-audit"
+
+  subjects:
+    # 5.1.6 - Service Account Token mounting
+    # "Ensure that Service Account Tokens are only mounted where necessary"
+    - deny:
+        - /var/run/secrets/kubernetes.io/serviceaccount
+      events:
+        - access
+        - open
+      autoAllowOwner: true
+      defaultResponse: audit
+      audit: true
+      tags:
+        benchmark: "CIS 5.1.6"
+        severity: high
+        category: serviceaccount-tokens
+
+    # 5.4.1 - Prefer network policies
+    # Audit access to sensitive host paths if mounted
+    - deny:
+        - /etc/kubernetes
+        - /var/lib/kubelet
+        - /var/lib/etcd
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        benchmark: "CIS 5.4"
+        severity: critical
+        category: host-path-access
+
+    # Audit access to container runtime sockets
+    - deny:
+        - /var/run/docker.sock
+        - /var/run/containerd/containerd.sock
+        - /var/run/crio/crio.sock
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        benchmark: "CIS 5.4"
+        severity: critical
+        category: runtime-socket
+
+  containerRuntime: auto
+  # Enforcing recommended for runtime socket protection
+  enforcing: true
+  paused: false
+  logFormat: json

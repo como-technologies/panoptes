@@ -92,6 +92,8 @@ impl SessionState for EbpfWatchSessionState {
 pub struct ArgusdServiceImpl {
     /// Node name.
     node_name: String,
+    /// Cluster name for multi-cluster deployments.
+    cluster_name: String,
     /// Maximum number of watches.
     max_watches: usize,
     /// Active watch sessions.
@@ -121,7 +123,7 @@ impl SessionManager<EbpfWatchSessionState> for ArgusdServiceImpl {
 
 impl ArgusdServiceImpl {
     /// Create a new ArgusdService instance (eBPF mode).
-    pub fn new(node_name: String, max_watches: usize) -> Self {
+    pub fn new(node_name: String, cluster_name: String, max_watches: usize) -> Self {
         let runtime: Option<Box<dyn ContainerRuntime>> = detect_runtime();
 
         if let Some(ref rt) = runtime {
@@ -132,6 +134,7 @@ impl ArgusdServiceImpl {
 
         Self {
             node_name: node_name.clone(),
+            cluster_name,
             max_watches,
             sessions: new_session_map(),
             broadcaster: EventBroadcaster::new(10000),
@@ -188,6 +191,7 @@ impl ArgusdServiceImpl {
         let broadcaster = self.broadcaster.clone();
         let sessions = self.sessions.clone();
         let node_name = self.node_name.clone();
+        let cluster_name = self.cluster_name.clone();
 
         tokio::spawn(async move {
             loop {
@@ -279,6 +283,8 @@ impl ArgusdServiceImpl {
                         inode: 0,
                         tags: Default::default(),
                         process_info,
+                        // Multi-cluster identification
+                        cluster_name: cluster_name.clone(),
                     };
 
                     // Log the event with process attribution

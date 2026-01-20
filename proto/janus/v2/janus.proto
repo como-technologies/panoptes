@@ -383,6 +383,11 @@ message AccessEvent {
 
   // audit_logged indicates if this event was written to kernel audit log.
   bool audit_logged = 13;
+
+  // cluster_name identifies the cluster where this event originated. (NEW in v2)
+  // Used for multi-cluster aggregation and Prometheus federation.
+  // Populated from PANOPTES_CLUSTER_NAME environment variable.
+  string cluster_name = 14;
 }
 
 // GetMetricsRequest specifies what metrics to retrieve.
