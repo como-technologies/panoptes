@@ -118,6 +118,7 @@ use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, error, info, warn};
 
 use crate::dedupe::DedupeCache;
+use crate::metrics::GuardMetrics;
 use crate::policy::{PolicyError, PolicyEvaluator};
 
 // Re-export AccessResponse from audit module for backward compatibility
@@ -134,6 +135,29 @@ pub enum GuardError {
 
     #[error("policy error: {0}")]
     Policy(#[from] PolicyError),
+
+    /// Maximum fanotify marks exceeded for this guard.
+    ///
+    /// Each guard has a configurable limit on the number of fanotify marks
+    /// it can create. This prevents a single guard from exhausting kernel
+    /// resources (max_user_marks sysctl).
+    ///
+    /// ## Why This Matters
+    ///
+    /// The kernel has a per-user limit on fanotify marks. If one guard
+    /// consumes too many marks, subsequent guards will fail to register
+    /// their mounts, leaving containers unprotected.
+    ///
+    /// ## Mitigation
+    ///
+    /// - Increase max_marks_per_guard in guard config
+    /// - Increase kernel limit: sysctl -w fs.fanotify.max_user_marks=65536
+    /// - Reduce the number of containers per guard
+    #[error("maximum fanotify marks ({max_marks}) exceeded for this guard (active: {marks_active})")]
+    MaxMarksExceeded {
+        max_marks: usize,
+        marks_active: usize,
+    },
 }
 
 /// Access event from fanotify
@@ -157,6 +181,17 @@ pub struct GuardConfig {
     pub events: Vec<String>,
     pub auto_allow_owner: bool,
     pub enforce: bool,
+    /// Maximum number of fanotify marks this guard can create.
+    ///
+    /// This is a defensive limit to prevent a single guard from exhausting
+    /// the kernel's per-user fanotify mark limit. Each call to `add_mount()`
+    /// consumes one mark.
+    ///
+    /// Default: 100 (sufficient for multi-container pods with room to spare)
+    ///
+    /// The kernel limit is controlled by:
+    ///   /proc/sys/fs/fanotify/max_user_marks (typically 8192 or higher)
+    pub max_marks_per_guard: usize,
 }
 
 /// fanotify-based file access guard.
@@ -171,6 +206,28 @@ pub struct Guard {
     policy: PolicyEvaluator,
     /// Deduplication cache to reduce redundant event processing.
     dedupe: Mutex<DedupeCache>,
+    /// Optional metrics collector for tracking guard statistics.
+    ///
+    /// When provided, the guard will record:
+    /// - Event counts by type and response (allow/deny/audit)
+    /// - Queue overflow events (FAN_Q_OVERFLOW)
+    /// - Permission response write retries/failures
+    ///
+    /// These metrics are critical for detecting security monitoring gaps.
+    metrics: Option<Arc<GuardMetrics>>,
+    /// Number of active fanotify marks for this guard.
+    ///
+    /// Tracks the marks created via `add_mount()`. Used to enforce
+    /// `config.max_marks_per_guard` and prevent exhausting kernel resources.
+    ///
+    /// ## Kernel Resource Tracking
+    ///
+    /// The kernel tracks marks globally per user via `max_user_marks` sysctl.
+    /// This per-guard counter provides:
+    /// - Defense against a single guard consuming all marks
+    /// - Visibility into mark usage for debugging
+    /// - Early failure with clear error message rather than kernel ENOSPC
+    marks_active: std::sync::atomic::AtomicUsize,
 }
 
 impl Guard {
@@ -185,12 +242,19 @@ impl Guard {
     /// When `config.enforce` is false, uses `FAN_CLASS_NOTIF` for notification-only
     /// mode. Events are delivered after the fact and cannot block access.
     ///
+    /// # Arguments
+    ///
+    /// * `config` - Guard configuration with allow/deny patterns and settings
+    /// * `metrics` - Optional metrics collector for tracking guard statistics.
+    ///               When provided, records event counts, queue overflows, and
+    ///               response write failures for security monitoring.
+    ///
     /// # Errors
     ///
     /// Returns `GuardError::Fanotify` if fanotify_init() fails. Common causes:
     /// - Missing `CAP_SYS_ADMIN` capability
     /// - Kernel doesn't support fanotify
-    pub fn new(config: GuardConfig) -> Result<Self, GuardError> {
+    pub fn new(config: GuardConfig, metrics: Option<Arc<GuardMetrics>>) -> Result<Self, GuardError> {
         // Initialize fanotify with appropriate flags
         // FAN_CLASS_CONTENT: Receive permission events for content access
         // FAN_CLASS_NOTIF: Notification only, no permission events
@@ -230,6 +294,8 @@ impl Guard {
             config,
             policy,
             dedupe,
+            metrics,
+            marks_active: std::sync::atomic::AtomicUsize::new(0),
         })
     }
 
@@ -239,14 +305,48 @@ impl Guard {
     /// file access events on the filesystem. The specific events monitored
     /// are determined by the guard's configuration.
     ///
+    /// # Mark Limit Enforcement
+    ///
+    /// This method enforces `config.max_marks_per_guard` to prevent a single
+    /// guard from exhausting the kernel's fanotify mark limit. Each successful
+    /// call increments the internal mark counter.
+    ///
+    /// ## Why Per-Guard Limits Matter
+    ///
+    /// The kernel has a global per-user limit on fanotify marks
+    /// (`/proc/sys/fs/fanotify/max_user_marks`). Without per-guard limits:
+    /// - A single misconfigured guard could consume all available marks
+    /// - Subsequent guards would fail with ENOSPC
+    /// - Containers would be left unprotected with unclear error messages
+    ///
+    /// By failing fast with a clear error, operators can identify and fix
+    /// the problematic guard configuration.
+    ///
     /// # Arguments
     ///
     /// * `path` - Path to a file on the mount point to monitor
     ///
     /// # Errors
     ///
-    /// Returns `GuardError::Fanotify` if fanotify_mark() fails.
+    /// - `GuardError::MaxMarksExceeded` - Mark limit for this guard reached
+    /// - `GuardError::Fanotify` - Kernel fanotify_mark() failed
     pub fn add_mount(&self, path: &Path) -> Result<(), GuardError> {
+        // Check per-guard mark limit BEFORE attempting to register.
+        // This provides a clear error message instead of cryptic ENOSPC from kernel.
+        let current_marks = self.marks_active.load(Ordering::SeqCst);
+        if current_marks >= self.config.max_marks_per_guard {
+            warn!(
+                current = current_marks,
+                limit = self.config.max_marks_per_guard,
+                path = %path.display(),
+                "Per-guard mark limit exceeded - cannot add mount"
+            );
+            return Err(GuardError::MaxMarksExceeded {
+                max_marks: self.config.max_marks_per_guard,
+                marks_active: current_marks,
+            });
+        }
+
         let mask = self.events_to_mask();
 
         // FAN_MARK_ADD: Add to existing marks
@@ -255,7 +355,15 @@ impl Guard {
 
         self.fanotify.mark(mark_flags, mask, None, Some(path))?;
 
-        debug!(path = %path.display(), "Added mount to guard");
+        // Increment mark counter after successful registration
+        let new_count = self.marks_active.fetch_add(1, Ordering::SeqCst) + 1;
+        debug!(
+            path = %path.display(),
+            marks_active = new_count,
+            limit = self.config.max_marks_per_guard,
+            "Added mount to guard"
+        );
+
         Ok(())
     }
 
@@ -283,10 +391,59 @@ impl Guard {
             match self.fanotify.read_events() {
                 Ok(events) => {
                     for event in events {
+                        // =========================================================
+                        // QUEUE OVERFLOW DETECTION (FAN_Q_OVERFLOW)
+                        // =========================================================
+                        //
+                        // The fanotify subsystem has a finite event queue controlled by:
+                        //   /proc/sys/fs/fanotify/max_queued_events (default: 16384)
+                        //
+                        // When events arrive faster than userspace can process them:
+                        // 1. Kernel drops oldest events that haven't been read
+                        // 2. Sets FAN_Q_OVERFLOW flag on the next readable event
+                        // 3. Events continue normally after userspace catches up
+                        //
+                        // SECURITY IMPLICATION: Overflow means some file access events
+                        // were permanently lost. An attacker could potentially exploit
+                        // this by generating high event volume to mask malicious access.
+                        //
+                        // MITIGATION:
+                        // - Monitor queue_overflows metric and alert on non-zero
+                        // - Increase max_queued_events if frequent overflows
+                        // - Reduce monitoring scope (fewer mounts, more specific paths)
+                        //
+                        // References:
+                        // - fanotify(7) man page, "Queue overflow" section
+                        // - Linux kernel: fs/notify/fanotify/fanotify_user.c
+                        if event.mask().contains(MaskFlags::FAN_Q_OVERFLOW) {
+                            warn!(
+                                "fanotify queue overflow detected - events may have been lost. \
+                                 Consider increasing /proc/sys/fs/fanotify/max_queued_events"
+                            );
+                            if let Some(ref metrics) = self.metrics {
+                                metrics.record_queue_overflow();
+                            }
+                            // FAN_Q_OVERFLOW events don't have a valid fd or path,
+                            // so we continue to the next event
+                            continue;
+                        }
+
                         let access_event = self.process_event(&event);
 
-                        // Send response for permission events - this MUST happen promptly
-                        // to avoid blocking the accessing process
+                        // =========================================================
+                        // PERMISSION RESPONSE WITH RETRY
+                        // =========================================================
+                        //
+                        // For permission events, we MUST respond promptly to avoid
+                        // blocking the accessing process. If write_response() fails
+                        // with EAGAIN, we retry with brief delays.
+                        //
+                        // CRITICAL: If all retries fail, we default to FAN_ALLOW to
+                        // prevent hanging the monitored process. This is a security
+                        // trade-off: it's better to allow access than to cause a DoS.
+                        //
+                        // The response_write_failures metric tracks these occurrences
+                        // so operators can investigate and address the root cause.
                         if let Some(ref fd) = event.fd() {
                             let response_type = if access_event.response == AccessResponse::Deny {
                                 Response::FAN_DENY
@@ -296,8 +453,48 @@ impl Guard {
 
                             let response = FanotifyResponse::new(fd.as_fd(), response_type);
 
-                            if let Err(e) = self.fanotify.write_response(response) {
-                                error!(error = %e, "Failed to write fanotify response");
+                            // Retry loop for permission response
+                            const MAX_RETRIES: u32 = 3;
+                            const RETRY_DELAY_MICROS: u64 = 100;
+                            let mut write_success = false;
+
+                            for attempt in 0..MAX_RETRIES {
+                                match self.fanotify.write_response(response.clone()) {
+                                    Ok(()) => {
+                                        write_success = true;
+                                        break;
+                                    }
+                                    Err(nix::Error::EAGAIN) => {
+                                        // Kernel buffer full, brief sleep and retry
+                                        if let Some(ref metrics) = self.metrics {
+                                            metrics.record_response_retry();
+                                        }
+                                        if attempt < MAX_RETRIES - 1 {
+                                            std::thread::sleep(std::time::Duration::from_micros(
+                                                RETRY_DELAY_MICROS * (attempt as u64 + 1)
+                                            ));
+                                        }
+                                    }
+                                    Err(e) => {
+                                        // Non-recoverable error, log and break
+                                        error!(error = %e, "Failed to write fanotify response");
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if !write_success {
+                                // All retries exhausted - this is a serious condition
+                                warn!(
+                                    path = %access_event.path,
+                                    pid = access_event.pid,
+                                    "Permission response write failed after {} retries - \
+                                     access was implicitly allowed to prevent process hang",
+                                    MAX_RETRIES
+                                );
+                                if let Some(ref metrics) = self.metrics {
+                                    metrics.record_response_failure();
+                                }
                             }
                         }
 

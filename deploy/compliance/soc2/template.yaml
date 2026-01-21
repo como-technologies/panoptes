@@ -20,9 +20,9 @@ metadata:
   name: soc2-fim
   labels:
     compliance: soc2
-    panoptes.io/template: soc2-fim
+    panoptes.como-technologies.io/template: soc2-fim
   annotations:
-    panoptes.io/description: "SOC 2 File Integrity Monitoring"
+    panoptes.como-technologies.io/description: "SOC 2 File Integrity Monitoring"
     soc2/criteria: "CC7.1, CC7.2, CC7.3"
 spec:
   # Target pods in SOC 2 scope
@@ -145,9 +145,9 @@ spec:
 
     # SSL/TLS certificates
     - paths:
-        - /etc/ssl/certs
-        - /etc/ssl/private
-        - /etc/pki
+        - /etc/ssl/certs    # prevents certificate tampering
+        - /etc/ssl/private  # prevents private key theft
+        - /etc/pki          # prevents PKI infrastructure tampering
       events:
         - all
       recursive: true
@@ -155,6 +155,81 @@ spec:
         criteria: "CC6.1"
         severity: critical
         category: certificates
+
+    # =================================================================
+    # STAGING AREA MONITORING (SOC 2 CC7.2 - System Monitoring)
+    # Detect malware staging in temp directories
+    # =================================================================
+    - paths:
+        - /tmp              # prevents malware staging in world-writable temp
+        - /var/tmp          # prevents persistent temp file attacks
+        - /dev/shm          # prevents in-memory malware execution (RAM-backed)
+      events:
+        - create
+        - modify
+        - delete
+      recursive: true
+      maxDepth: 3
+      ignore:
+        - "*.sock"
+        - "*.pid"
+        - "pulse-*"
+        - "ssh-*"
+        - ".X*-lock"
+      tags:
+        criteria: "CC7.2"
+        severity: high
+        category: staging-detection
+        attack: "T1074"
+
+    # =================================================================
+    # LIBRARY INJECTION DETECTION (SOC 2 CC7.1 - System Operations)
+    # Detect LD_PRELOAD and library hijacking attacks
+    # =================================================================
+    - paths:
+        - /usr/lib          # prevents malicious library injection
+        - /lib              # prevents system library tampering
+        - /lib64            # prevents 64-bit library tampering
+        - /usr/lib64        # prevents 64-bit library injection
+        - /etc/ld.so.conf   # prevents linker config hijacking
+        - /etc/ld.so.conf.d # prevents linker config directory attacks
+        - /etc/ld.so.preload # prevents LD_PRELOAD persistence
+      events:
+        - create
+        - modify
+        - delete
+      recursive: true
+      maxDepth: 2
+      ignore:
+        - "*.pyc"
+        - "__pycache__"
+        - "*.cache"
+      tags:
+        criteria: "CC7.1"
+        severity: critical
+        category: library-integrity
+        attack: "T1574.006"
+
+    # =================================================================
+    # SHELL CONFIGURATION MONITORING (SOC 2 CC6.1 - Access Security)
+    # Detect shell backdoors for persistence
+    # =================================================================
+    - paths:
+        - /etc/profile      # prevents system-wide shell backdoor
+        - /etc/profile.d    # prevents profile.d script injection
+        - /etc/bash.bashrc  # prevents global bashrc backdoor
+        - /root/.bashrc     # prevents root shell backdoor
+        - /root/.bash_profile # prevents root login backdoor
+      events:
+        - modify
+        - create
+      recursive: true
+      maxDepth: 1
+      tags:
+        criteria: "CC6.1"
+        severity: high
+        category: shell-persistence
+        attack: "T1546.004"
 
   containerRuntime: auto
   paused: false
@@ -167,9 +242,9 @@ metadata:
   name: soc2-access
   labels:
     compliance: soc2
-    panoptes.io/template: soc2-access
+    panoptes.como-technologies.io/template: soc2-access
   annotations:
-    panoptes.io/description: "SOC 2 Access Control and Auditing"
+    panoptes.como-technologies.io/description: "SOC 2 Access Control and Auditing"
     soc2/criteria: "CC6.1, CC6.2, CC7.3"
 spec:
   # Target pods in SOC 2 scope
@@ -200,12 +275,15 @@ spec:
 
     # CC6.2 - Access Authorization
     # Protect Kubernetes secrets and credentials
+    # SECURITY NOTE: autoAllowOwner permits the pod to read any mounted secret.
+    # For stricter control, set autoAllowOwner: false and configure explicit
+    # RBAC policies. See docs/security/attack-surface-analysis.md section 3.2
     - deny:
         - /var/run/secrets
       events:
         - access
         - open
-      autoAllowOwner: true
+      autoAllowOwner: true  # Permissive - see security note above
       defaultResponse: deny
       audit: true
       tags:
@@ -239,7 +317,6 @@ spec:
       events:
         - access
         - open
-        - modify
       audit: true
       tags:
         criteria: "CC7.3"

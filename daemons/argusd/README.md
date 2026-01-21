@@ -309,6 +309,79 @@ Argus requires the following Linux capabilities:
 **Note:** The DaemonSet uses `privileged: true` which includes all capabilities.
 For production, consider using specific capabilities instead.
 
+## Defensive Hardening
+
+Argusd implements several defensive measures to protect against kernel interface
+issues that could cause silent security monitoring failures.
+
+### Resource Limit Checks
+
+At startup, argusd verifies system resource limits are sufficient:
+
+| Limit | Purpose | Check |
+|-------|---------|-------|
+| `RLIMIT_NOFILE` | File descriptor limit | Must exceed `max_watches + 1024` |
+| `max_user_watches` | Per-user inotify watch limit | Warning if below `max_watches` |
+| `max_queued_events` | Event queue size | Warning if below 32768 |
+
+If limits are too low, the daemon exits with a clear error message explaining
+how to adjust the limit. This prevents cryptic failures partway through operation.
+
+**Fix insufficient limits:**
+
+```bash
+# File descriptor limit
+ulimit -n 65536
+
+# inotify watch limit (persistent)
+echo "fs.inotify.max_user_watches=524288" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+
+# Event queue size (prevents overflow)
+echo "fs.inotify.max_queued_events=65536" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+```
+
+### Queue Overflow Handling
+
+If inotify events arrive faster than argusd can process them, the kernel
+drops events and sets `IN_Q_OVERFLOW`. Argusd detects this and:
+
+1. Logs a warning with the `queue_overflows` metric
+2. Reinitializes the inotify instance
+3. Re-adds all watches from stored configuration
+
+**Security implication:** Events during the overflow window are lost. Monitor
+the `queue_overflows` metric and alert on non-zero values.
+
+**Mitigation:**
+- Increase `max_queued_events` via sysctl
+- Reduce monitoring scope (fewer paths, more specific patterns)
+- Ensure daemon has sufficient CPU resources
+
+### Metrics for Security Monitoring
+
+| Metric | Description | Alert Threshold |
+|--------|-------------|-----------------|
+| `queue_overflows` | Events dropped due to kernel queue overflow | > 0 |
+| `errors_total` | Generic error counter | Rate > 1/min |
+| `move_pairs_timeout` | Unpaired move events (possible attack) | Rate > 10/min |
+
+**Prometheus alert example:**
+
+```yaml
+- alert: InotifyQueueOverflow
+  expr: rate(argusd_queue_overflows_total[5m]) > 0
+  annotations:
+    summary: "inotify events are being dropped"
+    runbook: "Increase max_queued_events or reduce monitoring scope"
+```
+
+### References
+
+- `man 7 inotify` - inotify limits and queue overflow behavior
+- `fs.inotify.*` sysctls - `/proc/sys/fs/inotify/`
+
 ## Kubernetes Deployment
 
 The daemon is deployed as a DaemonSet. See `hack/argusd-daemonset.yaml`:

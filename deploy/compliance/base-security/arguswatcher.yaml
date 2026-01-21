@@ -6,13 +6,13 @@ metadata:
     app.kubernetes.io/name: base-security-fim
     app.kubernetes.io/component: fim
     app.kubernetes.io/part-of: panoptes
-    panoptes.io/template: base-security
+    panoptes.como-technologies.io/template: base-security
   annotations:
-    panoptes.io/description: "Base Security File Integrity Monitoring"
+    panoptes.como-technologies.io/description: "Base Security File Integrity Monitoring"
 spec:
   selector:
     matchLabels:
-      security.panoptes.io/monitored: "true"
+      panoptes.como-technologies.io/monitored: "true"
 
   subjects:
     # Critical system files
@@ -108,8 +108,8 @@ spec:
 
     # System services
     - paths:
-        - /etc/systemd/system
-        - /etc/init.d
+        - /etc/systemd/system  # prevents persistence via systemd backdoor
+        - /etc/init.d          # prevents persistence via init script
       events:
         - modify
         - create
@@ -119,6 +119,77 @@ spec:
       tags:
         severity: high
         category: system-services
+
+    # =================================================================
+    # STAGING AREA MONITORING - Detect malware staging/execution
+    # =================================================================
+    - paths:
+        - /tmp              # prevents malware staging in world-writable temp
+        - /var/tmp          # prevents persistent temp file attacks
+        - /dev/shm          # prevents in-memory malware execution (RAM-backed)
+      events:
+        - create
+        - modify
+        - delete
+      recursive: true
+      maxDepth: 3
+      ignore:
+        - "*.sock"
+        - "*.pid"
+        - "pulse-*"
+        - "ssh-*"
+        - ".X*-lock"
+      tags:
+        severity: high
+        category: staging-detection
+        attack: "T1074"
+
+    # =================================================================
+    # LIBRARY INJECTION DETECTION - Detect LD_PRELOAD attacks
+    # =================================================================
+    - paths:
+        - /usr/lib          # prevents malicious library injection
+        - /lib              # prevents system library tampering
+        - /lib64            # prevents 64-bit library tampering
+        - /usr/lib64        # prevents 64-bit library injection
+        - /etc/ld.so.conf   # prevents linker config hijacking
+        - /etc/ld.so.conf.d # prevents linker config directory attacks
+        - /etc/ld.so.preload # prevents LD_PRELOAD persistence
+      events:
+        - create
+        - modify
+        - delete
+      recursive: true
+      maxDepth: 2
+      ignore:
+        - "*.pyc"
+        - "__pycache__"
+        - "*.cache"
+      tags:
+        severity: critical
+        category: library-integrity
+        attack: "T1574.006"
+
+    # =================================================================
+    # SHELL CONFIGURATION MONITORING - Detect shell backdoors
+    # =================================================================
+    - paths:
+        - /etc/profile      # prevents system-wide shell backdoor
+        - /etc/profile.d    # prevents profile.d script injection
+        - /etc/bash.bashrc  # prevents global bashrc backdoor
+        - /etc/bashrc       # prevents RHEL-style bashrc backdoor
+        - /root/.bashrc     # prevents root shell backdoor
+        - /root/.bash_profile # prevents root login backdoor
+        - /root/.profile    # prevents root profile backdoor
+      events:
+        - modify
+        - create
+      recursive: true
+      maxDepth: 1
+      tags:
+        severity: high
+        category: shell-persistence
+        attack: "T1546.004"
 
   containerRuntime: auto
   paused: false

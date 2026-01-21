@@ -261,7 +261,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      security.panoptes.io/monitored: "true"
+      panoptes.como-technologies.io/monitored: "true"
   subjects:
     - paths:
         - /etc/passwd
@@ -289,7 +289,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      security.panoptes.io/monitored: "true"
+      panoptes.como-technologies.io/monitored: "true"
   subjects:
     - deny:
         - /etc/shadow
@@ -436,7 +436,7 @@ kubectl get arguswatcher critical-files -o jsonpath='{.status}'
 kubectl logs -n panoptes-system -l app=argusd
 
 # Ensure pods have the correct label
-kubectl get pods -l security.panoptes.io/monitored=true
+kubectl get pods -l panoptes.como-technologies.io/monitored=true
 ```
 
 ### Metrics Not Appearing

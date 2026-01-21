@@ -21,9 +21,9 @@ metadata:
   name: nist-fim
   labels:
     compliance: nist-800-53
-    panoptes.io/template: nist-fim
+    panoptes.como-technologies.io/template: nist-fim
   annotations:
-    panoptes.io/description: "NIST 800-53 File Integrity Monitoring"
+    panoptes.como-technologies.io/description: "NIST 800-53 File Integrity Monitoring"
     nist/controls: "SI-7, SI-7(1), SI-7(2)"
 spec:
   # Target federal information system workloads
@@ -136,8 +136,8 @@ spec:
 
     # SI-7: Boot configuration
     - paths:
-        - /boot
-        - /etc/grub.d
+        - /boot             # prevents bootloader/kernel tampering
+        - /etc/grub.d       # prevents GRUB config modification
       events:
         - modify
         - create
@@ -148,6 +148,53 @@ spec:
         control: "SI-7"
         severity: critical
         category: boot-config
+
+    # =================================================================
+    # STAGING AREA MONITORING (NIST SI-7 - Software Integrity)
+    # Detect malware staging in temp directories
+    # =================================================================
+    - paths:
+        - /tmp              # prevents malware staging in world-writable temp
+        - /var/tmp          # prevents persistent temp file attacks
+        - /dev/shm          # prevents in-memory malware execution (RAM-backed)
+      events:
+        - create
+        - modify
+        - delete
+      recursive: true
+      maxDepth: 3
+      ignore:
+        - "*.sock"
+        - "*.pid"
+        - "pulse-*"
+        - "ssh-*"
+        - ".X*-lock"
+      tags:
+        control: "SI-7"
+        severity: high
+        category: staging-detection
+        attack: "T1074"
+
+    # =================================================================
+    # SHELL CONFIGURATION MONITORING (NIST AC-6 - Least Privilege)
+    # Detect shell backdoors for persistence
+    # =================================================================
+    - paths:
+        - /etc/profile      # prevents system-wide shell backdoor
+        - /etc/profile.d    # prevents profile.d script injection
+        - /etc/bash.bashrc  # prevents global bashrc backdoor
+        - /root/.bashrc     # prevents root shell backdoor
+        - /root/.bash_profile # prevents root login backdoor
+      events:
+        - modify
+        - create
+      recursive: true
+      maxDepth: 1
+      tags:
+        control: "AC-6"
+        severity: high
+        category: shell-persistence
+        attack: "T1546.004"
 
   containerRuntime: auto
   paused: false
@@ -160,9 +207,9 @@ metadata:
   name: nist-access
   labels:
     compliance: nist-800-53
-    panoptes.io/template: nist-access
+    panoptes.como-technologies.io/template: nist-access
   annotations:
-    panoptes.io/description: "NIST 800-53 Access Control and Auditing"
+    panoptes.como-technologies.io/description: "NIST 800-53 Access Control and Auditing"
     nist/controls: "AU-2, AU-3, AU-6, AC-6"
 spec:
   # Target federal information system workloads
@@ -199,7 +246,6 @@ spec:
       events:
         - access
         - open
-        - modify
       audit: true
       tags:
         control: "AU-2"
@@ -222,12 +268,15 @@ spec:
         category: ssh-keys
 
     # AU-2: Kubernetes secrets access
+    # SECURITY NOTE: autoAllowOwner permits the pod to read any mounted secret.
+    # For stricter control, set autoAllowOwner: false and configure explicit
+    # RBAC policies. See docs/security/attack-surface-analysis.md section 3.2
     - deny:
         - /var/run/secrets/kubernetes.io
       events:
         - access
         - open
-      autoAllowOwner: true
+      autoAllowOwner: true  # Permissive - see security note above
       defaultResponse: audit
       audit: true
       tags:

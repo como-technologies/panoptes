@@ -6,9 +6,9 @@ metadata:
   name: gdpr-access
   labels:
     compliance: gdpr
-    panoptes.io/template: gdpr-access
+    panoptes.como-technologies.io/template: gdpr-access
   annotations:
-    panoptes.io/description: "GDPR Access Control and Auditing"
+    panoptes.como-technologies.io/description: "GDPR Access Control and Auditing"
     gdpr/articles: "30, 32, 33"
 spec:
   selector:
@@ -24,7 +24,6 @@ spec:
       events:
         - access
         - open
-        - modify
       audit: true
       tags:
         article: "30"
@@ -50,12 +49,15 @@ spec:
         category: credential-protection
 
     # Article 32: Kubernetes secrets
+    # SECURITY NOTE: autoAllowOwner permits the pod to read any mounted secret.
+    # For stricter control, set autoAllowOwner: false and configure explicit
+    # RBAC policies. See docs/security/attack-surface-analysis.md section 3.2
     - deny:
         - /var/run/secrets
       events:
         - access
         - open
-      autoAllowOwner: true
+      autoAllowOwner: true  # Permissive - see security note above
       defaultResponse: deny
       audit: true
       tags:

@@ -533,8 +533,17 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
             let event_tx = session_guard.state.event_tx.clone();
             let container_pids = session_guard.pids.clone();
             let enforcing = session_guard.state.enforcing;
+            // Extract metrics for the guard to track queue overflows, response failures, etc.
+            let typed_metrics = session_guard.state.typed_metrics.clone();
 
             // Build guard config from first subject (simplified for now)
+            //
+            // max_marks_per_guard: Default to 100, which is sufficient for
+            // multi-container pods with room to spare. The kernel limit
+            // (max_user_marks) is typically 8192+, so this per-guard limit
+            // prevents a single guard from consuming too many marks.
+            const DEFAULT_MAX_MARKS_PER_GUARD: usize = 100;
+
             let config = if let Some(subject) = session_guard.state.subjects.first() {
                 GuardConfig {
                     allow_patterns: subject.allow.clone(),
@@ -551,6 +560,7 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
                         .collect(),
                     auto_allow_owner: subject.auto_allow_owner,
                     enforce: enforcing,
+                    max_marks_per_guard: DEFAULT_MAX_MARKS_PER_GUARD,
                 }
             } else {
                 GuardConfig {
@@ -559,12 +569,14 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
                     events: vec!["open_perm".to_string(), "access_perm".to_string()],
                     auto_allow_owner: false,
                     enforce: enforcing,
+                    max_marks_per_guard: DEFAULT_MAX_MARKS_PER_GUARD,
                 }
             };
             drop(session_guard);
 
             // Create guard SYNCHRONOUSLY - blocks until fanotify_init() completes
-            let guard = Guard::new(config.clone()).map_err(|e| {
+            // Pass metrics to track defensive hardening counters (queue overflows, etc.)
+            let guard = Guard::new(config.clone(), Some(typed_metrics)).map_err(|e| {
                 error!(error = %e, "Failed to create guard");
                 running.store(false, Ordering::SeqCst);
                 Status::internal(format!("Failed to create guard: {}", e))

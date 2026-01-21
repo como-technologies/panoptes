@@ -7,9 +7,9 @@ metadata:
     app.kubernetes.io/component: access-control
     app.kubernetes.io/part-of: panoptes
     compliance: pci-dss
-    panoptes.io/template: pci-dss-access
+    panoptes.como-technologies.io/template: pci-dss-access
   annotations:
-    panoptes.io/description: "PCI-DSS Access Control and Auditing"
+    panoptes.como-technologies.io/description: "PCI-DSS Access Control and Auditing"
     pci-dss/requirements: "7.1, 10.2"
 spec:
   selector:
@@ -38,12 +38,15 @@ spec:
         category: credential-access
 
     # Kubernetes secrets protection
+    # SECURITY NOTE: autoAllowOwner permits the pod to read any mounted secret.
+    # For stricter control, set autoAllowOwner: false and configure explicit
+    # RBAC policies. See docs/security/attack-surface-analysis.md section 3.2
     - deny:
         - /var/run/secrets/kubernetes.io
       events:
         - access
         - open
-      autoAllowOwner: true
+      autoAllowOwner: true  # Permissive - see security note above
       defaultResponse: deny
       audit: true
       tags:
@@ -58,7 +61,6 @@ spec:
       events:
         - access
         - open
-        - modify
       audit: true
       tags:
         requirement: "10.2"

@@ -332,7 +332,7 @@ metadata:
   namespace: default
   labels:
     app: test-app
-    security.panoptes.io/monitored: "true"
+    panoptes.como-technologies.io/monitored: "true"
 spec:
   containers:
   - name: alpine

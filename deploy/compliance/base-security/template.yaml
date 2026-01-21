@@ -13,23 +13,23 @@
 # - Suspicious tool execution detection
 #
 # Usage:
-#   1. Label your pods: kubectl label pod <name> security.panoptes.io/monitored=true
+#   1. Label your pods: kubectl label pod <name> panoptes.como-technologies.io/monitored=true
 #   2. Apply this template: kubectl apply -f base-security.yaml
-#   3. Verify: kubectl get aw,jg -l panoptes.io/template
+#   3. Verify: kubectl get aw,jg -l panoptes.como-technologies.io/template
 ---
 apiVersion: argus.como-technologies.io/v2
 kind: ArgusWatcher
 metadata:
   name: base-security-fim
   labels:
-    panoptes.io/template: base-security
+    panoptes.como-technologies.io/template: base-security
   annotations:
-    panoptes.io/description: "Base Security File Integrity Monitoring"
+    panoptes.como-technologies.io/description: "Base Security File Integrity Monitoring"
 spec:
   # Default selector - monitors pods with security label
   selector:
     matchLabels:
-      security.panoptes.io/monitored: "true"
+      panoptes.como-technologies.io/monitored: "true"
 
   subjects:
     # Critical system files - always monitor
@@ -125,8 +125,8 @@ spec:
 
     # System services
     - paths:
-        - /etc/systemd/system
-        - /etc/init.d
+        - /etc/systemd/system  # prevents persistence via systemd backdoor
+        - /etc/init.d          # prevents persistence via init script
       events:
         - modify
         - create
@@ -136,6 +136,80 @@ spec:
       tags:
         severity: high
         category: system-services
+
+    # =================================================================
+    # STAGING AREA MONITORING - Detect malware staging/execution
+    # Attackers commonly stage payloads in temp directories
+    # =================================================================
+    - paths:
+        - /tmp              # prevents malware staging in world-writable temp
+        - /var/tmp          # prevents persistent temp file attacks
+        - /dev/shm          # prevents in-memory malware execution (RAM-backed)
+      events:
+        - create
+        - modify
+        - delete
+      recursive: true
+      maxDepth: 3
+      ignore:
+        - "*.sock"          # legitimate sockets
+        - "*.pid"           # process ID files
+        - "pulse-*"         # PulseAudio temp files
+        - "ssh-*"           # SSH agent sockets
+        - ".X*-lock"        # X11 lock files
+      tags:
+        severity: high
+        category: staging-detection
+        attack: "T1074"     # MITRE: Data Staged
+
+    # =================================================================
+    # LIBRARY INJECTION DETECTION - Detect LD_PRELOAD attacks
+    # Attackers inject malicious shared libraries to hijack processes
+    # =================================================================
+    - paths:
+        - /usr/lib          # prevents malicious library injection
+        - /lib              # prevents system library tampering
+        - /lib64            # prevents 64-bit library tampering
+        - /usr/lib64        # prevents 64-bit library injection
+        - /etc/ld.so.conf   # prevents linker config hijacking
+        - /etc/ld.so.conf.d # prevents linker config directory attacks
+        - /etc/ld.so.preload # prevents LD_PRELOAD persistence
+      events:
+        - create
+        - modify
+        - delete
+      recursive: true
+      maxDepth: 2
+      ignore:
+        - "*.pyc"           # Python bytecode (legitimate)
+        - "__pycache__"     # Python cache dirs
+        - "*.cache"         # general cache files
+      tags:
+        severity: critical
+        category: library-integrity
+        attack: "T1574.006" # MITRE: LD_PRELOAD Hijacking
+
+    # =================================================================
+    # SHELL CONFIGURATION MONITORING - Detect shell backdoors
+    # Attackers modify shell configs for persistence on login
+    # =================================================================
+    - paths:
+        - /etc/profile      # prevents system-wide shell backdoor
+        - /etc/profile.d    # prevents profile.d script injection
+        - /etc/bash.bashrc  # prevents global bashrc backdoor
+        - /etc/bashrc       # prevents RHEL-style bashrc backdoor
+        - /root/.bashrc     # prevents root shell backdoor
+        - /root/.bash_profile # prevents root login backdoor
+        - /root/.profile    # prevents root profile backdoor
+      events:
+        - modify
+        - create
+      recursive: true
+      maxDepth: 1
+      tags:
+        severity: high
+        category: shell-persistence
+        attack: "T1546.004" # MITRE: Unix Shell Config Modification
 
   containerRuntime: auto
   paused: false
@@ -147,14 +221,14 @@ kind: JanusGuard
 metadata:
   name: base-security-access
   labels:
-    panoptes.io/template: base-security
+    panoptes.como-technologies.io/template: base-security
   annotations:
-    panoptes.io/description: "Base Security Access Control"
+    panoptes.como-technologies.io/description: "Base Security Access Control"
 spec:
   # Default selector - monitors pods with security label
   selector:
     matchLabels:
-      security.panoptes.io/monitored: "true"
+      panoptes.como-technologies.io/monitored: "true"
 
   subjects:
     # Protect shadow files - deny all access
@@ -185,12 +259,15 @@ spec:
         category: ssh-keys
 
     # Kubernetes secrets - allow owner only
+    # SECURITY NOTE: autoAllowOwner permits the pod to read any mounted secret.
+    # For stricter control, set autoAllowOwner: false and configure explicit
+    # RBAC policies. See docs/security/attack-surface-analysis.md section 3.2
     - deny:
         - /var/run/secrets/kubernetes.io
       events:
         - access
         - open
-      autoAllowOwner: true
+      autoAllowOwner: true  # Permissive - see security note above
       defaultResponse: deny
       audit: true
       tags:

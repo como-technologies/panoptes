@@ -6,13 +6,13 @@ metadata:
     app.kubernetes.io/name: base-security-access
     app.kubernetes.io/component: access-control
     app.kubernetes.io/part-of: panoptes
-    panoptes.io/template: base-security
+    panoptes.como-technologies.io/template: base-security
   annotations:
-    panoptes.io/description: "Base Security Access Control"
+    panoptes.como-technologies.io/description: "Base Security Access Control"
 spec:
   selector:
     matchLabels:
-      security.panoptes.io/monitored: "true"
+      panoptes.como-technologies.io/monitored: "true"
 
   subjects:
     # Protect shadow files
@@ -43,12 +43,15 @@ spec:
         category: ssh-keys
 
     # Kubernetes secrets - allow owner only
+    # SECURITY NOTE: autoAllowOwner permits the pod to read any mounted secret.
+    # For stricter control, set autoAllowOwner: false and configure explicit
+    # RBAC policies. See docs/security/attack-surface-analysis.md section 3.2
     - deny:
         - /var/run/secrets/kubernetes.io
       events:
         - access
         - open
-      autoAllowOwner: true
+      autoAllowOwner: true  # Permissive - see security note above
       defaultResponse: deny
       audit: true
       tags:

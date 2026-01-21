@@ -7,9 +7,9 @@ metadata:
     app.kubernetes.io/component: access-control
     app.kubernetes.io/part-of: panoptes
     compliance: cis-kubernetes
-    panoptes.io/template: cis-k8s-secrets
+    panoptes.como-technologies.io/template: cis-k8s-secrets
   annotations:
-    panoptes.io/description: "CIS Kubernetes Secrets Access Control"
+    panoptes.como-technologies.io/description: "CIS Kubernetes Secrets Access Control"
     cis/benchmark: "v1.8"
     cis/sections: "5.1, 5.4"
 spec:
@@ -19,12 +19,15 @@ spec:
 
   subjects:
     # 5.1.6 - Service Account Token mounting
+    # SECURITY NOTE: autoAllowOwner permits the pod to read any mounted secret.
+    # For stricter control, set autoAllowOwner: false and configure explicit
+    # RBAC policies. See docs/security/attack-surface-analysis.md section 3.2
     - deny:
         - /var/run/secrets/kubernetes.io/serviceaccount
       events:
         - access
         - open
-      autoAllowOwner: true
+      autoAllowOwner: true  # Permissive - see security note above
       defaultResponse: audit
       audit: true
       tags:

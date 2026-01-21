@@ -14,13 +14,13 @@ Label the pods you want to monitor:
 
 ```bash
 # Label a specific pod
-kubectl label pod my-app-pod security.panoptes.io/monitored=true
+kubectl label pod my-app-pod panoptes.como-technologies.io/monitored=true
 
 # Label all pods in a deployment
-kubectl label pods -l app=my-app security.panoptes.io/monitored=true
+kubectl label pods -l app=my-app panoptes.como-technologies.io/monitored=true
 
 # Label all pods in a namespace
-kubectl label pods -n production --all security.panoptes.io/monitored=true
+kubectl label pods -n production --all panoptes.como-technologies.io/monitored=true
 ```
 
 ## Step 2: Apply Base Security Template (30 seconds)
@@ -41,7 +41,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      security.panoptes.io/monitored: "true"
+      panoptes.como-technologies.io/monitored: "true"
   subjects:
     - paths:
         - /etc/passwd
@@ -68,7 +68,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      security.panoptes.io/monitored: "true"
+      panoptes.como-technologies.io/monitored: "true"
   subjects:
     - deny:
         - /etc/shadow
@@ -124,7 +124,7 @@ Trigger a test event to verify monitoring is working:
 
 ```bash
 # Get a monitored pod name
-POD=$(kubectl get pods -l security.panoptes.io/monitored=true -o jsonpath='{.items[0].metadata.name}')
+POD=$(kubectl get pods -l panoptes.como-technologies.io/monitored=true -o jsonpath='{.items[0].metadata.name}')
 
 # Exec into the pod and touch a monitored file
 kubectl exec $POD -- touch /etc/test-file
@@ -147,7 +147,7 @@ Your cluster now has basic security monitoring for:
 
 ```bash
 # Add more pods to monitoring
-kubectl label pods -l app=database security.panoptes.io/monitored=true
+kubectl label pods -l app=database panoptes.como-technologies.io/monitored=true
 ```
 
 ### Add Compliance Templates
@@ -176,7 +176,7 @@ Configure Prometheus alerts for critical events (see [alerting documentation](..
 
 1. Check pods are labeled:
    ```bash
-   kubectl get pods -l security.panoptes.io/monitored=true
+   kubectl get pods -l panoptes.como-technologies.io/monitored=true
    ```
 
 2. Check daemon pods are running:

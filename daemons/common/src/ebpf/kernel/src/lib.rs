@@ -66,6 +66,7 @@
 mod filtering;
 mod helpers;
 mod maps;
+pub mod offsets;
 mod path;
 mod process;
 mod task;

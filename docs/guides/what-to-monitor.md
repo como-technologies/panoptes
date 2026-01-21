@@ -20,7 +20,7 @@ This guide helps you identify which files and paths to monitor in your Kubernete
 ### Argus (File Integrity Monitoring)
 - **Purpose**: Detect when files are created, modified, or deleted
 - **Use for**: Configuration files, logs, binaries, certificates
-- **Events**: `create`, `modify`, `delete`, `attrib`, `moved_from`, `moved_to`
+- **Events**: `create`, `modify`, `delete`, `attrib`, `movedfrom`, `movedto`
 - **Best for**: "What changed?" questions
 
 ### Janus (File Access Control)
@@ -301,7 +301,7 @@ subjects:
 | `modify` | Content changes (config tampering) |
 | `delete` | File removal (log tampering, cleanup) |
 | `attrib` | Permission changes (privilege escalation) |
-| `moved_from`/`moved_to` | File relocation (hiding) |
+| `movedfrom`/`movedto` | File relocation (hiding) |
 | `all` | Full monitoring (high-security paths) |
 
 ### Janus Events

@@ -7,9 +7,9 @@ metadata:
     app.kubernetes.io/component: access-control
     app.kubernetes.io/part-of: panoptes
     compliance: soc2
-    panoptes.io/template: soc2-access
+    panoptes.como-technologies.io/template: soc2-access
   annotations:
-    panoptes.io/description: "SOC 2 Access Control and Auditing"
+    panoptes.como-technologies.io/description: "SOC 2 Access Control and Auditing"
     soc2/criteria: "CC6.1, CC6.2, CC7.3"
 spec:
   selector:
@@ -37,12 +37,15 @@ spec:
         category: credential-access
 
     # CC6.2 - Access Authorization
+    # SECURITY NOTE: autoAllowOwner permits the pod to read any mounted secret.
+    # For stricter control, set autoAllowOwner: false and configure explicit
+    # RBAC policies. See docs/security/attack-surface-analysis.md section 3.2
     - deny:
         - /var/run/secrets
       events:
         - access
         - open
-      autoAllowOwner: true
+      autoAllowOwner: true  # Permissive - see security note above
       defaultResponse: deny
       audit: true
       tags:
@@ -75,7 +78,6 @@ spec:
       events:
         - access
         - open
-        - modify
       audit: true
       tags:
         criteria: "CC7.3"

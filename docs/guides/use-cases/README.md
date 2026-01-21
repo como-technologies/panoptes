@@ -17,7 +17,7 @@ Every compliance framework requires labeling pods to identify which workloads to
 
 | Framework | Label | Value | kubectl command |
 |-----------|-------|-------|-----------------|
-| Base Security | `security.panoptes.io/monitored` | `true` | `kubectl label pod NAME security.panoptes.io/monitored=true` |
+| Base Security | `panoptes.como-technologies.io/monitored` | `true` | `kubectl label pod NAME panoptes.como-technologies.io/monitored=true` |
 | PCI-DSS | `pci-dss/scope` | `in-scope` | `kubectl label pod NAME pci-dss/scope=in-scope` |
 | HIPAA | `hipaa/scope` | `ephi` | `kubectl label pod NAME hipaa/scope=ephi` |
 | SOC 2 | `soc2/scope` | `in-scope` | `kubectl label pod NAME soc2/scope=in-scope` |

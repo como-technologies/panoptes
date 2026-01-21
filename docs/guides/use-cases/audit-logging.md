@@ -63,7 +63,6 @@ spec:
       events:
         - access
         - open
-        - modify
       audit: true
       tags:
         category: data-access

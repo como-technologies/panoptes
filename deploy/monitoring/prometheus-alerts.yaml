@@ -1,0 +1,341 @@
+# Prometheus Alerting Rules for Panoptes
+# Deploy with: kubectl apply -f prometheus-alerts.yaml
+#
+# These alerts integrate with Prometheus Operator (PrometheusRule CRD).
+# For standalone Prometheus, extract the 'groups' section to a rules file.
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: panoptes-alerts
+  namespace: panoptes-system
+  labels:
+    app.kubernetes.io/name: panoptes
+    app.kubernetes.io/component: monitoring
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+    # =========================================================================
+    # inotify Queue and Watch Alerts (argusd)
+    # =========================================================================
+    - name: panoptes-inotify
+      rules:
+        # CRITICAL: Queue overflow detected - events are being lost
+        - alert: PanoptesInotifyQueueOverflow
+          expr: increase(panoptes_argus_inotify_queue_overflow_total[5m]) > 0
+          for: 0m
+          labels:
+            severity: critical
+            component: argusd
+          annotations:
+            summary: "inotify queue overflow detected on {{ $labels.node }}"
+            description: |
+              The inotify event queue has overflowed on node {{ $labels.node }}.
+              Events during this period have been PERMANENTLY LOST.
+              This may indicate an attack attempting to overwhelm monitoring.
+
+              Immediate actions:
+              1. Check for suspicious high-volume file operations
+              2. Review daemon logs: kubectl logs -n panoptes-system -l app=argusd
+              3. Consider increasing max_queued_events: sysctl fs.inotify.max_queued_events
+
+              See: docs/operations/kernel-tuning.md
+            runbook_url: "https://github.com/your-org/panoptes/blob/main/docs/operations/kernel-tuning.md"
+
+        # WARNING: Watch count approaching limit
+        - alert: PanoptesInotifyWatchLimitApproaching
+          expr: |
+            (panoptes_argus_inotify_watches_total / panoptes_argus_inotify_max_watches) > 0.8
+          for: 5m
+          labels:
+            severity: warning
+            component: argusd
+          annotations:
+            summary: "inotify watch limit approaching on {{ $labels.node }}"
+            description: |
+              Node {{ $labels.node }} is using {{ $value | humanizePercentage }} of available inotify watches.
+              When the limit is reached, new watches will fail silently.
+
+              Current usage: {{ $labels.watches }} / {{ $labels.max_watches }}
+
+              Actions:
+              1. Increase max_user_watches: sysctl -w fs.inotify.max_user_watches=524288
+              2. Review monitored paths for unnecessary directories
+
+              See: docs/operations/kernel-tuning.md
+
+        # WARNING: High event rate may indicate attack or misconfiguration
+        - alert: PanoptesHighEventRate
+          expr: rate(panoptes_argus_events_total[5m]) > 1000
+          for: 5m
+          labels:
+            severity: warning
+            component: argusd
+          annotations:
+            summary: "High file system event rate on {{ $labels.node }}"
+            description: |
+              Node {{ $labels.node }} is processing {{ $value | humanize }} events/sec.
+              This may indicate:
+              - A legitimate high-activity workload
+              - An attack attempting to overwhelm monitoring
+              - Misconfigured monitoring (too broad paths, missing ignore patterns)
+
+              Actions:
+              1. Review event sources in dashboard
+              2. Add ignore patterns for noisy paths
+              3. Monitor for queue overflow
+
+    # =========================================================================
+    # JanusGuard Enforcement Alerts (janusd)
+    # =========================================================================
+    - name: panoptes-janusguard
+      rules:
+        # CRITICAL: Access to critical path was denied
+        - alert: PanoptesCriticalPathDenied
+          expr: |
+            increase(panoptes_janus_events_total{
+              action="deny",
+              tags_severity="critical"
+            }[5m]) > 0
+          for: 0m
+          labels:
+            severity: critical
+            component: janusd
+          annotations:
+            summary: "Critical path access denied on {{ $labels.node }}"
+            description: |
+              A process attempted to access a critical protected path and was denied.
+
+              Path: {{ $labels.path }}
+              Process: {{ $labels.process }}
+              Pod: {{ $labels.pod }}
+
+              This may indicate:
+              - An attempted attack or privilege escalation
+              - A misconfigured application
+              - A legitimate process that needs allowlisting
+
+              Investigate immediately.
+
+        # WARNING: High deny rate may indicate ongoing attack
+        - alert: PanoptesHighDenyRate
+          expr: rate(panoptes_janus_events_total{action="deny"}[5m]) > 10
+          for: 5m
+          labels:
+            severity: warning
+            component: janusd
+          annotations:
+            summary: "High deny rate detected on {{ $labels.node }}"
+            description: |
+              JanusGuard is denying {{ $value | humanize }} requests/sec on node {{ $labels.node }}.
+
+              This may indicate:
+              - An ongoing attack
+              - Application misconfiguration
+              - Overly strict policies
+
+              Actions:
+              1. Review denied events in dashboard
+              2. Check if legitimate applications are affected
+              3. Investigate suspicious patterns
+
+        # WARNING: Credential access attempt
+        - alert: PanoptesCredentialAccessAttempt
+          expr: |
+            increase(panoptes_janus_events_total{
+              tags_category="credential-access"
+            }[5m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+            component: janusd
+          annotations:
+            summary: "Credential file access attempt on {{ $labels.node }}"
+            description: |
+              A process attempted to access credential files.
+
+              Path: {{ $labels.path }}
+              Process: {{ $labels.process }}
+              Pod: {{ $labels.pod }}
+              Action: {{ $labels.action }}
+
+              If action=deny, the access was blocked.
+              If action=audit, the access was allowed but logged.
+
+        # CRITICAL: Container runtime socket access (escape attempt)
+        - alert: PanoptesContainerEscapeAttempt
+          expr: |
+            increase(panoptes_janus_events_total{
+              tags_category="runtime-socket",
+              action="deny"
+            }[5m]) > 0
+          for: 0m
+          labels:
+            severity: critical
+            component: janusd
+          annotations:
+            summary: "Container escape attempt blocked on {{ $labels.node }}"
+            description: |
+              A process attempted to access container runtime socket and was BLOCKED.
+              This is a common container escape technique.
+
+              Path: {{ $labels.path }}
+              Process: {{ $labels.process }}
+              Pod: {{ $labels.pod }}
+
+              INVESTIGATE IMMEDIATELY - this may be an active attack.
+
+    # =========================================================================
+    # Daemon Health Alerts
+    # =========================================================================
+    - name: panoptes-health
+      rules:
+        # CRITICAL: Daemon is down
+        - alert: PanoptesArgusdDown
+          expr: up{job="argusd"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            component: argusd
+          annotations:
+            summary: "argusd daemon is down on {{ $labels.node }}"
+            description: |
+              The argusd (file integrity monitoring) daemon is not responding on node {{ $labels.node }}.
+              File system changes are NOT being monitored.
+
+              Actions:
+              1. Check daemon status: kubectl get pods -n panoptes-system -l app=argusd
+              2. Check daemon logs: kubectl logs -n panoptes-system -l app=argusd
+              3. Check node status
+
+        - alert: PanoptesJanusdDown
+          expr: up{job="janusd"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            component: janusd
+          annotations:
+            summary: "janusd daemon is down on {{ $labels.node }}"
+            description: |
+              The janusd (access control) daemon is not responding on node {{ $labels.node }}.
+              Access policies are NOT being enforced (if enforcement was enabled).
+
+              Actions:
+              1. Check daemon status: kubectl get pods -n panoptes-system -l app=janusd
+              2. Check daemon logs: kubectl logs -n panoptes-system -l app=janusd
+              3. Check node status
+
+        # WARNING: Daemon restart
+        - alert: PanoptesDaemonRestarted
+          expr: |
+            changes(process_start_time_seconds{job=~"argusd|janusd"}[10m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Panoptes daemon restarted on {{ $labels.node }}"
+            description: |
+              The {{ $labels.job }} daemon restarted on node {{ $labels.node }}.
+              Some events may have been missed during the restart.
+
+              Check for:
+              - OOM kills
+              - Crashloops
+              - Node issues
+
+        # WARNING: High memory usage
+        - alert: PanoptesDaemonHighMemory
+          expr: |
+            (process_resident_memory_bytes{job=~"argusd|janusd"} / 1024 / 1024) > 512
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High memory usage for {{ $labels.job }} on {{ $labels.node }}"
+            description: |
+              The {{ $labels.job }} daemon is using {{ $value | humanize }}MB of memory.
+              This may indicate:
+              - Too many watches/marks
+              - Memory leak
+              - Need to increase resource limits
+
+    # =========================================================================
+    # Compliance Alerts
+    # =========================================================================
+    - name: panoptes-compliance
+      rules:
+        # WARNING: Audit log tampering detected
+        - alert: PanoptesAuditLogTampering
+          expr: |
+            increase(panoptes_argus_events_total{
+              tags_category="log-integrity",
+              event_type=~"delete|modify"
+            }[5m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+            component: argusd
+          annotations:
+            summary: "Audit log modification detected on {{ $labels.node }}"
+            description: |
+              A log file was modified or deleted.
+
+              Path: {{ $labels.path }}
+              Event: {{ $labels.event_type }}
+
+              This may indicate:
+              - Normal log rotation (check if .gz or numbered)
+              - Attempted evidence tampering
+
+              Review immediately for compliance requirements.
+
+        # CRITICAL: System binary modification
+        - alert: PanoptesSystemBinaryModified
+          expr: |
+            increase(panoptes_argus_events_total{
+              tags_category="system-binaries",
+              event_type=~"modify|create"
+            }[5m]) > 0
+          for: 0m
+          labels:
+            severity: critical
+            component: argusd
+          annotations:
+            summary: "System binary modified on {{ $labels.node }}"
+            description: |
+              A system binary was modified or created.
+
+              Path: {{ $labels.path }}
+              Event: {{ $labels.event_type }}
+
+              This is a CRITICAL security event that may indicate:
+              - Package update (check timing)
+              - Binary replacement attack
+              - Malware installation
+
+              INVESTIGATE IMMEDIATELY.
+
+        # WARNING: Staging area activity
+        - alert: PanoptesStagingAreaActivity
+          expr: |
+            increase(panoptes_argus_events_total{
+              tags_category="staging-detection"
+            }[5m]) > 10
+          for: 5m
+          labels:
+            severity: warning
+            component: argusd
+          annotations:
+            summary: "Unusual staging area activity on {{ $labels.node }}"
+            description: |
+              High activity detected in staging areas (/tmp, /var/tmp, /dev/shm).
+
+              {{ $value }} events in the last 5 minutes.
+
+              This may indicate:
+              - Normal application behavior
+              - Malware staging
+              - Attack preparation
+
+              Review the specific files being created/modified.

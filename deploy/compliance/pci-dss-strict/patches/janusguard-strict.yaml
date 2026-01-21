@@ -1,0 +1,8 @@
+# Strategic merge patch to enable strict enforcement
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: pci-dss-access
+spec:
+  # Enable blocking mode - violations will be denied, not just logged
+  enforcing: true

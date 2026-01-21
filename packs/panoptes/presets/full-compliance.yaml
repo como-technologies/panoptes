@@ -17,7 +17,7 @@
 # Usage:
 #   1. Select this preset when creating a cluster profile
 #   2. Label pods with appropriate compliance labels:
-#      - security.panoptes.io/monitored=true (base security)
+#      - panoptes.como-technologies.io/monitored=true (base security)
 #      - pci-dss/scope=in-scope (PCI-DSS)
 #      - hipaa/scope=ephi (HIPAA)
 #      - soc2/scope=in-scope (SOC 2)
@@ -40,7 +40,7 @@ compliance:
     namespace: ""
     enforcing: false
     podSelector:
-      security.panoptes.io/monitored: "true"
+      panoptes.como-technologies.io/monitored: "true"
 
   pciDss:
     enabled: true

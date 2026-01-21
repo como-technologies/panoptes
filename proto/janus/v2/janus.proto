@@ -433,4 +433,9 @@ message GuardMetrics {
 
   // event_counts contains counts by event type.
   map<string, int64> event_counts = 6;
+
+  // queue_overflows is the number of fanotify FAN_Q_OVERFLOW events detected.
+  // Non-zero indicates events were lost due to kernel queue exhaustion.
+  // Monitor this metric and increase /proc/sys/fs/fanotify/max_queued_events if needed.
+  int64 queue_overflows = 7;
 }

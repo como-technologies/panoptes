@@ -3,55 +3,25 @@
 //! Provides access to kernel `task_struct` fields for process attribution.
 //! Used by exec/exit tracepoints to capture process context at exec time.
 //!
-//! # Kernel Structure Offsets
-//!
-//! These offsets are for common kernel versions (5.x, 6.x). For true portability
-//! across kernel versions, BTF/CO-RE should be used, but hardcoded offsets work
-//! for the majority of production systems.
-//!
 //! # Safety
 //!
 //! All kernel memory access uses `bpf_probe_read_kernel` which is safe for
-//! reading kernel memory from BPF context.
+//! reading kernel memory from BPF context. See the `probe_kernel!` macro
+//! for the recommended safe wrapper.
+//!
+//! # Kernel Structure Offsets
+//!
+//! Offsets are defined in the `offsets` module. See that module for
+//! documentation on verifying offsets for your kernel.
 
 use aya_ebpf::helpers::{bpf_get_current_task, bpf_probe_read_kernel};
 use panoptes_ebpf_types::{MAX_CMDLINE_LEN, MAX_CWD_LEN, MAX_EXE_LEN};
 
+use crate::offsets::{
+    FS_PWD_OFFSET, MM_ARG_END_OFFSET, MM_ARG_START_OFFSET, PATH_DENTRY_OFFSET,
+    TASK_FS_OFFSET, TASK_MM_OFFSET, TASK_REAL_PARENT_OFFSET, TASK_TGID_OFFSET,
+};
 use crate::path::{extract_path_from_dentry, Dentry};
-
-// ============================================================================
-// Kernel Structure Offsets
-// ============================================================================
-// These offsets are for Linux 5.x/6.x kernels. They may need adjustment for
-// other kernel versions. Consider using BTF/CO-RE for better portability.
-
-/// Offset of `real_parent` in `task_struct`
-/// task_struct->real_parent (pointer to parent task)
-const TASK_REAL_PARENT_OFFSET: usize = 2336; // Approximate, varies by kernel config
-
-/// Offset of `tgid` in `task_struct`
-/// task_struct->tgid
-const TASK_TGID_OFFSET: usize = 2284; // Approximate
-
-/// Offset of `mm` in `task_struct`
-/// task_struct->mm (pointer to mm_struct)
-const TASK_MM_OFFSET: usize = 2104; // Approximate
-
-/// Offset of `fs` in `task_struct`
-/// task_struct->fs (pointer to fs_struct)
-const TASK_FS_OFFSET: usize = 2656; // Approximate
-
-/// Offset of `arg_start` in `mm_struct`
-/// mm_struct->arg_start (start of command line args)
-const MM_ARG_START_OFFSET: usize = 360; // Approximate
-
-/// Offset of `arg_end` in `mm_struct`
-/// mm_struct->arg_end (end of command line args)
-const MM_ARG_END_OFFSET: usize = 368; // Approximate
-
-/// Offset of `pwd` in `fs_struct`
-/// fs_struct->pwd (current working directory path struct)
-const FS_PWD_OFFSET: usize = 32; // Approximate
 
 /// Maximum command line bytes to read
 const MAX_CMDLINE_READ: usize = 128;
@@ -125,8 +95,8 @@ pub fn extract_cwd(out: &mut [u8; MAX_CWD_LEN]) -> usize {
             return 0;
         }
 
-        // Read pwd.dentry (fs->pwd is a path struct, dentry is at offset 8)
-        let pwd_dentry_ptr = fs.add(FS_PWD_OFFSET + 8) as *const *const Dentry;
+        // Read pwd.dentry (fs->pwd is a path struct, dentry is at PATH_DENTRY_OFFSET)
+        let pwd_dentry_ptr = fs.add(FS_PWD_OFFSET + PATH_DENTRY_OFFSET) as *const *const Dentry;
         let pwd_dentry: *const Dentry = match bpf_probe_read_kernel(pwd_dentry_ptr) {
             Ok(d) => d,
             Err(_) => return 0,

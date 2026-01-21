@@ -1,0 +1,16 @@
+# Strict overlay for HIPAA compliance template
+# Enables enforcing mode (violations are blocked, not just logged)
+#
+# Usage:
+#   kubectl apply -k deploy/compliance/hipaa-strict/
+#
+# WARNING: Test in audit mode first (hipaa/) before enabling strict mode.
+# Blocked operations will interrupt workloads.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../hipaa
+
+patches:
+  - path: patches/janusguard-strict.yaml

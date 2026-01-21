@@ -18,6 +18,8 @@ use panoptes_common::{
     // Capability checking
     CapabilityChecker, LinuxCapabilityChecker, JANUSD_REQUIRED_CAPS,
     missing_capabilities_message,
+    // Resource limit checking
+    check_fd_limit, read_fanotify_limits, ResourceLimitsInfo,
 };
 #[cfg(feature = "ebpf")]
 use panoptes_common::{is_ebpf_supported, is_bpf_lsm_enabled, JANUSD_REQUIRED_CAPS_EBPF};
@@ -230,6 +232,69 @@ async fn main() -> Result<()> {
     }
 
     info!("Base capabilities verified");
+
+    // ═══════════════════════════════════════════════════════════════
+    // Resource Limit Verification (fail fast if insufficient)
+    // ═══════════════════════════════════════════════════════════════
+    //
+    // Verify system resource limits are sufficient BEFORE starting.
+    // This prevents cryptic failures partway through operation when
+    // the daemon runs out of file descriptors or mark slots.
+    //
+    // Key limits for janusd:
+    // - RLIMIT_NOFILE: File descriptors (fanotify opens FDs for each event!)
+    // - max_user_marks: Per-user fanotify mark limit
+    // - max_queued_events: fanotify event queue size (overflow = lost events)
+    //
+    // IMPORTANT: Each fanotify permission event includes an open FD to the
+    // accessed file. If events arrive faster than we can process them,
+    // we can exhaust FD limits. The safety margin must account for this.
+
+    // Log all resource limits for diagnostics
+    let limits_info = ResourceLimitsInfo::collect();
+    limits_info.log();
+
+    // Check file descriptor limit
+    // Larger safety margin than argusd because fanotify events consume FDs
+    // Each concurrent event holds an open FD until response is written
+    const FD_SAFETY_MARGIN: u64 = 4096;
+    if let Err(e) = check_fd_limit(config.max_guards as u64 * 100, FD_SAFETY_MARGIN) {
+        error!("{}", e);
+        error!(
+            "Increase with: ulimit -n {} (or update container securityContext)",
+            config.max_guards as u64 * 100 + FD_SAFETY_MARGIN
+        );
+        anyhow::bail!("Insufficient file descriptor limit - daemon cannot start safely");
+    }
+    info!(max_guards = config.max_guards, "File descriptor limit verified");
+
+    // Check fanotify-specific limits
+    let (max_user_marks, max_queued_events) = read_fanotify_limits();
+
+    // Note: max_user_marks sysctl may not exist on older kernels
+    if max_user_marks > 0 && max_user_marks < config.max_guards as u64 * 10 {
+        warn!(
+            kernel_limit = max_user_marks,
+            estimated_need = config.max_guards * 10,
+            "max_user_marks may be insufficient for configured max_guards"
+        );
+        warn!(
+            "Fix with: sysctl -w fs.fanotify.max_user_marks={}",
+            config.max_guards * 10
+        );
+    }
+
+    // Warn if queue is small (increases overflow risk)
+    // This is CRITICAL for janusd - queue overflow means missed access events
+    if max_queued_events < 32768 {
+        warn!(
+            current = max_queued_events,
+            recommended = 65536,
+            "fanotify max_queued_events is low - HIGH risk of queue overflow under load"
+        );
+        warn!("Fix with: sysctl -w fs.fanotify.max_queued_events=65536");
+        warn!("Queue overflow causes SILENT event loss - critical for security monitoring!");
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // Runtime Mode Selection (auto-detect with fallback)

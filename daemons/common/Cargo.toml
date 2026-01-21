@@ -27,6 +27,13 @@ tonic = { version = "0.12", optional = true }
 # Security
 caps = "0.5"
 
+# Secure secret handling - prevents accidental logging, auto-zeroes memory on drop
+secrecy = { version = "0.10", features = ["serde"] }
+zeroize = { version = "1.8", features = ["derive"] }
+
+# Linux system calls and resource limits
+nix = { version = "0.29", features = ["resource", "fs"] }
+
 # eBPF support (optional, for kernel-level process attribution)
 panoptes-ebpf-types = { path = "src/ebpf/types", features = ["user"], optional = true }
 aya = { version = "0.13", optional = true }

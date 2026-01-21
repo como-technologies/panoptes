@@ -264,7 +264,7 @@ Common false positives and how to handle:
 
 2. **Verify selector matches:**
    ```bash
-   kubectl get arguswatcher pci-dss-fim -o yaml | grep -A5 selector
+   kubectl get arguswatcher pci-dss-fim -o yaml | grep -A5 "selector:"
    ```
 
 3. **Check daemon logs:**

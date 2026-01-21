@@ -7,9 +7,9 @@ metadata:
     app.kubernetes.io/component: fim
     app.kubernetes.io/part-of: panoptes
     compliance: pci-dss
-    panoptes.io/template: pci-dss-fim
+    panoptes.como-technologies.io/template: pci-dss-fim
   annotations:
-    panoptes.io/description: "PCI-DSS File Integrity Monitoring"
+    panoptes.como-technologies.io/description: "PCI-DSS File Integrity Monitoring"
     pci-dss/requirements: "10.5.5, 11.5"
 spec:
   selector:
@@ -24,8 +24,8 @@ spec:
         - modify
         - delete
         - create
-        - moved_from
-        - moved_to
+        - movedfrom
+        - movedto
       recursive: true
       maxDepth: 5
       ignore:
@@ -96,10 +96,10 @@ spec:
 
     # Init and service configuration
     - paths:
-        - /etc/systemd
-        - /etc/init.d
-        - /etc/cron.d
-        - /etc/crontab
+        - /etc/systemd      # prevents persistence via systemd backdoor
+        - /etc/init.d       # prevents persistence via init script
+        - /etc/cron.d       # prevents cron-based persistence
+        - /etc/crontab      # prevents crontab backdoor
       events:
         - all
       recursive: true
@@ -108,6 +108,72 @@ spec:
         requirement: "11.5"
         severity: high
         category: system-services
+
+    # Staging area monitoring
+    - paths:
+        - /tmp              # prevents malware staging in world-writable temp
+        - /var/tmp          # prevents persistent temp file attacks
+        - /dev/shm          # prevents in-memory malware execution (RAM-backed)
+      events:
+        - create
+        - modify
+        - delete
+      recursive: true
+      maxDepth: 3
+      ignore:
+        - "*.sock"
+        - "*.pid"
+        - "pulse-*"
+        - "ssh-*"
+        - ".X*-lock"
+      tags:
+        requirement: "11.5"
+        severity: high
+        category: staging-detection
+        attack: "T1074"
+
+    # Library injection detection
+    - paths:
+        - /usr/lib          # prevents malicious library injection
+        - /lib              # prevents system library tampering
+        - /lib64            # prevents 64-bit library tampering
+        - /usr/lib64        # prevents 64-bit library injection
+        - /etc/ld.so.conf   # prevents linker config hijacking
+        - /etc/ld.so.conf.d # prevents linker config directory attacks
+        - /etc/ld.so.preload # prevents LD_PRELOAD persistence
+      events:
+        - create
+        - modify
+        - delete
+      recursive: true
+      maxDepth: 2
+      ignore:
+        - "*.pyc"
+        - "__pycache__"
+        - "*.cache"
+      tags:
+        requirement: "11.5"
+        severity: critical
+        category: library-integrity
+        attack: "T1574.006"
+
+    # Shell configuration monitoring
+    - paths:
+        - /etc/profile      # prevents system-wide shell backdoor
+        - /etc/profile.d    # prevents profile.d script injection
+        - /etc/bash.bashrc  # prevents global bashrc backdoor
+        - /root/.bashrc     # prevents root shell backdoor
+        - /root/.bash_profile # prevents root login backdoor
+      events:
+        - modify
+        - create
+      recursive: true
+      maxDepth: 1
+      tags:
+        requirement: "11.5"
+        severity: high
+        category: shell-persistence
+        attack: "T1546.004"
 
   containerRuntime: auto
   paused: false

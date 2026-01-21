@@ -7,9 +7,9 @@ metadata:
     app.kubernetes.io/component: fim
     app.kubernetes.io/part-of: panoptes
     compliance: cis-kubernetes
-    panoptes.io/template: cis-k8s-control-plane
+    panoptes.como-technologies.io/template: cis-k8s-control-plane
   annotations:
-    panoptes.io/description: "CIS Kubernetes Control Plane Monitoring"
+    panoptes.como-technologies.io/description: "CIS Kubernetes Control Plane Monitoring"
     cis/benchmark: "v1.8"
     cis/sections: "1.1, 1.2"
 spec:

@@ -7,9 +7,9 @@ metadata:
     app.kubernetes.io/component: access-control
     app.kubernetes.io/part-of: panoptes
     compliance: hipaa
-    panoptes.io/template: hipaa-access
+    panoptes.como-technologies.io/template: hipaa-access
   annotations:
-    panoptes.io/description: "HIPAA Access Control and Auditing"
+    panoptes.como-technologies.io/description: "HIPAA Access Control and Auditing"
     hipaa/requirements: "164.312(b), 164.312(d)"
 spec:
   selector:
@@ -25,7 +25,6 @@ spec:
       events:
         - access
         - open
-        - modify
       audit: true
       tags:
         requirement: "164.312(b)"
@@ -51,12 +50,15 @@ spec:
         category: credential-access
 
     # Kubernetes secrets
+    # SECURITY NOTE: autoAllowOwner permits the pod to read any mounted secret.
+    # For stricter control, set autoAllowOwner: false and configure explicit
+    # RBAC policies. See docs/security/attack-surface-analysis.md section 3.2
     - deny:
         - /var/run/secrets
       events:
         - access
         - open
-      autoAllowOwner: true
+      autoAllowOwner: true  # Permissive - see security note above
       defaultResponse: deny
       audit: true
       tags:

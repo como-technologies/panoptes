@@ -333,6 +333,143 @@ Janus requires the following Linux capabilities:
 
 **Note**: Running with `--privileged` in Docker/Kubernetes grants all these capabilities.
 
+## Defensive Hardening
+
+Janusd implements several defensive measures to protect against kernel interface
+issues that could cause silent security monitoring failures or process hangs.
+
+### Resource Limit Checks
+
+At startup, janusd verifies system resource limits are sufficient:
+
+| Limit | Purpose | Check |
+|-------|---------|-------|
+| `RLIMIT_NOFILE` | File descriptor limit | Must exceed `max_guards * 100 + 4096` |
+| `max_user_marks` | Per-user fanotify mark limit | Warning if below `max_guards * 10` |
+| `max_queued_events` | Event queue size | Warning if below 32768 |
+
+**Why the large FD margin**: Each fanotify permission event includes an open file
+descriptor to the accessed file. If events arrive faster than we can process and
+respond to them, FDs accumulate. The 4096 safety margin accounts for burst scenarios.
+
+If limits are too low, the daemon exits with a clear error message explaining
+how to adjust the limit. This prevents cryptic failures partway through operation.
+
+**Fix insufficient limits:**
+
+```bash
+# File descriptor limit
+ulimit -n 65536
+
+# fanotify mark limit (persistent)
+echo "fs.fanotify.max_user_marks=65536" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+
+# Event queue size (CRITICAL for security monitoring)
+echo "fs.fanotify.max_queued_events=65536" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+```
+
+### Queue Overflow Handling (FAN_Q_OVERFLOW)
+
+If fanotify events arrive faster than janusd can process them, the kernel drops
+events and sets `FAN_Q_OVERFLOW` on the next read. Janusd detects this and:
+
+1. Logs a warning with the `queue_overflows` metric
+2. Records the overflow in metrics for alerting
+3. Continues processing remaining events
+
+**Security implication:** Events during the overflow window are lost. This creates
+a gap in the audit trail where file accesses may have occurred without logging.
+**This is CRITICAL for security monitoring** - monitor the `queue_overflows` metric
+and alert on non-zero values.
+
+**Kernel behavior:**
+- Default queue size: `/proc/sys/fs/fanotify/max_queued_events` (typically 16384)
+- When full: oldest events dropped, `FAN_Q_OVERFLOW` set on next read
+- Recovery: events continue normally after userspace catches up
+
+**Mitigation:**
+- Increase `max_queued_events` via sysctl (65536+ recommended)
+- Reduce guard scope (fewer paths, more specific patterns)
+- Ensure daemon has sufficient CPU resources
+- Monitor queue depth and scale resources accordingly
+
+### Permission Response Resilience
+
+When janusd receives a permission event (file open in guarded path), it must
+respond with `FAN_ALLOW` or `FAN_DENY` via `write()`. If this response fails,
+the monitored process hangs indefinitely.
+
+Janusd implements retry with exponential backoff:
+
+| Retry | Delay | Behavior |
+|-------|-------|----------|
+| 1 | 100μs | Retry immediately after brief sleep |
+| 2 | 200μs | Double the backoff |
+| 3 | 400μs | Final attempt |
+| Fallback | - | Default to `FAN_ALLOW` to prevent hang |
+
+**Rationale for FAN_ALLOW fallback:** A hung process is worse than a missed
+denial. The event is still logged for audit purposes, and the `response_write_failures`
+metric allows alerting on the condition.
+
+**Metrics recorded:**
+- `response_write_retries`: Number of retry attempts
+- `response_write_failures`: Responses that failed after all retries (defaulted to ALLOW)
+
+### Mark Limit Tracking
+
+Janusd tracks the number of active fanotify marks and enforces a configurable limit.
+This prevents exhausting kernel resources which would cause subsequent guards to fail.
+
+**Configuration:**
+```bash
+./target/release/janusd --max-guards=1000
+```
+
+When the limit is reached, `CreateGuard` returns an error rather than silently
+failing to protect the container.
+
+### Metrics for Security Monitoring
+
+| Metric | Description | Alert Threshold |
+|--------|-------------|--------------------|
+| `queue_overflows` | Events dropped due to kernel queue overflow | > 0 |
+| `response_write_retries` | Permission response retry attempts | Rate > 10/min |
+| `response_write_failures` | Responses defaulted to ALLOW after failure | > 0 |
+| `errors_total` | Generic error counter | Rate > 1/min |
+
+**Prometheus alert example:**
+
+```yaml
+groups:
+- name: janusd
+  rules:
+  - alert: FanotifyQueueOverflow
+    expr: rate(janusd_queue_overflows_total[5m]) > 0
+    labels:
+      severity: critical
+    annotations:
+      summary: "fanotify events are being dropped"
+      description: "Queue overflow detected - audit trail has gaps"
+      runbook: "Increase max_queued_events or reduce guard scope"
+
+  - alert: PermissionResponseFailures
+    expr: janusd_response_write_failures_total > 0
+    labels:
+      severity: warning
+    annotations:
+      summary: "Permission responses failed, defaulted to ALLOW"
+      description: "Check daemon health and system resources"
+```
+
+### References
+
+- `man 7 fanotify` - fanotify limits and behavior
+- `fs.fanotify.*` sysctls - `/proc/sys/fs/fanotify/`
+- Linux kernel: `fs/notify/fanotify/fanotify_user.c`
+
 ## Kubernetes Deployment
 
 The daemon is deployed as a DaemonSet. See `hack/janusd-daemonset.yaml`:

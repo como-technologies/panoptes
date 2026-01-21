@@ -85,6 +85,7 @@ pub mod container_runtime;
 pub mod error;
 pub mod glog;
 pub mod proc;
+pub mod resource_limits;
 
 // Daemon infrastructure modules
 pub mod broadcast;
@@ -130,3 +131,9 @@ pub use grpc::{basic_filtered_broadcast_stream, basic_stream_from_iter, BasicStr
 
 // Re-export eBPF support detection (for runtime mode selection)
 pub use ebpf_support::{is_ebpf_supported, is_bpf_lsm_enabled};
+
+// Re-export resource limit checking utilities
+pub use resource_limits::{
+    check_fd_limit, read_inotify_limits, read_fanotify_limits,
+    ResourceLimitError, ResourceLimitsInfo,
+};

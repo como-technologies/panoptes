@@ -75,6 +75,55 @@ pub struct GuardMetrics {
 
     /// Policy cache misses
     pub policy_cache_misses: AtomicU64,
+
+    // =========================================================================
+    // DEFENSIVE HARDENING METRICS
+    // =========================================================================
+    //
+    // These metrics track kernel interface anomalies that could indicate
+    // attack attempts, resource exhaustion, or system instability.
+    //
+    // ## Why These Matter
+    //
+    // Monitoring these counters enables alerting on conditions that could
+    // cause silent security monitoring gaps:
+    //
+    // - `queue_overflows`: Events dropped by kernel before we could read them
+    // - `response_write_retries`: Permission responses that required retry
+    // - `response_write_failures`: Responses that failed even after retries
+    //
+    // ## Recommended Alerts
+    //
+    // ```yaml
+    // # Prometheus alerting rule example
+    // - alert: FanotifyQueueOverflow
+    //   expr: rate(janusd_queue_overflows_total[5m]) > 0
+    //   annotations:
+    //     summary: "Fanotify events are being dropped"
+    //     runbook: "Increase /proc/sys/fs/fanotify/max_queued_events or reduce monitoring scope"
+    // ```
+
+    /// Queue overflow events detected (FAN_Q_OVERFLOW).
+    ///
+    /// When fanotify's internal queue fills faster than userspace can read,
+    /// the kernel drops events and signals overflow. Each increment means
+    /// some file access events were permanently lost.
+    ///
+    /// Non-zero values indicate potential security monitoring gaps.
+    pub queue_overflows: AtomicU64,
+
+    /// Permission response write retries.
+    ///
+    /// Counts how many times write_response() returned EAGAIN and was retried.
+    /// High values may indicate system load or kernel resource pressure.
+    pub response_write_retries: AtomicU64,
+
+    /// Permission response write failures after all retries exhausted.
+    ///
+    /// When this is non-zero, some permission responses could not be delivered.
+    /// The daemon defaults to FAN_ALLOW to prevent hanging processes, but this
+    /// means enforcement may have been bypassed.
+    pub response_write_failures: AtomicU64,
 }
 
 impl GuardMetrics {
@@ -95,6 +144,9 @@ impl GuardMetrics {
             deduplicated: AtomicU64::new(0),
             policy_cache_hits: AtomicU64::new(0),
             policy_cache_misses: AtomicU64::new(0),
+            queue_overflows: AtomicU64::new(0),
+            response_write_retries: AtomicU64::new(0),
+            response_write_failures: AtomicU64::new(0),
         }
     }
 
@@ -160,6 +212,66 @@ impl GuardMetrics {
         self.policy_cache_misses.fetch_add(1, ORDERING);
     }
 
+    // =========================================================================
+    // DEFENSIVE HARDENING METRIC METHODS
+    // =========================================================================
+
+    /// Record a fanotify queue overflow (FAN_Q_OVERFLOW).
+    ///
+    /// # Queue Overflow Detection
+    ///
+    /// The Linux fanotify subsystem has a finite event queue controlled by
+    /// `/proc/sys/fs/fanotify/max_queued_events` (default: 16384 events).
+    ///
+    /// ## When Overflow Occurs
+    ///
+    /// When events arrive faster than userspace can process them:
+    /// 1. Kernel drops oldest events that haven't been read
+    /// 2. Sets FAN_Q_OVERFLOW flag on the next readable event
+    /// 3. Events continue normally after userspace catches up
+    ///
+    /// ## Security Implications
+    ///
+    /// Overflow means some file access events were permanently lost. An attacker
+    /// could potentially exploit this by generating high event volume to mask
+    /// malicious file access during the overflow window.
+    ///
+    /// ## Mitigation
+    ///
+    /// 1. Monitor this metric and alert on non-zero values
+    /// 2. Increase max_queued_events: `sysctl -w fs.fanotify.max_queued_events=65536`
+    /// 3. Reduce monitoring scope (fewer mount points, more specific paths)
+    /// 4. Ensure daemon has sufficient CPU resources for event processing
+    ///
+    /// ## References
+    ///
+    /// - fanotify(7) man page - "Queue overflow" section
+    /// - Linux kernel: fs/notify/fanotify/fanotify_user.c
+    #[inline]
+    pub fn record_queue_overflow(&self) {
+        self.queue_overflows.fetch_add(1, ORDERING);
+    }
+
+    /// Record a permission response write retry.
+    ///
+    /// Called when write_response() returns EAGAIN and the daemon retries.
+    /// Frequent retries may indicate system resource pressure.
+    #[inline]
+    pub fn record_response_retry(&self) {
+        self.response_write_retries.fetch_add(1, ORDERING);
+    }
+
+    /// Record a permission response write failure after all retries exhausted.
+    ///
+    /// This is a serious condition - the daemon was unable to deliver the
+    /// permission response to the kernel. To prevent hanging the monitored
+    /// process, the daemon defaults to allowing the access, which means
+    /// enforcement may have been bypassed.
+    #[inline]
+    pub fn record_response_failure(&self) {
+        self.response_write_failures.fetch_add(1, ORDERING);
+    }
+
     /// Take a snapshot of current metrics.
     pub fn snapshot(&self) -> MetricsSnapshot {
         MetricsSnapshot {
@@ -176,6 +288,9 @@ impl GuardMetrics {
             deduplicated: self.deduplicated.load(ORDERING),
             policy_cache_hits: self.policy_cache_hits.load(ORDERING),
             policy_cache_misses: self.policy_cache_misses.load(ORDERING),
+            queue_overflows: self.queue_overflows.load(ORDERING),
+            response_write_retries: self.response_write_retries.load(ORDERING),
+            response_write_failures: self.response_write_failures.load(ORDERING),
         }
     }
 
@@ -195,6 +310,9 @@ impl GuardMetrics {
         self.deduplicated.store(0, ORDERING);
         self.policy_cache_hits.store(0, ORDERING);
         self.policy_cache_misses.store(0, ORDERING);
+        self.queue_overflows.store(0, ORDERING);
+        self.response_write_retries.store(0, ORDERING);
+        self.response_write_failures.store(0, ORDERING);
     }
 }
 
@@ -242,6 +360,10 @@ impl DaemonMetrics for GuardMetrics {
         custom.insert("deduplicated".to_string(), self.deduplicated.load(ORDERING));
         custom.insert("policy_cache_hits".to_string(), self.policy_cache_hits.load(ORDERING));
         custom.insert("policy_cache_misses".to_string(), self.policy_cache_misses.load(ORDERING));
+        // Defensive hardening metrics - critical for security monitoring
+        custom.insert("queue_overflows".to_string(), self.queue_overflows.load(ORDERING));
+        custom.insert("response_write_retries".to_string(), self.response_write_retries.load(ORDERING));
+        custom.insert("response_write_failures".to_string(), self.response_write_failures.load(ORDERING));
 
         CommonMetricsSnapshot {
             name: self.guard_name.clone(),
@@ -271,6 +393,12 @@ pub struct MetricsSnapshot {
     pub deduplicated: u64,
     pub policy_cache_hits: u64,
     pub policy_cache_misses: u64,
+    /// Queue overflow events (FAN_Q_OVERFLOW) - indicates dropped events
+    pub queue_overflows: u64,
+    /// Permission response write retries (EAGAIN handling)
+    pub response_write_retries: u64,
+    /// Permission response write failures after retries exhausted
+    pub response_write_failures: u64,
 }
 
 impl MetricsSnapshot {

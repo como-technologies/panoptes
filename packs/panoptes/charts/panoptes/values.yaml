@@ -148,7 +148,7 @@ compliance:
     namespace: ""  # Uses release namespace if empty
     enforcing: false
     podSelector:
-      security.panoptes.io/monitored: "true"
+      panoptes.como-technologies.io/monitored: "true"
 
   pciDss:
     enabled: false

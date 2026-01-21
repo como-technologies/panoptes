@@ -1,0 +1,105 @@
+# cargo-deny configuration for Panoptes
+# https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]
+
+# ============================================================================
+# Advisories - Check for known vulnerabilities
+# ============================================================================
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# Fail on any vulnerability
+vulnerability = "deny"
+# Warn on unmaintained crates
+unmaintained = "warn"
+# Warn on yanked crates
+yanked = "warn"
+# Warn on crates with security notices
+notice = "warn"
+# Ignore specific advisories (use sparingly, document why)
+ignore = [
+    # Example: "RUSTSEC-2020-0001",
+]
+
+# ============================================================================
+# Licenses - Ensure all dependencies have acceptable licenses
+# ============================================================================
+[licenses]
+# Fail on unlicensed crates
+unlicensed = "deny"
+# Copyleft licenses require careful review
+copyleft = "warn"
+# List of allowed licenses (permissive + weak copyleft)
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "MPL-2.0",
+    "Unicode-DFS-2016",
+    "CC0-1.0",
+    "BSL-1.0",
+]
+# Confidence threshold for license detection
+confidence-threshold = 0.8
+
+# Crates with non-standard licenses that we've manually reviewed
+[[licenses.clarify]]
+name = "ring"
+expression = "ISC AND MIT AND OpenSSL"
+license-files = [
+    { path = "LICENSE", hash = 0xbd0eed23 },
+]
+
+# ============================================================================
+# Bans - Disallow specific crates or features
+# ============================================================================
+[bans]
+# Warn on multiple versions of the same crate
+multiple-versions = "warn"
+# Warn on wildcard dependencies
+wildcards = "warn"
+# Allow build/dev dependencies to have different versions
+workspace-default-features = "allow"
+external-default-features = "allow"
+# Deny specific crates known to have issues
+deny = [
+    # Example: { name = "openssl" } # Prefer rustls
+]
+# Skip duplicate checking for these crates (common to have multiple versions)
+skip = [
+    # { name = "syn", version = "*" },
+]
+# Skip checking tree for these crates
+skip-tree = [
+    # { name = "windows-sys", version = "*" },
+]
+
+# ============================================================================
+# Sources - Restrict where crates can come from
+# ============================================================================
+[sources]
+# Only allow crates from crates.io
+unknown-registry = "deny"
+# Deny crates from git repositories (require vendoring for production)
+unknown-git = "warn"
+# Allow specific git sources if needed
+allow-git = [
+    # "https://github.com/example/crate",
+]
+
+[sources.allow-org]
+# Allow crates from specific GitHub organizations
+github = [
+    "como-technologies",
+    "rust-lang",
+    "tokio-rs",
+]

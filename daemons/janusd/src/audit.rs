@@ -39,9 +39,10 @@
 //! - Linux kernel source: `kernel/audit.c`
 
 use std::io;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use nix::sys::socket::{bind, sendto, MsgFlags, NetlinkAddr};
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
@@ -183,13 +184,32 @@ pub trait AuditLogger: Send + Sync {
 }
 
 /// Netlink-based audit logger that writes to the kernel audit subsystem.
+///
+/// Uses `OwnedFd` for the socket, which provides automatic cleanup via `Drop`.
+/// This eliminates the need for a manual `Drop` implementation and reduces
+/// the risk of file descriptor leaks.
 pub struct NetlinkAuditLogger {
-    socket_fd: RawFd,
+    /// Owned file descriptor for the netlink socket.
+    /// Automatically closed when the logger is dropped.
+    socket_fd: OwnedFd,
+    /// Sequence number for netlink messages.
     sequence: AtomicU32,
 }
 
 impl NetlinkAuditLogger {
     /// Create a new netlink audit logger.
+    ///
+    /// # Unsafe Code Minimization
+    ///
+    /// The only `unsafe` block is for `libc::socket()` because nix's `socket()`
+    /// function requires a `SockProtocol` enum, and `NETLINK_AUDIT` (protocol 9)
+    /// is not exposed in that enum. The raw fd is immediately wrapped in `OwnedFd`
+    /// for automatic cleanup.
+    ///
+    /// All other operations use nix's safe wrappers:
+    /// - `NetlinkAddr` instead of `sockaddr_nl` with `mem::zeroed()`
+    /// - `nix::sys::socket::bind()` instead of `libc::bind()`
+    /// - `OwnedFd::drop()` handles close automatically
     ///
     /// # Errors
     ///
@@ -205,8 +225,17 @@ impl NetlinkAuditLogger {
             }
         }
 
-        // Create netlink socket
-        let socket_fd = unsafe {
+        // Create netlink socket.
+        //
+        // SAFETY: libc::socket() is safe to call. We immediately check the return
+        // value and convert to OwnedFd for automatic cleanup. The only reason we
+        // use libc directly is that nix's SockProtocol enum doesn't include
+        // NETLINK_AUDIT (protocol 9).
+        //
+        // If socket() fails, it returns -1 and sets errno. We convert that to a
+        // Rust io::Error. If it succeeds, we immediately wrap the fd in OwnedFd
+        // so any subsequent errors will still clean up the socket.
+        let raw_fd = unsafe {
             libc::socket(
                 libc::AF_NETLINK,
                 libc::SOCK_RAW | libc::SOCK_CLOEXEC,
@@ -214,28 +243,24 @@ impl NetlinkAuditLogger {
             )
         };
 
-        if socket_fd < 0 {
+        if raw_fd < 0 {
             return Err(AuditError::SocketCreate(io::Error::last_os_error()));
         }
 
-        // Bind the socket
-        let mut addr: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
-        addr.nl_family = libc::AF_NETLINK as u16;
-        addr.nl_pid = 0; // Let kernel assign
-        addr.nl_groups = 0;
+        // SAFETY: We just verified raw_fd is a valid fd from socket().
+        // OwnedFd takes ownership and will close it when dropped.
+        let socket_fd = unsafe { OwnedFd::from_raw_fd(raw_fd) };
 
-        let ret = unsafe {
-            libc::bind(
-                socket_fd,
-                &addr as *const libc::sockaddr_nl as *const libc::sockaddr,
-                std::mem::size_of::<libc::sockaddr_nl>() as libc::socklen_t,
-            )
-        };
+        // Bind the socket using nix's safe wrapper.
+        // NetlinkAddr::new(pid, groups) creates a properly initialized address:
+        // - pid=0 lets kernel assign a port ID
+        // - groups=0 means no multicast group subscriptions
+        let addr = NetlinkAddr::new(0, 0);
 
-        if ret < 0 {
-            unsafe { libc::close(socket_fd) };
-            return Err(AuditError::SocketBind(io::Error::last_os_error()));
-        }
+        bind(socket_fd.as_raw_fd(), &addr).map_err(|e| {
+            // OwnedFd will close the socket automatically when dropped
+            AuditError::SocketBind(io::Error::from_raw_os_error(e as i32))
+        })?;
 
         info!("Netlink audit logger initialized");
 
@@ -246,6 +271,10 @@ impl NetlinkAuditLogger {
     }
 
     /// Send an audit message to the kernel.
+    ///
+    /// Uses nix's safe `sendto()` wrapper instead of raw libc calls.
+    /// The netlink message header is built manually (no unsafe needed for that),
+    /// then sent using nix's type-safe socket operations.
     fn send_message(&self, message: &str) -> Result<(), AuditError> {
         let msg_bytes = message.as_bytes();
 
@@ -260,7 +289,8 @@ impl NetlinkAuditLogger {
 
         let mut buffer = vec![0u8; aligned_len];
 
-        // Fill in netlink header
+        // Fill in netlink header (struct nlmsghdr)
+        // This is pure data manipulation, no unsafe needed.
         let seq = self.sequence.fetch_add(1, Ordering::SeqCst);
 
         // nlmsg_len (u32)
@@ -277,26 +307,19 @@ impl NetlinkAuditLogger {
         // Copy message payload
         buffer[NLMSG_HDRLEN..NLMSG_HDRLEN + msg_bytes.len()].copy_from_slice(msg_bytes);
 
-        // Send to kernel
-        let mut dest_addr: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
-        dest_addr.nl_family = libc::AF_NETLINK as u16;
-        dest_addr.nl_pid = 0; // Kernel
-        dest_addr.nl_groups = 0;
+        // Send to kernel using nix's safe sendto() wrapper.
+        // NetlinkAddr::new(0, 0) creates the destination address:
+        // - pid=0 means send to kernel
+        // - groups=0 means no multicast
+        let dest_addr = NetlinkAddr::new(0, 0);
 
-        let ret = unsafe {
-            libc::sendto(
-                self.socket_fd,
-                buffer.as_ptr() as *const libc::c_void,
-                buffer.len(),
-                0,
-                &dest_addr as *const libc::sockaddr_nl as *const libc::sockaddr,
-                std::mem::size_of::<libc::sockaddr_nl>() as libc::socklen_t,
-            )
-        };
-
-        if ret < 0 {
-            return Err(AuditError::SendMessage(io::Error::last_os_error()));
-        }
+        sendto(
+            self.socket_fd.as_raw_fd(),
+            &buffer,
+            &dest_addr,
+            MsgFlags::empty(),
+        )
+        .map_err(|e| AuditError::SendMessage(io::Error::from_raw_os_error(e as i32)))?;
 
         debug!(seq = seq, len = msg_bytes.len(), "Sent audit message");
 
@@ -304,11 +327,12 @@ impl NetlinkAuditLogger {
     }
 }
 
-impl Drop for NetlinkAuditLogger {
-    fn drop(&mut self) {
-        unsafe { libc::close(self.socket_fd) };
-    }
-}
+// Note: No manual Drop implementation needed.
+// OwnedFd automatically closes the socket when NetlinkAuditLogger is dropped.
+// This is safer than manual libc::close() calls:
+// - No risk of double-close
+// - No risk of use-after-close
+// - No unsafe code needed for cleanup
 
 impl AuditLogger for NetlinkAuditLogger {
     fn log_access(&self, event: &AuditAccessEvent) -> Result<(), AuditError> {
@@ -323,7 +347,7 @@ impl AuditLogger for NetlinkAuditLogger {
 
 impl AsRawFd for NetlinkAuditLogger {
     fn as_raw_fd(&self) -> RawFd {
-        self.socket_fd
+        self.socket_fd.as_raw_fd()
     }
 }
 

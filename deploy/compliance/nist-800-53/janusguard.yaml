@@ -6,9 +6,9 @@ metadata:
   name: nist-access
   labels:
     compliance: nist-800-53
-    panoptes.io/template: nist-access
+    panoptes.como-technologies.io/template: nist-access
   annotations:
-    panoptes.io/description: "NIST 800-53 Access Control and Auditing"
+    panoptes.como-technologies.io/description: "NIST 800-53 Access Control and Auditing"
     nist/controls: "AU-2, AU-3, AU-6, AC-6"
 spec:
   selector:
@@ -41,7 +41,6 @@ spec:
       events:
         - access
         - open
-        - modify
       audit: true
       tags:
         control: "AU-2"
@@ -64,12 +63,15 @@ spec:
         category: ssh-keys
 
     # AU-2: Kubernetes secrets
+    # SECURITY NOTE: autoAllowOwner permits the pod to read any mounted secret.
+    # For stricter control, set autoAllowOwner: false and configure explicit
+    # RBAC policies. See docs/security/attack-surface-analysis.md section 3.2
     - deny:
         - /var/run/secrets/kubernetes.io
       events:
         - access
         - open
-      autoAllowOwner: true
+      autoAllowOwner: true  # Permissive - see security note above
       defaultResponse: audit
       audit: true
       tags:

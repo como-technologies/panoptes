@@ -18,9 +18,9 @@ metadata:
   name: hipaa-fim
   labels:
     compliance: hipaa
-    panoptes.io/template: hipaa-fim
+    panoptes.como-technologies.io/template: hipaa-fim
   annotations:
-    panoptes.io/description: "HIPAA File Integrity Monitoring"
+    panoptes.como-technologies.io/description: "HIPAA File Integrity Monitoring"
     hipaa/requirements: "164.312(b), 164.312(c)(1), 164.308(a)(1)"
 spec:
   # Target pods handling ePHI
@@ -106,10 +106,10 @@ spec:
 
     # Database configuration files
     - paths:
-        - /var/lib/postgresql
-        - /var/lib/mysql
-        - /etc/postgresql
-        - /etc/mysql
+        - /var/lib/postgresql  # prevents ePHI database tampering
+        - /var/lib/mysql       # prevents ePHI database tampering
+        - /etc/postgresql      # prevents database config backdoor
+        - /etc/mysql           # prevents database config backdoor
       events:
         - modify
         - create
@@ -124,6 +124,81 @@ spec:
         severity: high
         category: database-config
 
+    # =================================================================
+    # STAGING AREA MONITORING (HIPAA 164.312(c)(1) - Integrity)
+    # Detect malware staging that could compromise ePHI
+    # =================================================================
+    - paths:
+        - /tmp              # prevents malware staging in world-writable temp
+        - /var/tmp          # prevents persistent temp file attacks
+        - /dev/shm          # prevents in-memory malware execution (RAM-backed)
+      events:
+        - create
+        - modify
+        - delete
+      recursive: true
+      maxDepth: 3
+      ignore:
+        - "*.sock"
+        - "*.pid"
+        - "pulse-*"
+        - "ssh-*"
+        - ".X*-lock"
+      tags:
+        requirement: "164.312(c)(1)"
+        severity: high
+        category: staging-detection
+        attack: "T1074"
+
+    # =================================================================
+    # LIBRARY INJECTION DETECTION (HIPAA 164.312(c)(1) - Integrity)
+    # Detect LD_PRELOAD attacks that could intercept ePHI
+    # =================================================================
+    - paths:
+        - /usr/lib          # prevents malicious library injection
+        - /lib              # prevents system library tampering
+        - /lib64            # prevents 64-bit library tampering
+        - /usr/lib64        # prevents 64-bit library injection
+        - /etc/ld.so.conf   # prevents linker config hijacking
+        - /etc/ld.so.conf.d # prevents linker config directory attacks
+        - /etc/ld.so.preload # prevents LD_PRELOAD persistence
+      events:
+        - create
+        - modify
+        - delete
+      recursive: true
+      maxDepth: 2
+      ignore:
+        - "*.pyc"
+        - "__pycache__"
+        - "*.cache"
+      tags:
+        requirement: "164.312(c)(1)"
+        severity: critical
+        category: library-integrity
+        attack: "T1574.006"
+
+    # =================================================================
+    # SHELL CONFIGURATION MONITORING (HIPAA 164.312(d) - Auth)
+    # Detect shell backdoors for persistence
+    # =================================================================
+    - paths:
+        - /etc/profile      # prevents system-wide shell backdoor
+        - /etc/profile.d    # prevents profile.d script injection
+        - /etc/bash.bashrc  # prevents global bashrc backdoor
+        - /root/.bashrc     # prevents root shell backdoor
+        - /root/.bash_profile # prevents root login backdoor
+      events:
+        - modify
+        - create
+      recursive: true
+      maxDepth: 1
+      tags:
+        requirement: "164.312(d)"
+        severity: high
+        category: shell-persistence
+        attack: "T1546.004"
+
   containerRuntime: auto
   paused: false
   logFormat: json
@@ -135,9 +210,9 @@ metadata:
   name: hipaa-access
   labels:
     compliance: hipaa
-    panoptes.io/template: hipaa-access
+    panoptes.como-technologies.io/template: hipaa-access
   annotations:
-    panoptes.io/description: "HIPAA Access Control and Auditing"
+    panoptes.como-technologies.io/description: "HIPAA Access Control and Auditing"
     hipaa/requirements: "164.312(b), 164.312(d)"
 spec:
   # Target pods handling ePHI
@@ -157,7 +232,6 @@ spec:
       events:
         - access
         - open
-        - modify
       audit: true
       tags:
         requirement: "164.312(b)"
@@ -184,12 +258,15 @@ spec:
         category: credential-access
 
     # Kubernetes secrets (may contain ePHI credentials)
+    # SECURITY NOTE: autoAllowOwner permits the pod to read any mounted secret.
+    # For stricter control, set autoAllowOwner: false and configure explicit
+    # RBAC policies. See docs/security/attack-surface-analysis.md section 3.2
     - deny:
         - /var/run/secrets
       events:
         - access
         - open
-      autoAllowOwner: true
+      autoAllowOwner: true  # Permissive - see security note above
       defaultResponse: deny
       audit: true
       tags:

@@ -154,7 +154,7 @@ compliance:
     namespace: ""
     enforcing: false
     podSelector:
-      security.panoptes.io/monitored: "true"
+      panoptes.como-technologies.io/monitored: "true"
 
   pciDss:
     enabled: false

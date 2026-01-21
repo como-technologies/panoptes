@@ -18,6 +18,8 @@ use panoptes_common::{
     // Capability checking
     CapabilityChecker, LinuxCapabilityChecker, ARGUSD_REQUIRED_CAPS,
     missing_capabilities_message,
+    // Resource limit checking
+    check_fd_limit, read_inotify_limits, ResourceLimitsInfo,
 };
 #[cfg(feature = "ebpf")]
 use panoptes_common::{is_ebpf_supported, is_bpf_lsm_enabled, ARGUSD_REQUIRED_CAPS_EBPF};
@@ -225,6 +227,63 @@ async fn main() -> Result<()> {
     }
 
     info!("Base capabilities verified");
+
+    // ═══════════════════════════════════════════════════════════════
+    // Resource Limit Verification (fail fast if insufficient)
+    // ═══════════════════════════════════════════════════════════════
+    //
+    // Verify system resource limits are sufficient BEFORE starting.
+    // This prevents cryptic failures partway through operation when
+    // the daemon runs out of file descriptors or watch slots.
+    //
+    // Key limits for argusd:
+    // - RLIMIT_NOFILE: File descriptors (for inotify fds + gRPC + logging)
+    // - max_user_watches: Per-user inotify watch limit
+    // - max_queued_events: inotify event queue size (overflow = lost events)
+
+    // Log all resource limits for diagnostics
+    let limits_info = ResourceLimitsInfo::collect();
+    limits_info.log();
+
+    // Check file descriptor limit
+    // Safety margin of 1024 for: gRPC connections, logging, proc access, etc.
+    const FD_SAFETY_MARGIN: u64 = 1024;
+    if let Err(e) = check_fd_limit(config.max_watches as u64, FD_SAFETY_MARGIN) {
+        error!("{}", e);
+        error!(
+            "Increase with: ulimit -n {} (or update container securityContext)",
+            config.max_watches as u64 + FD_SAFETY_MARGIN
+        );
+        anyhow::bail!("Insufficient file descriptor limit - daemon cannot start safely");
+    }
+    info!(max_watches = config.max_watches, "File descriptor limit verified");
+
+    // Check inotify-specific limits
+    let (max_user_watches, max_queued_events) = read_inotify_limits();
+
+    if max_user_watches < config.max_watches as u64 {
+        warn!(
+            kernel_limit = max_user_watches,
+            configured = config.max_watches,
+            "max_user_watches is less than configured max_watches"
+        );
+        warn!(
+            "Fix with: sysctl -w fs.inotify.max_user_watches={}",
+            config.max_watches
+        );
+        // Don't fail - the kernel will return ENOSPC when limit is hit,
+        // which we handle gracefully. Just warn.
+    }
+
+    // Warn if queue is small (increases overflow risk)
+    if max_queued_events < 32768 {
+        warn!(
+            current = max_queued_events,
+            recommended = 65536,
+            "inotify max_queued_events is low - risk of queue overflow under load"
+        );
+        warn!("Fix with: sysctl -w fs.inotify.max_queued_events=65536");
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // Runtime Mode Selection (auto-detect with fallback)

@@ -41,7 +41,7 @@ Traditional security tools miss container-level threats because they focus on th
 
 ```bash
 # Label all pods for security monitoring
-kubectl label pods --all security.panoptes.io/monitored=true
+kubectl label pods --all panoptes.como-technologies.io/monitored=true
 ```
 
 ### Step 2: Apply the Base Security Template (30 seconds)
@@ -114,7 +114,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      security.panoptes.io/monitored: "true"
+      panoptes.como-technologies.io/monitored: "true"
   subjects:
     # Cron-based persistence
     - paths:
@@ -207,7 +207,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      security.panoptes.io/monitored: "true"
+      panoptes.como-technologies.io/monitored: "true"
   subjects:
     # Block shadow file access
     - deny:
