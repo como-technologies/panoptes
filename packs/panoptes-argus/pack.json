@@ -1,18 +1,18 @@
 {
   "addonType": "security",
   "cloudTypes": ["all"],
-  "displayName": "Janus Audit - File Access Auditing",
-  "kubeManifestType": "helm",
+  "displayName": "Panoptes Argus - File Integrity Monitoring",
+  "charts": ["charts/panoptes-argus"],
   "layer": "addon",
-  "name": "janus-audit",
+  "name": "panoptes-argus",
   "version": "2.0.0",
   "constraints": {
     "minKubeVersion": "1.28.0"
   },
   "annotations": {
     "category": "Security",
-    "subcategory": "Audit Logging",
-    "description": "Real-time file access auditing and enforcement for Kubernetes using fanotify"
+    "subcategory": "File Integrity Monitoring",
+    "description": "Real-time file integrity monitoring for Kubernetes using inotify"
   },
   "supportedOS": ["linux"],
   "supportedArchitectures": ["amd64", "arm64"]

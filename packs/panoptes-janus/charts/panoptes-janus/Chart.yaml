@@ -1,0 +1,18 @@
+apiVersion: v2
+name: panoptes-janus
+description: Panoptes Janus - File Access Auditing for Kubernetes using fanotify
+type: application
+version: 2.0.0
+appVersion: "2.0.0"
+keywords:
+  - security
+  - file-access
+  - auditing
+  - fanotify
+  - kubernetes
+home: https://github.com/como-technologies/panoptes
+maintainers:
+  - name: Como Technologies
+    email: security@comotech.io
+annotations:
+  category: Security

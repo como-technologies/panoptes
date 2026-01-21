@@ -2,7 +2,7 @@
   "addonType": "security",
   "cloudTypes": ["all"],
   "displayName": "Panoptes Security Suite",
-  "kubeManifestType": "helm",
+  "charts": ["charts/panoptes"],
   "layer": "addon",
   "name": "panoptes",
   "version": "2.0.0",

@@ -1,0 +1,89 @@
+# Default values for panoptes-janus
+
+# Override names
+nameOverride: ""
+fullnameOverride: ""
+
+# Global cluster identification for multi-cluster deployments
+global:
+  cluster:
+    name: ""
+    environment: ""
+    region: ""
+
+# Controller configuration (janus-operator)
+controller:
+  image:
+    repository: gcr.io/spectro-images/janus-controller
+    tag: "2.0.0"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+
+# Daemon configuration (janusd)
+daemon:
+  image:
+    repository: gcr.io/spectro-images/janusd
+    tag: "2.0.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  nodeSelector: {}
+  tolerations:
+    - operator: Exists
+      effect: NoSchedule
+  # Required capabilities for fanotify monitoring
+  securityContext:
+    privileged: false
+    capabilities:
+      add:
+        - SYS_ADMIN
+        - SYS_PTRACE
+        - DAC_READ_SEARCH
+        - AUDIT_WRITE
+
+# Enforcement mode (global default)
+enforcement:
+  # true = block denied access, false = audit-only
+  enabled: true
+
+# Kernel audit integration
+audit:
+  kernelAudit: true
+
+# gRPC service configuration
+service:
+  type: ClusterIP
+  port: 50052
+
+# Observability
+observability:
+  prometheus:
+    enabled: true
+    port: 8080
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    namespace: ""
+
+# Container runtime detection
+containerRuntime:
+  detection: auto  # auto, containerd, or cri-o

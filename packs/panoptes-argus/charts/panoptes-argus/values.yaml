@@ -1,0 +1,79 @@
+# Default values for panoptes-argus
+
+# Override names
+nameOverride: ""
+fullnameOverride: ""
+
+# Global cluster identification for multi-cluster deployments
+global:
+  cluster:
+    name: ""
+    environment: ""
+    region: ""
+
+# Controller configuration (argus-operator)
+controller:
+  image:
+    repository: gcr.io/spectro-images/argus-controller
+    tag: "2.0.0"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+
+# Daemon configuration (argusd)
+daemon:
+  image:
+    repository: gcr.io/spectro-images/argusd
+    tag: "2.0.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  nodeSelector: {}
+  tolerations:
+    - operator: Exists
+      effect: NoSchedule
+  # Required capabilities for inotify monitoring
+  securityContext:
+    privileged: false
+    capabilities:
+      add:
+        - SYS_ADMIN
+        - SYS_PTRACE
+        - DAC_READ_SEARCH
+
+# gRPC service configuration
+service:
+  type: ClusterIP
+  port: 50051
+
+# Observability
+observability:
+  prometheus:
+    enabled: true
+    port: 8080
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    namespace: ""
+
+# Container runtime detection
+containerRuntime:
+  detection: auto  # auto, containerd, or cri-o
