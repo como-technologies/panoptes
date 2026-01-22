@@ -58,13 +58,21 @@ impl PolicyEvaluator {
         cache_size: Option<usize>,
     ) -> Self {
         Self {
-            deny_patterns: deny.iter().filter_map(|p| CompiledPattern::new(p)).collect(),
-            allow_patterns: allow.iter().filter_map(|p| CompiledPattern::new(p)).collect(),
+            deny_patterns: deny
+                .iter()
+                .filter_map(|p| CompiledPattern::new(p))
+                .collect(),
+            allow_patterns: allow
+                .iter()
+                .filter_map(|p| CompiledPattern::new(p))
+                .collect(),
             auto_allow_owner,
             owner_pid: None,
             default_response,
             cache: cache_size.map(|size| {
-                RwLock::new(lru::LruCache::new(std::num::NonZeroUsize::new(size).unwrap()))
+                RwLock::new(lru::LruCache::new(
+                    std::num::NonZeroUsize::new(size).unwrap(),
+                ))
             }),
         }
     }
@@ -148,7 +156,7 @@ fn bench_policy_evaluation_no_cache(c: &mut Criterion) {
         ],
         false,
         AccessResponse::Deny,
-        None,  // No cache
+        None, // No cache
     );
 
     let test_paths: Vec<PathBuf> = vec![
@@ -218,7 +226,7 @@ fn bench_policy_evaluation_with_cache(c: &mut Criterion) {
         ],
         false,
         AccessResponse::Deny,
-        Some(1024),  // With cache
+        Some(1024), // With cache
     );
 
     let test_paths: Vec<PathBuf> = vec![
@@ -283,7 +291,8 @@ fn bench_deduplication(c: &mut Criterion) {
             let now = Instant::now();
 
             // Clean expired entries
-            self.entries.retain(|(_, _, _, time)| now.duration_since(*time) < self.window);
+            self.entries
+                .retain(|(_, _, _, time)| now.duration_since(*time) < self.window);
 
             // Check for duplicate
             let is_duplicate = self.entries.iter().any(|(p, id, r, time)| {
@@ -329,7 +338,11 @@ fn bench_deduplication(c: &mut Criterion) {
     });
 
     // Benchmark with high duplicate rate
-    let repeated_event = (PathBuf::from("/app/hot_file.txt"), 1234, AccessResponse::Allow);
+    let repeated_event = (
+        PathBuf::from("/app/hot_file.txt"),
+        1234,
+        AccessResponse::Allow,
+    );
 
     group.bench_function("check_and_record_duplicates", |b| {
         let mut cache = DedupeCache::new(64, Duration::from_millis(100));

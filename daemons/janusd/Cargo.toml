@@ -55,7 +55,7 @@ glob = "0.3"
 caps = "0.5"
 
 # LRU cache for policy evaluation
-lru = "0.12"
+lru = "0.16"
 
 [build-dependencies]
 tonic-build = "0.12"

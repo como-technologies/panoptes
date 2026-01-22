@@ -102,7 +102,6 @@ pub struct GuardMetrics {
     //     summary: "Fanotify events are being dropped"
     //     runbook: "Increase /proc/sys/fs/fanotify/max_queued_events or reduce monitoring scope"
     // ```
-
     /// Queue overflow events detected (FAN_Q_OVERFLOW).
     ///
     /// When fanotify's internal queue fills faster than userspace can read,
@@ -349,21 +348,54 @@ impl DaemonMetrics for GuardMetrics {
         let mut custom = HashMap::new();
 
         // Add fanotify-specific metrics
-        custom.insert("events_allowed".to_string(), self.events_allowed.load(ORDERING));
-        custom.insert("events_denied".to_string(), self.events_denied.load(ORDERING));
-        custom.insert("events_audited".to_string(), self.events_audited.load(ORDERING));
-        custom.insert("access_events".to_string(), self.access_events.load(ORDERING));
+        custom.insert(
+            "events_allowed".to_string(),
+            self.events_allowed.load(ORDERING),
+        );
+        custom.insert(
+            "events_denied".to_string(),
+            self.events_denied.load(ORDERING),
+        );
+        custom.insert(
+            "events_audited".to_string(),
+            self.events_audited.load(ORDERING),
+        );
+        custom.insert(
+            "access_events".to_string(),
+            self.access_events.load(ORDERING),
+        );
         custom.insert("open_events".to_string(), self.open_events.load(ORDERING));
-        custom.insert("open_exec_events".to_string(), self.open_exec_events.load(ORDERING));
-        custom.insert("close_write_events".to_string(), self.close_write_events.load(ORDERING));
+        custom.insert(
+            "open_exec_events".to_string(),
+            self.open_exec_events.load(ORDERING),
+        );
+        custom.insert(
+            "close_write_events".to_string(),
+            self.close_write_events.load(ORDERING),
+        );
         custom.insert("close_events".to_string(), self.close_events.load(ORDERING));
         custom.insert("deduplicated".to_string(), self.deduplicated.load(ORDERING));
-        custom.insert("policy_cache_hits".to_string(), self.policy_cache_hits.load(ORDERING));
-        custom.insert("policy_cache_misses".to_string(), self.policy_cache_misses.load(ORDERING));
+        custom.insert(
+            "policy_cache_hits".to_string(),
+            self.policy_cache_hits.load(ORDERING),
+        );
+        custom.insert(
+            "policy_cache_misses".to_string(),
+            self.policy_cache_misses.load(ORDERING),
+        );
         // Defensive hardening metrics - critical for security monitoring
-        custom.insert("queue_overflows".to_string(), self.queue_overflows.load(ORDERING));
-        custom.insert("response_write_retries".to_string(), self.response_write_retries.load(ORDERING));
-        custom.insert("response_write_failures".to_string(), self.response_write_failures.load(ORDERING));
+        custom.insert(
+            "queue_overflows".to_string(),
+            self.queue_overflows.load(ORDERING),
+        );
+        custom.insert(
+            "response_write_retries".to_string(),
+            self.response_write_retries.load(ORDERING),
+        );
+        custom.insert(
+            "response_write_failures".to_string(),
+            self.response_write_failures.load(ORDERING),
+        );
 
         CommonMetricsSnapshot {
             name: self.guard_name.clone(),

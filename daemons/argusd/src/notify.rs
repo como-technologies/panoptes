@@ -467,7 +467,10 @@ impl Watcher {
     }
 
     /// Create a watcher with metrics collection.
-    pub fn with_metrics(max_watches: usize, metrics: Arc<WatcherMetrics>) -> Result<Self, NotifyError> {
+    pub fn with_metrics(
+        max_watches: usize,
+        metrics: Arc<WatcherMetrics>,
+    ) -> Result<Self, NotifyError> {
         let mut watcher = Self::new(max_watches)?;
         watcher.metrics = Some(metrics);
         Ok(watcher)
@@ -485,7 +488,11 @@ impl Watcher {
     /// - `EACCES` - Read access to pathname not permitted
     /// - `ENOSPC` - User watch limit reached (max_user_watches)
     /// - `ENOENT` - pathname does not exist
-    pub fn add_watch(&mut self, path: &Path, flags: AddWatchFlags) -> Result<WatchDescriptor, NotifyError> {
+    pub fn add_watch(
+        &mut self,
+        path: &Path,
+        flags: AddWatchFlags,
+    ) -> Result<WatchDescriptor, NotifyError> {
         if self.watches.len() >= self.max_watches {
             return Err(NotifyError::MaxWatchesExceeded {
                 current: self.watches.len(),
@@ -672,13 +679,13 @@ impl Watcher {
     /// Call this AFTER `add_watches()` to start processing events.
     /// This separation allows synchronous watch registration for the
     /// watcher-wait init container pattern.
-    pub async fn run_event_loop(
-        &mut self,
-        tx: mpsc::Sender<FileEvent>,
-    ) -> Result<(), NotifyError> {
-        let config = self.config.clone().ok_or_else(|| NotifyError::Io(
-            std::io::Error::new(std::io::ErrorKind::Other, "no config - call add_watches first")
-        ))?;
+    pub async fn run_event_loop(&mut self, tx: mpsc::Sender<FileEvent>) -> Result<(), NotifyError> {
+        let config = self.config.clone().ok_or_else(|| {
+            NotifyError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "no config - call add_watches first",
+            ))
+        })?;
 
         self.running.store(true, Ordering::SeqCst);
         self.state = WatchState::Running;
@@ -908,16 +915,22 @@ impl Watcher {
 
         self.state = WatchState::Paused;
 
-        self.config.clone().ok_or_else(|| NotifyError::Io(
-            std::io::Error::new(std::io::ErrorKind::Other, "no config stored")
-        ))
+        self.config.clone().ok_or_else(|| {
+            NotifyError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "no config stored",
+            ))
+        })
     }
 
     /// Resume a paused watcher.
     pub async fn resume(&mut self, tx: mpsc::Sender<FileEvent>) -> Result<(), NotifyError> {
-        let config = self.config.clone().ok_or_else(|| NotifyError::Io(
-            std::io::Error::new(std::io::ErrorKind::Other, "no config stored")
-        ))?;
+        let config = self.config.clone().ok_or_else(|| {
+            NotifyError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "no config stored",
+            ))
+        })?;
 
         // Reinitialize inotify
         self.inotify = Inotify::init(InitFlags::IN_NONBLOCK | InitFlags::IN_CLOEXEC)?;
@@ -971,9 +984,10 @@ impl Watcher {
     fn process_event(&mut self, event: &nix::sys::inotify::InotifyEvent) -> Option<Vec<FileEvent>> {
         let dir_path = self.watches.get(&event.wd)?.clone();
 
-        let filename = event.name.as_ref().map(|n| {
-            n.to_str().unwrap_or_default().to_string()
-        });
+        let filename = event
+            .name
+            .as_ref()
+            .map(|n| n.to_str().unwrap_or_default().to_string());
 
         let full_path = if let Some(ref name) = filename {
             dir_path.join(name)
@@ -988,12 +1002,8 @@ impl Watcher {
         match event_type {
             EventType::MovedFrom => {
                 // Record and wait for matching MovedTo
-                self.move_tracker.record_moved_from(
-                    event.cookie,
-                    full_path,
-                    filename,
-                    is_dir,
-                );
+                self.move_tracker
+                    .record_moved_from(event.cookie, full_path, filename, is_dir);
                 None
             }
             EventType::MovedTo => {
@@ -1037,21 +1047,22 @@ impl Watcher {
                     }])
                 }
             }
-            _ => {
-                Some(vec![FileEvent {
-                    event_type,
-                    path: full_path,
-                    filename,
-                    is_dir,
-                    cookie: event.cookie,
-                    move_peer: None,
-                }])
-            }
+            _ => Some(vec![FileEvent {
+                event_type,
+                path: full_path,
+                filename,
+                is_dir,
+                cookie: event.cookie,
+                move_peer: None,
+            }]),
         }
     }
 
     /// Emit expired move events that didn't get a matching pair.
-    async fn emit_expired_moves(&mut self, tx: &mpsc::Sender<FileEvent>) -> Result<(), NotifyError> {
+    async fn emit_expired_moves(
+        &mut self,
+        tx: &mpsc::Sender<FileEvent>,
+    ) -> Result<(), NotifyError> {
         let expired = self.move_tracker.drain_expired();
 
         for (cookie, pending) in expired {
@@ -1113,7 +1124,8 @@ impl Watcher {
                 }
 
                 if config.recursive && path.is_dir() {
-                    let _ = self.add_recursive_watches(path, flags, config.max_depth.unwrap_or(0), 0);
+                    let _ =
+                        self.add_recursive_watches(path, flags, config.max_depth.unwrap_or(0), 0);
                 }
             }
         }
@@ -1122,7 +1134,10 @@ impl Watcher {
             metrics.set_watches_active(self.watches.len() as u64);
         }
 
-        info!(watch_count = self.watches.len(), "Reinitialized after overflow");
+        info!(
+            watch_count = self.watches.len(),
+            "Reinitialized after overflow"
+        );
         Ok(())
     }
 }
@@ -1217,7 +1232,12 @@ mod tests {
         fn test_record_moved_from() {
             let mut tracker = MovePairTracker::new(Duration::from_millis(100));
 
-            tracker.record_moved_from(42, PathBuf::from("/a/file.txt"), Some("file.txt".to_string()), false);
+            tracker.record_moved_from(
+                42,
+                PathBuf::from("/a/file.txt"),
+                Some("file.txt".to_string()),
+                false,
+            );
 
             assert_eq!(tracker.pending_count(), 1);
         }
@@ -1227,7 +1247,12 @@ mod tests {
             let mut tracker = MovePairTracker::new(Duration::from_millis(100));
 
             // Cookie 0 should be ignored
-            tracker.record_moved_from(0, PathBuf::from("/a/file.txt"), Some("file.txt".to_string()), false);
+            tracker.record_moved_from(
+                0,
+                PathBuf::from("/a/file.txt"),
+                Some("file.txt".to_string()),
+                false,
+            );
 
             assert_eq!(tracker.pending_count(), 0);
         }
@@ -1236,7 +1261,12 @@ mod tests {
         fn test_match_moved_to_success() {
             let mut tracker = MovePairTracker::new(Duration::from_millis(100));
 
-            tracker.record_moved_from(42, PathBuf::from("/a/file.txt"), Some("file.txt".to_string()), false);
+            tracker.record_moved_from(
+                42,
+                PathBuf::from("/a/file.txt"),
+                Some("file.txt".to_string()),
+                false,
+            );
 
             let result = tracker.match_moved_to(42);
 
@@ -1254,7 +1284,12 @@ mod tests {
         fn test_match_moved_to_no_match() {
             let mut tracker = MovePairTracker::new(Duration::from_millis(100));
 
-            tracker.record_moved_from(42, PathBuf::from("/a/file.txt"), Some("file.txt".to_string()), false);
+            tracker.record_moved_from(
+                42,
+                PathBuf::from("/a/file.txt"),
+                Some("file.txt".to_string()),
+                false,
+            );
 
             // Different cookie should not match
             let result = tracker.match_moved_to(99);
@@ -1267,7 +1302,12 @@ mod tests {
         fn test_match_moved_to_cookie_zero() {
             let mut tracker = MovePairTracker::new(Duration::from_millis(100));
 
-            tracker.record_moved_from(42, PathBuf::from("/a/file.txt"), Some("file.txt".to_string()), false);
+            tracker.record_moved_from(
+                42,
+                PathBuf::from("/a/file.txt"),
+                Some("file.txt".to_string()),
+                false,
+            );
 
             // Cookie 0 should return None
             let result = tracker.match_moved_to(0);
@@ -1279,8 +1319,18 @@ mod tests {
         fn test_drain_expired() {
             let mut tracker = MovePairTracker::new(Duration::from_millis(1));
 
-            tracker.record_moved_from(42, PathBuf::from("/a/file.txt"), Some("file.txt".to_string()), false);
-            tracker.record_moved_from(43, PathBuf::from("/b/file.txt"), Some("file.txt".to_string()), false);
+            tracker.record_moved_from(
+                42,
+                PathBuf::from("/a/file.txt"),
+                Some("file.txt".to_string()),
+                false,
+            );
+            tracker.record_moved_from(
+                43,
+                PathBuf::from("/b/file.txt"),
+                Some("file.txt".to_string()),
+                false,
+            );
 
             // Wait for expiration
             std::thread::sleep(Duration::from_millis(5));
@@ -1295,7 +1345,12 @@ mod tests {
         fn test_drain_expired_partial() {
             let mut tracker = MovePairTracker::new(Duration::from_millis(50));
 
-            tracker.record_moved_from(42, PathBuf::from("/a/file.txt"), Some("file.txt".to_string()), false);
+            tracker.record_moved_from(
+                42,
+                PathBuf::from("/a/file.txt"),
+                Some("file.txt".to_string()),
+                false,
+            );
 
             // Not expired yet
             let expired = tracker.drain_expired();
@@ -1327,7 +1382,12 @@ mod tests {
         fn test_directory_move() {
             let mut tracker = MovePairTracker::new(Duration::from_millis(100));
 
-            tracker.record_moved_from(42, PathBuf::from("/a/subdir"), Some("subdir".to_string()), true);
+            tracker.record_moved_from(
+                42,
+                PathBuf::from("/a/subdir"),
+                Some("subdir".to_string()),
+                true,
+            );
 
             let result = tracker.match_moved_to(42);
 
@@ -1404,37 +1464,58 @@ mod tests {
 
         #[test]
         fn test_access() {
-            assert_eq!(mask_to_event_type(AddWatchFlags::IN_ACCESS), EventType::Access);
+            assert_eq!(
+                mask_to_event_type(AddWatchFlags::IN_ACCESS),
+                EventType::Access
+            );
         }
 
         #[test]
         fn test_create() {
-            assert_eq!(mask_to_event_type(AddWatchFlags::IN_CREATE), EventType::Create);
+            assert_eq!(
+                mask_to_event_type(AddWatchFlags::IN_CREATE),
+                EventType::Create
+            );
         }
 
         #[test]
         fn test_modify() {
-            assert_eq!(mask_to_event_type(AddWatchFlags::IN_MODIFY), EventType::Modify);
+            assert_eq!(
+                mask_to_event_type(AddWatchFlags::IN_MODIFY),
+                EventType::Modify
+            );
         }
 
         #[test]
         fn test_delete() {
-            assert_eq!(mask_to_event_type(AddWatchFlags::IN_DELETE), EventType::Delete);
+            assert_eq!(
+                mask_to_event_type(AddWatchFlags::IN_DELETE),
+                EventType::Delete
+            );
         }
 
         #[test]
         fn test_moved_from() {
-            assert_eq!(mask_to_event_type(AddWatchFlags::IN_MOVED_FROM), EventType::MovedFrom);
+            assert_eq!(
+                mask_to_event_type(AddWatchFlags::IN_MOVED_FROM),
+                EventType::MovedFrom
+            );
         }
 
         #[test]
         fn test_moved_to() {
-            assert_eq!(mask_to_event_type(AddWatchFlags::IN_MOVED_TO), EventType::MovedTo);
+            assert_eq!(
+                mask_to_event_type(AddWatchFlags::IN_MOVED_TO),
+                EventType::MovedTo
+            );
         }
 
         #[test]
         fn test_unknown() {
-            assert_eq!(mask_to_event_type(AddWatchFlags::empty()), EventType::Unknown);
+            assert_eq!(
+                mask_to_event_type(AddWatchFlags::empty()),
+                EventType::Unknown
+            );
         }
     }
 
@@ -1480,7 +1561,10 @@ mod tests {
 
         #[test]
         fn test_max_watches_exceeded_display() {
-            let err = NotifyError::MaxWatchesExceeded { current: 100, limit: 100 };
+            let err = NotifyError::MaxWatchesExceeded {
+                current: 100,
+                limit: 100,
+            };
             let msg = err.to_string();
             assert!(msg.contains("100"));
             assert!(msg.contains("limit"));

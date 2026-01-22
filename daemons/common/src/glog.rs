@@ -253,7 +253,11 @@ mod tests {
         );
 
         // Check it ends with newline
-        assert!(output.ends_with('\n'), "Should end with newline: {}", output);
+        assert!(
+            output.ends_with('\n'),
+            "Should end with newline: {}",
+            output
+        );
     }
 
     #[test]

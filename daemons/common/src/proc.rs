@@ -294,10 +294,12 @@ impl ProcfsProcessResolver {
         })?;
 
         // Find LAST ')' - comm can contain parentheses
-        let comm_end = content.rfind(')').ok_or_else(|| ProcError::StatParseError {
-            pid,
-            reason: "missing ')' for comm field".to_string(),
-        })?;
+        let comm_end = content
+            .rfind(')')
+            .ok_or_else(|| ProcError::StatParseError {
+                pid,
+                reason: "missing ')' for comm field".to_string(),
+            })?;
 
         let comm = content[comm_start + 1..comm_end].to_string();
 
@@ -308,15 +310,20 @@ impl ProcfsProcessResolver {
         if fields.len() < 2 {
             return Err(ProcError::StatParseError {
                 pid,
-                reason: format!("expected at least 2 fields after comm, got {}", fields.len()),
+                reason: format!(
+                    "expected at least 2 fields after comm, got {}",
+                    fields.len()
+                ),
             });
         }
 
         // fields[0] = state, fields[1] = ppid
-        let ppid = fields[1].parse::<u32>().map_err(|_| ProcError::StatParseError {
-            pid,
-            reason: format!("invalid ppid: '{}'", fields[1]),
-        })?;
+        let ppid = fields[1]
+            .parse::<u32>()
+            .map_err(|_| ProcError::StatParseError {
+                pid,
+                reason: format!("invalid ppid: '{}'", fields[1]),
+            })?;
 
         Ok((pid, comm, ppid))
     }
@@ -541,7 +548,11 @@ mod tests {
                 gid: 1000,
                 comm: "bash".to_string(),
                 exe: PathBuf::from("/usr/bin/bash"),
-                cmdline: vec!["-bash".to_string(), "-c".to_string(), "echo hello".to_string()],
+                cmdline: vec![
+                    "-bash".to_string(),
+                    "-c".to_string(),
+                    "echo hello".to_string(),
+                ],
                 cwd: PathBuf::from("/home/user/project"),
             };
             assert_eq!(info.cmdline.len(), 3);
@@ -587,7 +598,11 @@ mod tests {
 
             // comm field with spaces
             let mut stat_file = fs::File::create(pid_dir.join("stat")).unwrap();
-            writeln!(stat_file, "1234 (Web Content) S 5678 1234 1234 0 -1 4194304").unwrap();
+            writeln!(
+                stat_file,
+                "1234 (Web Content) S 5678 1234 1234 0 -1 4194304"
+            )
+            .unwrap();
 
             let (pid, comm, ppid) = resolver.parse_stat(1234).unwrap();
             assert_eq!(pid, 1234);

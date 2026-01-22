@@ -131,7 +131,12 @@ impl FileEventType {
     pub fn is_fim_event(&self) -> bool {
         matches!(
             self,
-            Self::Create | Self::Modify | Self::Delete | Self::Rename | Self::Attrib | Self::OpenWrite
+            Self::Create
+                | Self::Modify
+                | Self::Delete
+                | Self::Rename
+                | Self::Attrib
+                | Self::OpenWrite
         )
     }
 
@@ -197,7 +202,11 @@ pub struct FileEvent {
 impl FileEvent {
     /// Get the path as a string slice (up to first null byte)
     pub fn path_str(&self) -> &str {
-        let len = self.path.iter().position(|&b| b == 0).unwrap_or(MAX_PATH_LEN);
+        let len = self
+            .path
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(MAX_PATH_LEN);
         // Safety: We're in no_std, but this is only called from userspace
         // where we have the "user" feature enabled
         core::str::from_utf8(&self.path[..len]).unwrap_or("<invalid utf8>")
@@ -205,7 +214,11 @@ impl FileEvent {
 
     /// Get the command name as a string slice
     pub fn comm_str(&self) -> &str {
-        let len = self.comm.iter().position(|&b| b == 0).unwrap_or(MAX_COMM_LEN);
+        let len = self
+            .comm
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(MAX_COMM_LEN);
         core::str::from_utf8(&self.comm[..len]).unwrap_or("<invalid utf8>")
     }
 
@@ -337,7 +350,11 @@ impl ProcessCacheEntry {
 
     /// Get the command line as a string slice
     pub fn cmdline_str(&self) -> &str {
-        let len = self.cmdline.iter().position(|&b| b == 0).unwrap_or(MAX_CMDLINE_LEN);
+        let len = self
+            .cmdline
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(MAX_CMDLINE_LEN);
         core::str::from_utf8(&self.cmdline[..len]).unwrap_or("<invalid utf8>")
     }
 
@@ -359,7 +376,11 @@ impl ProcessCacheEntry {
 
     /// Get the command name as a string slice
     pub fn comm_str(&self) -> &str {
-        let len = self.comm.iter().position(|&b| b == 0).unwrap_or(MAX_COMM_LEN);
+        let len = self
+            .comm
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(MAX_COMM_LEN);
         core::str::from_utf8(&self.comm[..len]).unwrap_or("<invalid utf8>")
     }
 
@@ -456,7 +477,11 @@ mod tests {
         let size = core::mem::size_of::<ProcessCacheEntry>();
         assert!(size < 512, "ProcessCacheEntry too large: {} bytes", size);
         // Verify expected size range
-        assert!(size >= 400, "ProcessCacheEntry smaller than expected: {} bytes", size);
+        assert!(
+            size >= 400,
+            "ProcessCacheEntry smaller than expected: {} bytes",
+            size
+        );
     }
 
     #[test]

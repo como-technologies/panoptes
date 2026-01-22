@@ -248,7 +248,9 @@ impl ContainerdRuntime {
 
     /// Checks if containerd socket exists (runtime is available).
     pub fn is_available(&self) -> bool {
-        let socket_path = self.host_root.join(Self::SOCKET_PATH.trim_start_matches('/'));
+        let socket_path = self
+            .host_root
+            .join(Self::SOCKET_PATH.trim_start_matches('/'));
         socket_path.exists()
     }
 }
@@ -365,7 +367,9 @@ impl CriORuntime {
 
     /// Checks if CRI-O socket exists (runtime is available).
     pub fn is_available(&self) -> bool {
-        let socket_path = self.host_root.join(Self::SOCKET_PATH.trim_start_matches('/'));
+        let socket_path = self
+            .host_root
+            .join(Self::SOCKET_PATH.trim_start_matches('/'));
         socket_path.exists()
     }
 }
@@ -530,7 +534,9 @@ pub fn detect_runtime() -> Option<Box<dyn ContainerRuntime>> {
 /// let pid = runtime.resolve_pid("containerd://abc123")?;
 /// # Ok::<(), panoptes_common::error::RuntimeError>(())
 /// ```
-pub fn runtime_for_container(container_id: &str) -> Result<Box<dyn ContainerRuntime>, RuntimeError> {
+pub fn runtime_for_container(
+    container_id: &str,
+) -> Result<Box<dyn ContainerRuntime>, RuntimeError> {
     match detect_runtime_type(container_id) {
         Some(RuntimeType::Containerd) => Ok(Box::new(ContainerdRuntime::new())),
         Some(RuntimeType::CriO) => Ok(Box::new(CriORuntime::new())),
@@ -745,7 +751,9 @@ mod tests {
             let path = runtime.pid_file_path("abc123");
             assert_eq!(
                 path,
-                PathBuf::from("/run/containerd/io.containerd.runtime.v2.task/k8s.io/abc123/init.pid")
+                PathBuf::from(
+                    "/run/containerd/io.containerd.runtime.v2.task/k8s.io/abc123/init.pid"
+                )
             );
         }
 

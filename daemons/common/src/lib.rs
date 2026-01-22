@@ -97,30 +97,33 @@ pub mod grpc;
 
 // Re-export environment abstraction types
 pub use capabilities::{
-    CapabilityChecker, CapabilityError, LinuxCapabilityChecker, RequiredCapability,
-    ARGUSD_REQUIRED_CAPS, ARGUSD_REQUIRED_CAPS_EBPF,
-    JANUSD_REQUIRED_CAPS, JANUSD_REQUIRED_CAPS_EBPF, JANUSD_OPTIONAL_CAPS,
-    missing_capabilities_message,
+    missing_capabilities_message, CapabilityChecker, CapabilityError, LinuxCapabilityChecker,
+    RequiredCapability, ARGUSD_REQUIRED_CAPS, ARGUSD_REQUIRED_CAPS_EBPF, JANUSD_OPTIONAL_CAPS,
+    JANUSD_REQUIRED_CAPS, JANUSD_REQUIRED_CAPS_EBPF,
 };
 pub use environment::{
-    DeploymentEnvironment, EnvironmentDetector, EnvironmentError, EnvironmentWarning,
-    Feature, LinuxEnvironmentDetector, WarningSeverity,
+    DeploymentEnvironment, EnvironmentDetector, EnvironmentError, EnvironmentWarning, Feature,
+    LinuxEnvironmentDetector, WarningSeverity,
 };
 pub use paths::{LinuxPathProvider, PathProvider, RuntimeType as PathRuntimeType};
 
 // Re-export commonly used types from core modules
 pub use container_runtime::{
-    ContainerRuntime, ContainerdRuntime, CriORuntime, RuntimeType,
-    detect_runtime, detect_runtime_type, runtime_for_container,
+    detect_runtime, detect_runtime_type, runtime_for_container, ContainerRuntime,
+    ContainerdRuntime, CriORuntime, RuntimeType,
 };
-pub use error::{CommonError, RuntimeError, ProcError, SecurityError};
+pub use error::{CommonError, ProcError, RuntimeError, SecurityError};
 pub use glog::GlogLayer;
 pub use proc::{ProcessInfo, ProcessResolver, ProcfsProcessResolver};
 
 // Re-export daemon infrastructure types
 pub use broadcast::{EventBroadcaster, Filterable, StreamFilter};
-pub use metrics::{AggregateTotals, BasicMetrics, DaemonMetrics, MetricsAggregator, MetricsSnapshot};
-pub use session::{new_session_map, Session, SessionError, SessionManager, SessionMap, SessionState};
+pub use metrics::{
+    AggregateTotals, BasicMetrics, DaemonMetrics, MetricsAggregator, MetricsSnapshot,
+};
+pub use session::{
+    new_session_map, Session, SessionError, SessionManager, SessionMap, SessionState,
+};
 
 // Re-export gRPC helpers (when feature enabled)
 #[cfg(feature = "grpc")]
@@ -130,10 +133,10 @@ pub use grpc::{broadcast_stream, filtered_broadcast_stream, stream_from_iter, Gr
 pub use grpc::{basic_filtered_broadcast_stream, basic_stream_from_iter, BasicStream};
 
 // Re-export eBPF support detection (for runtime mode selection)
-pub use ebpf_support::{is_ebpf_supported, is_bpf_lsm_enabled};
+pub use ebpf_support::{is_bpf_lsm_enabled, is_ebpf_supported};
 
 // Re-export resource limit checking utilities
 pub use resource_limits::{
-    check_fd_limit, read_inotify_limits, read_fanotify_limits,
-    ResourceLimitError, ResourceLimitsInfo,
+    check_fd_limit, read_fanotify_limits, read_inotify_limits, ResourceLimitError,
+    ResourceLimitsInfo,
 };

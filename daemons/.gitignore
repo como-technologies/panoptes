@@ -1,3 +1,8 @@
+# Rust
+/target/
+target/
+**/*.rs.bk
+
 # C/C++ build artifacts
 build/
 cmake-build-*/

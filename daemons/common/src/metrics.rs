@@ -230,11 +230,7 @@ impl MetricsAggregator {
         let collectors = self.collectors.read().await;
         collectors
             .iter()
-            .filter(|c| {
-                name_filter
-                    .map(|f| c.name().starts_with(f))
-                    .unwrap_or(true)
-            })
+            .filter(|c| name_filter.map(|f| c.name().starts_with(f)).unwrap_or(true))
             .map(|c| c.snapshot())
             .collect()
     }
@@ -373,8 +369,7 @@ mod tests {
             .await;
         agg.register(Arc::new(BasicMetrics::new("watcher-bar")))
             .await;
-        agg.register(Arc::new(BasicMetrics::new("other-baz")))
-            .await;
+        agg.register(Arc::new(BasicMetrics::new("other-baz"))).await;
 
         let filtered = agg.collect_filtered(Some("watcher")).await;
         assert_eq!(filtered.len(), 2);

@@ -41,8 +41,7 @@ pub struct EbpfAccessEvent {
 
 impl From<FileEvent> for EbpfAccessEvent {
     fn from(event: FileEvent) -> Self {
-        let event_type =
-            FileEventType::from_u32(event.event_type).unwrap_or(FileEventType::Access);
+        let event_type = FileEventType::from_u32(event.event_type).unwrap_or(FileEventType::Access);
 
         Self {
             event_type,

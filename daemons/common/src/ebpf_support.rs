@@ -67,7 +67,8 @@ fn check_kernel_version(required_major: u32, required_minor: u32) -> bool {
         let parts: Vec<&str> = release.trim().split('.').collect();
         if parts.len() >= 2 {
             if let (Ok(major), Ok(minor)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
-                return major > required_major || (major == required_major && minor >= required_minor);
+                return major > required_major
+                    || (major == required_major && minor >= required_minor);
             }
         }
     }

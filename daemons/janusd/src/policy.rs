@@ -351,7 +351,6 @@ impl PolicyEvaluator {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,15 +433,9 @@ mod tests {
 
     #[test]
     fn test_policy_default_response() {
-        let policy = PolicyEvaluator::with_config(
-            vec![],
-            vec![],
-            false,
-            None,
-            AccessResponse::Audit,
-            None,
-        )
-        .unwrap();
+        let policy =
+            PolicyEvaluator::with_config(vec![], vec![], false, None, AccessResponse::Audit, None)
+                .unwrap();
 
         // No patterns match, should use default (Audit)
         let result = policy.evaluate(Path::new("/any/path"), None);
@@ -508,13 +501,7 @@ mod tests {
 
         // Update to deny /etc/*
         policy
-            .update(
-                Some(vec!["/etc/*".to_string()]),
-                None,
-                None,
-                None,
-                None,
-            )
+            .update(Some(vec!["/etc/*".to_string()]), None, None, None, None)
             .unwrap();
 
         // Now should be denied
@@ -586,10 +573,7 @@ mod tests {
                 "/etc/gshadow".to_string(),
                 "/root/**".to_string(),
             ],
-            vec![
-                "/etc/*.conf".to_string(),
-                "/var/log/**".to_string(),
-            ],
+            vec!["/etc/*.conf".to_string(), "/var/log/**".to_string()],
             false,
             None,
             AccessResponse::Audit, // Default audit
@@ -598,15 +582,30 @@ mod tests {
         .unwrap();
 
         // Explicitly denied
-        assert_eq!(policy.evaluate(Path::new("/etc/shadow"), None), AccessResponse::Deny);
-        assert_eq!(policy.evaluate(Path::new("/root/secret"), None), AccessResponse::Deny);
+        assert_eq!(
+            policy.evaluate(Path::new("/etc/shadow"), None),
+            AccessResponse::Deny
+        );
+        assert_eq!(
+            policy.evaluate(Path::new("/root/secret"), None),
+            AccessResponse::Deny
+        );
 
         // Explicitly allowed
-        assert_eq!(policy.evaluate(Path::new("/etc/nginx.conf"), None), AccessResponse::Allow);
-        assert_eq!(policy.evaluate(Path::new("/var/log/syslog"), None), AccessResponse::Allow);
+        assert_eq!(
+            policy.evaluate(Path::new("/etc/nginx.conf"), None),
+            AccessResponse::Allow
+        );
+        assert_eq!(
+            policy.evaluate(Path::new("/var/log/syslog"), None),
+            AccessResponse::Allow
+        );
 
         // Default audit
-        assert_eq!(policy.evaluate(Path::new("/usr/bin/ls"), None), AccessResponse::Audit);
+        assert_eq!(
+            policy.evaluate(Path::new("/usr/bin/ls"), None),
+            AccessResponse::Audit
+        );
     }
 
     #[test]

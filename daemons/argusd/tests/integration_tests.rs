@@ -70,7 +70,10 @@ mod inotify_tests {
             event.mask.contains(AddWatchFlags::IN_CREATE),
             "Expected IN_CREATE event"
         );
-        assert_eq!(event.name.as_deref(), Some(std::ffi::OsStr::new("test_file.txt")));
+        assert_eq!(
+            event.name.as_deref(),
+            Some(std::ffi::OsStr::new("test_file.txt"))
+        );
     }
 
     /// Test that inotify can detect file modification events.
@@ -105,7 +108,9 @@ mod inotify_tests {
 
         // Verify we got a MODIFY event
         assert!(
-            events.iter().any(|e| e.mask.contains(AddWatchFlags::IN_MODIFY)),
+            events
+                .iter()
+                .any(|e| e.mask.contains(AddWatchFlags::IN_MODIFY)),
             "Expected IN_MODIFY event"
         );
     }
@@ -174,11 +179,18 @@ mod inotify_tests {
 
         // Read events
         let events = inotify.read_events().expect("Failed to read events");
-        assert!(events.len() >= 2, "Expected at least two events (MOVED_FROM and MOVED_TO)");
+        assert!(
+            events.len() >= 2,
+            "Expected at least two events (MOVED_FROM and MOVED_TO)"
+        );
 
         // Find MOVED_FROM and MOVED_TO events
-        let moved_from = events.iter().find(|e| e.mask.contains(AddWatchFlags::IN_MOVED_FROM));
-        let moved_to = events.iter().find(|e| e.mask.contains(AddWatchFlags::IN_MOVED_TO));
+        let moved_from = events
+            .iter()
+            .find(|e| e.mask.contains(AddWatchFlags::IN_MOVED_FROM));
+        let moved_to = events
+            .iter()
+            .find(|e| e.mask.contains(AddWatchFlags::IN_MOVED_TO));
 
         assert!(moved_from.is_some(), "Expected IN_MOVED_FROM event");
         assert!(moved_to.is_some(), "Expected IN_MOVED_TO event");
@@ -187,7 +199,10 @@ mod inotify_tests {
         let from_cookie = moved_from.unwrap().cookie;
         let to_cookie = moved_to.unwrap().cookie;
         assert!(from_cookie > 0, "Cookie should be non-zero");
-        assert_eq!(from_cookie, to_cookie, "Cookies should match for paired move events");
+        assert_eq!(
+            from_cookie, to_cookie,
+            "Cookies should match for paired move events"
+        );
     }
 
     /// Test that multiple watches can be established on different paths.
@@ -302,9 +317,7 @@ mod watch_config_tests {
             glob::Pattern::new(".git/**").unwrap(),
         ];
 
-        let should_ignore = |path: &str| -> bool {
-            patterns.iter().any(|p| p.matches(path))
-        };
+        let should_ignore = |path: &str| -> bool { patterns.iter().any(|p| p.matches(path)) };
 
         assert!(should_ignore("error.log"));
         assert!(should_ignore("temp.tmp"));
@@ -357,7 +370,10 @@ mod event_processing_tests {
         assert_eq!(EventType::from_str("modify"), Some(EventType::Modify));
         assert_eq!(EventType::from_str("delete"), Some(EventType::Delete));
         assert_eq!(EventType::from_str("movedFrom"), Some(EventType::MovedFrom));
-        assert_eq!(EventType::from_str("moved_from"), Some(EventType::MovedFrom));
+        assert_eq!(
+            EventType::from_str("moved_from"),
+            Some(EventType::MovedFrom)
+        );
         assert_eq!(EventType::from_str("invalid"), None);
     }
 
@@ -366,9 +382,8 @@ mod event_processing_tests {
     fn test_event_filtering() {
         let allowed_events = vec![EventType::Create, EventType::Delete];
 
-        let should_include = |event_type: EventType| -> bool {
-            allowed_events.contains(&event_type)
-        };
+        let should_include =
+            |event_type: EventType| -> bool { allowed_events.contains(&event_type) };
 
         assert!(should_include(EventType::Create));
         assert!(should_include(EventType::Delete));

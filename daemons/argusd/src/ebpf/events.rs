@@ -26,8 +26,7 @@ pub struct EbpfFileEvent {
 
 impl From<FileEvent> for EbpfFileEvent {
     fn from(event: FileEvent) -> Self {
-        let event_type =
-            FileEventType::from_u32(event.event_type).unwrap_or(FileEventType::Modify);
+        let event_type = FileEventType::from_u32(event.event_type).unwrap_or(FileEventType::Modify);
 
         Self {
             event_type,

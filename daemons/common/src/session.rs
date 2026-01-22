@@ -387,7 +387,10 @@ mod tests {
         let session3 = create_test_session("test3");
         let result = manager.insert(session3.id.clone(), session3).await;
 
-        assert!(matches!(result, Err(SessionError::MaxSessionsReached { .. })));
+        assert!(matches!(
+            result,
+            Err(SessionError::MaxSessionsReached { .. })
+        ));
     }
 
     #[tokio::test]

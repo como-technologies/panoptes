@@ -72,7 +72,9 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum ResourceLimitError {
     /// File descriptor limit is too low for the requested operation.
-    #[error("file descriptor limit too low: {current} < {required} (adjust with: ulimit -n {required})")]
+    #[error(
+        "file descriptor limit too low: {current} < {required} (adjust with: ulimit -n {required})"
+    )]
     FdLimitTooLow {
         /// Current soft limit from RLIMIT_NOFILE
         current: u64,
@@ -168,10 +170,9 @@ pub fn check_fd_limit(required_fds: u64, safety_margin: u64) -> Result<u64, Reso
 /// }
 /// ```
 pub fn read_inotify_limits() -> (u64, u64) {
-    let max_user_watches = read_proc_u64("/proc/sys/fs/inotify/max_user_watches")
-        .unwrap_or(8192);
-    let max_queued_events = read_proc_u64("/proc/sys/fs/inotify/max_queued_events")
-        .unwrap_or(16384);
+    let max_user_watches = read_proc_u64("/proc/sys/fs/inotify/max_user_watches").unwrap_or(8192);
+    let max_queued_events =
+        read_proc_u64("/proc/sys/fs/inotify/max_queued_events").unwrap_or(16384);
 
     (max_user_watches, max_queued_events)
 }
@@ -181,8 +182,7 @@ pub fn read_inotify_limits() -> (u64, u64) {
 /// This controls how many separate inotify file descriptors can be created.
 /// Default is 128, which is usually sufficient.
 pub fn read_inotify_max_instances() -> u64 {
-    read_proc_u64("/proc/sys/fs/inotify/max_user_instances")
-        .unwrap_or(128)
+    read_proc_u64("/proc/sys/fs/inotify/max_user_instances").unwrap_or(128)
 }
 
 /// Read fanotify limits from /proc/sys/fs/fanotify/*.
@@ -201,10 +201,9 @@ pub fn read_inotify_max_instances() -> u64 {
 /// still work but will rely on error handling when limits are reached.
 pub fn read_fanotify_limits() -> (u64, u64) {
     // Note: These sysctls were added in relatively recent kernels
-    let max_user_marks = read_proc_u64("/proc/sys/fs/fanotify/max_user_marks")
-        .unwrap_or(8192);
-    let max_queued_events = read_proc_u64("/proc/sys/fs/fanotify/max_queued_events")
-        .unwrap_or(16384);
+    let max_user_marks = read_proc_u64("/proc/sys/fs/fanotify/max_user_marks").unwrap_or(8192);
+    let max_queued_events =
+        read_proc_u64("/proc/sys/fs/fanotify/max_queued_events").unwrap_or(16384);
 
     (max_user_marks, max_queued_events)
 }
@@ -235,8 +234,7 @@ impl ResourceLimitsInfo {
     pub fn collect() -> Self {
         use nix::sys::resource::{getrlimit, Resource};
 
-        let (fd_soft, fd_hard) = getrlimit(Resource::RLIMIT_NOFILE)
-            .unwrap_or((0, 0));
+        let (fd_soft, fd_hard) = getrlimit(Resource::RLIMIT_NOFILE).unwrap_or((0, 0));
 
         let (inotify_max_watches, inotify_max_queued) = read_inotify_limits();
         let inotify_max_instances = read_inotify_max_instances();
@@ -271,8 +269,8 @@ impl ResourceLimitsInfo {
 /// Read a u64 value from a /proc file.
 fn read_proc_u64(path: impl AsRef<Path>) -> Result<u64, ResourceLimitError> {
     let path = path.as_ref();
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| ResourceLimitError::ProcReadFailed {
+    let content =
+        std::fs::read_to_string(path).map_err(|e| ResourceLimitError::ProcReadFailed {
             path: path.display().to_string(),
             source: e,
         })?;
@@ -282,10 +280,7 @@ fn read_proc_u64(path: impl AsRef<Path>) -> Result<u64, ResourceLimitError> {
         .parse()
         .map_err(|_| ResourceLimitError::ProcReadFailed {
             path: path.display().to_string(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "failed to parse as u64",
-            ),
+            source: std::io::Error::new(std::io::ErrorKind::InvalidData, "failed to parse as u64"),
         })
 }
 

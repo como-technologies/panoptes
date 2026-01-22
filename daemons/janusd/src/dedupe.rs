@@ -132,7 +132,8 @@ impl DedupeCache {
             self.entries.pop_front();
         }
 
-        self.entries.push_back(DedupeEntry::new(path, pid, response));
+        self.entries
+            .push_back(DedupeEntry::new(path, pid, response));
     }
 
     /// Check and record in a single operation.
@@ -171,7 +172,6 @@ impl DedupeCache {
         self.entries.clear();
     }
 }
-
 
 #[cfg(test)]
 mod tests {

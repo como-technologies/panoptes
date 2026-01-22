@@ -6,12 +6,12 @@
 use aya::{
     maps::{HashMap, RingBuf},
     programs::{Lsm, TracePoint},
-    Ebpf, EbpfLoader as AyaEbpfLoader, Btf,
+    Btf, Ebpf, EbpfLoader as AyaEbpfLoader,
 };
 use aya_log::EbpfLogger;
 use thiserror::Error;
 use tokio::sync::mpsc;
-use tracing::{info, warn, error, debug};
+use tracing::{debug, error, info, warn};
 
 use panoptes_ebpf_types::{FileEvent, ProcessCacheEntry};
 
@@ -134,8 +134,7 @@ impl EbpfLoader {
         info!(programs = ?programs, "Loading eBPF programs");
 
         // Load BTF from sysfs
-        let btf = Btf::from_sys_fs()
-            .map_err(|e| EbpfError::Load(aya::EbpfError::BtfError(e)))?;
+        let btf = Btf::from_sys_fs().map_err(|e| EbpfError::Load(aya::EbpfError::BtfError(e)))?;
 
         let mut ebpf = AyaEbpfLoader::new()
             .btf(Some(&btf))
@@ -152,7 +151,10 @@ impl EbpfLoader {
             Self::attach_lsm_program(&mut ebpf, &btf, program_name)?;
         }
 
-        info!(count = programs.len(), "eBPF programs attached successfully");
+        info!(
+            count = programs.len(),
+            "eBPF programs attached successfully"
+        );
 
         // Create event channel (buffer 1024 events)
         let (event_tx, event_rx) = mpsc::channel(1024);
@@ -233,9 +235,8 @@ impl EbpfLoader {
                     let data = item.as_ref();
                     if data.len() >= std::mem::size_of::<FileEvent>() {
                         // Safety: FileEvent is repr(C) and we checked the size
-                        let event = unsafe {
-                            std::ptr::read_unaligned(data.as_ptr() as *const FileEvent)
-                        };
+                        let event =
+                            unsafe { std::ptr::read_unaligned(data.as_ptr() as *const FileEvent) };
 
                         // Use blocking send since we're in spawn_blocking
                         if tx.blocking_send(event).is_err() {
@@ -305,7 +306,11 @@ impl EbpfLoader {
         map.insert(0, if enabled { 1 } else { 0 }, 0)
             .map_err(|e| EbpfError::Map(format!("Failed to update FILTER_ENABLED: {}", e)))?;
 
-        info!(enabled = enabled, "In-kernel filtering {}", if enabled { "enabled" } else { "disabled" });
+        info!(
+            enabled = enabled,
+            "In-kernel filtering {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
         Ok(())
     }
 
@@ -442,8 +447,9 @@ impl EbpfLoader {
         let len = bytes.len().min(256);
         key[..len].copy_from_slice(&bytes[..len]);
 
-        map.remove(&key)
-            .map_err(|e| EbpfError::Map(format!("Failed to remove ignored path '{}': {}", path, e)))?;
+        map.remove(&key).map_err(|e| {
+            EbpfError::Map(format!("Failed to remove ignored path '{}': {}", path, e))
+        })?;
 
         debug!(path = path, "Removed path from kernel ignore list");
         Ok(())
@@ -463,11 +469,19 @@ impl EbpfLoader {
     ///
     /// This does NOT clear existing entries - it only adds. For a full sync,
     /// use with set_filter_enabled(false), clear, add all, set_filter_enabled(true).
-    pub fn sync_watched_prefixes(&mut self, prefixes: &[&str], map_name: &str) -> Result<(), EbpfError> {
+    pub fn sync_watched_prefixes(
+        &mut self,
+        prefixes: &[&str],
+        map_name: &str,
+    ) -> Result<(), EbpfError> {
         for prefix in prefixes {
             self.add_watched_prefix(prefix, map_name)?;
         }
-        info!(count = prefixes.len(), map = map_name, "Synced watched prefixes to kernel filter");
+        info!(
+            count = prefixes.len(),
+            map = map_name,
+            "Synced watched prefixes to kernel filter"
+        );
         Ok(())
     }
 
@@ -569,15 +583,17 @@ impl EbpfLoader {
     pub fn attach_process_tracepoints(&mut self) -> Result<(), EbpfError> {
         // Attach sched_process_exec
         if let Some(prog) = self.ebpf.program_mut("sched_process_exec") {
-            let prog: &mut TracePoint = prog
-                .try_into()
-                .map_err(|e| EbpfError::Attach(format!("sched_process_exec is not a tracepoint: {}", e)))?;
+            let prog: &mut TracePoint = prog.try_into().map_err(|e| {
+                EbpfError::Attach(format!("sched_process_exec is not a tracepoint: {}", e))
+            })?;
 
-            prog.load()
-                .map_err(|e| EbpfError::Attach(format!("Failed to load sched_process_exec: {}", e)))?;
+            prog.load().map_err(|e| {
+                EbpfError::Attach(format!("Failed to load sched_process_exec: {}", e))
+            })?;
 
-            prog.attach("sched", "sched_process_exec")
-                .map_err(|e| EbpfError::Attach(format!("Failed to attach sched_process_exec: {}", e)))?;
+            prog.attach("sched", "sched_process_exec").map_err(|e| {
+                EbpfError::Attach(format!("Failed to attach sched_process_exec: {}", e))
+            })?;
 
             debug!("Attached sched_process_exec tracepoint");
         } else {
@@ -586,15 +602,17 @@ impl EbpfLoader {
 
         // Attach sched_process_exit
         if let Some(prog) = self.ebpf.program_mut("sched_process_exit") {
-            let prog: &mut TracePoint = prog
-                .try_into()
-                .map_err(|e| EbpfError::Attach(format!("sched_process_exit is not a tracepoint: {}", e)))?;
+            let prog: &mut TracePoint = prog.try_into().map_err(|e| {
+                EbpfError::Attach(format!("sched_process_exit is not a tracepoint: {}", e))
+            })?;
 
-            prog.load()
-                .map_err(|e| EbpfError::Attach(format!("Failed to load sched_process_exit: {}", e)))?;
+            prog.load().map_err(|e| {
+                EbpfError::Attach(format!("Failed to load sched_process_exit: {}", e))
+            })?;
 
-            prog.attach("sched", "sched_process_exit")
-                .map_err(|e| EbpfError::Attach(format!("Failed to attach sched_process_exit: {}", e)))?;
+            prog.attach("sched", "sched_process_exit").map_err(|e| {
+                EbpfError::Attach(format!("Failed to attach sched_process_exit: {}", e))
+            })?;
 
             debug!("Attached sched_process_exit tracepoint");
         } else {
@@ -635,7 +653,10 @@ impl EbpfLoader {
         match map.get(&tgid, 0) {
             Ok(entry) => Ok(Some(entry)),
             Err(aya::maps::MapError::KeyNotFound) => Ok(None),
-            Err(e) => Err(EbpfError::Map(format!("Failed to lookup process {}: {}", tgid, e))),
+            Err(e) => Err(EbpfError::Map(format!(
+                "Failed to lookup process {}: {}",
+                tgid, e
+            ))),
         }
     }
 

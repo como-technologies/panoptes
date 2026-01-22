@@ -9,21 +9,28 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use tonic::transport::Server;
-use tonic_health::server::health_reporter;
 use panoptes_common::{
-    GlogLayer,
-    // Environment abstraction
-    EnvironmentDetector, LinuxEnvironmentDetector, Feature, WarningSeverity,
-    // Capability checking
-    CapabilityChecker, LinuxCapabilityChecker, JANUSD_REQUIRED_CAPS,
-    missing_capabilities_message,
     // Resource limit checking
-    check_fd_limit, read_fanotify_limits, ResourceLimitsInfo,
+    check_fd_limit,
+    missing_capabilities_message,
+    read_fanotify_limits,
+    // Capability checking
+    CapabilityChecker,
+    // Environment abstraction
+    EnvironmentDetector,
+    Feature,
+    GlogLayer,
+    LinuxCapabilityChecker,
+    LinuxEnvironmentDetector,
+    ResourceLimitsInfo,
+    WarningSeverity,
+    JANUSD_REQUIRED_CAPS,
 };
 #[cfg(feature = "ebpf")]
-use panoptes_common::{is_ebpf_supported, is_bpf_lsm_enabled, JANUSD_REQUIRED_CAPS_EBPF};
-use tracing::{info, warn, error, Level};
+use panoptes_common::{is_bpf_lsm_enabled, is_ebpf_supported, JANUSD_REQUIRED_CAPS_EBPF};
+use tonic::transport::Server;
+use tonic_health::server::health_reporter;
+use tracing::{error, info, warn, Level};
 use tracing_subscriber::prelude::*;
 
 mod audit;
@@ -169,7 +176,9 @@ fn detect_runtime_mode(config: &Config, cap_checker: &LinuxCapabilityChecker) ->
 #[cfg(not(feature = "ebpf"))]
 fn detect_runtime_mode(config: &Config, _cap_checker: &LinuxCapabilityChecker) -> RuntimeMode {
     if config.mode.to_lowercase() == "ebpf" {
-        warn!("eBPF mode requested but binary compiled without eBPF support - using traditional mode");
+        warn!(
+            "eBPF mode requested but binary compiled without eBPF support - using traditional mode"
+        );
     }
     RuntimeMode::Traditional
 }
@@ -266,7 +275,10 @@ async fn main() -> Result<()> {
         );
         anyhow::bail!("Insufficient file descriptor limit - daemon cannot start safely");
     }
-    info!(max_guards = config.max_guards, "File descriptor limit verified");
+    info!(
+        max_guards = config.max_guards,
+        "File descriptor limit verified"
+    );
 
     // Check fanotify-specific limits
     let (max_user_marks, max_queued_events) = read_fanotify_limits();
@@ -309,7 +321,9 @@ async fn main() -> Result<()> {
         }
         RuntimeMode::Traditional => {
             info!("Traditional mode: fanotify-based file access auditing");
-            info!("Process info via /proc lookups (TOCTOU race possible for short-lived processes)");
+            info!(
+                "Process info via /proc lookups (TOCTOU race possible for short-lived processes)"
+            );
             "traditional (fanotify)"
         }
     };
@@ -353,13 +367,17 @@ async fn main() -> Result<()> {
         health_reporter
             .set_serving::<proto::janusd_service_server::JanusdServiceServer<Arc<service_ebpf::JanusdServiceImpl>>>()
             .await;
-        health_reporter.set_service_status(SERVICE_NAME, tonic_health::ServingStatus::Serving).await;
+        health_reporter
+            .set_service_status(SERVICE_NAME, tonic_health::ServingStatus::Serving)
+            .await;
 
         info!(addr = %listen_addr, "Starting gRPC server (v2)");
 
         Server::builder()
             .add_service(health_service)
-            .add_service(proto::janusd_service_server::JanusdServiceServer::from_arc(janusd_service))
+            .add_service(proto::janusd_service_server::JanusdServiceServer::from_arc(
+                janusd_service,
+            ))
             .serve(listen_addr)
             .await?;
     } else {
@@ -374,13 +392,17 @@ async fn main() -> Result<()> {
         health_reporter
             .set_serving::<proto::janusd_service_server::JanusdServiceServer<Arc<service::JanusdServiceImpl>>>()
             .await;
-        health_reporter.set_service_status(SERVICE_NAME, tonic_health::ServingStatus::Serving).await;
+        health_reporter
+            .set_service_status(SERVICE_NAME, tonic_health::ServingStatus::Serving)
+            .await;
 
         info!(addr = %listen_addr, "Starting gRPC server (v2)");
 
         Server::builder()
             .add_service(health_service)
-            .add_service(proto::janusd_service_server::JanusdServiceServer::from_arc(janusd_service))
+            .add_service(proto::janusd_service_server::JanusdServiceServer::from_arc(
+                janusd_service,
+            ))
             .serve(listen_addr)
             .await?;
     }
@@ -398,13 +420,17 @@ async fn main() -> Result<()> {
         health_reporter
             .set_serving::<proto::janusd_service_server::JanusdServiceServer<Arc<service::JanusdServiceImpl>>>()
             .await;
-        health_reporter.set_service_status(SERVICE_NAME, tonic_health::ServingStatus::Serving).await;
+        health_reporter
+            .set_service_status(SERVICE_NAME, tonic_health::ServingStatus::Serving)
+            .await;
 
         info!(addr = %listen_addr, "Starting gRPC server (v2)");
 
         Server::builder()
             .add_service(health_service)
-            .add_service(proto::janusd_service_server::JanusdServiceServer::from_arc(janusd_service))
+            .add_service(proto::janusd_service_server::JanusdServiceServer::from_arc(
+                janusd_service,
+            ))
             .serve(listen_addr)
             .await?;
     }

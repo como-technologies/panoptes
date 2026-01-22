@@ -1,0 +1,123 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: panoptes-assess
+  namespace: panoptes-system
+  labels:
+    app.kubernetes.io/name: panoptes-assess
+    app.kubernetes.io/part-of: panoptes
+spec:
+  ttlSecondsAfterFinished: 3600  # Clean up after 1 hour
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: panoptes-assess
+        app.kubernetes.io/part-of: panoptes
+    spec:
+      serviceAccountName: panoptes-assess
+      restartPolicy: Never
+      containers:
+        - name: assess
+          image: bitnami/kubectl:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              # Download and run assessment script
+              # In production, this would be baked into a custom image
+
+              echo "=========================================="
+              echo "Panoptes Compliance Assessment"
+              echo "=========================================="
+              echo ""
+
+              # Install jq if not present
+              if ! command -v jq &> /dev/null; then
+                echo "Note: jq not available, using basic parsing"
+              fi
+
+              # Run inline assessment (simplified version for Job)
+              TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+              CLUSTER=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace 2>/dev/null || echo "unknown")
+
+              echo "Timestamp: $TIMESTAMP"
+              echo "Scanning cluster..."
+              echo ""
+
+              # Get namespaces (exclude system)
+              NAMESPACES=$(kubectl get namespaces -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | grep -vE '^(kube-system|kube-public|kube-node-lease)$')
+              NS_COUNT=$(echo "$NAMESPACES" | wc -l)
+              echo "Namespaces to scan: $NS_COUNT"
+              echo ""
+
+              # Detection patterns
+              PCI_PATTERN="payment|stripe|checkout|card|billing"
+              HIPAA_PATTERN="health|patient|medical|ehr|fhir"
+              GDPR_PATTERN="gdpr|privacy|consent|pii"
+              DB_PATTERN="postgres|mysql|mongodb|redis"
+
+              echo "## Workload Analysis"
+              echo ""
+
+              for ns in $NAMESPACES; do
+                PODS=$(kubectl get pods -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}|{.spec.containers[*].image}{"\n"}{end}' 2>/dev/null)
+
+                echo "$PODS" | while IFS='|' read -r pod images; do
+                  [ -z "$pod" ] && continue
+
+                  FRAMEWORKS=""
+
+                  if echo "$pod $images" | grep -qiE "$PCI_PATTERN"; then
+                    FRAMEWORKS="${FRAMEWORKS}pci-dss,"
+                  fi
+                  if echo "$pod $images" | grep -qiE "$HIPAA_PATTERN"; then
+                    FRAMEWORKS="${FRAMEWORKS}hipaa,"
+                  fi
+                  if echo "$pod $images" | grep -qiE "$GDPR_PATTERN"; then
+                    FRAMEWORKS="${FRAMEWORKS}gdpr,"
+                  fi
+                  if echo "$images" | grep -qiE "$DB_PATTERN"; then
+                    FRAMEWORKS="${FRAMEWORKS}base-security,"
+                  fi
+
+                  if [ -n "$FRAMEWORKS" ]; then
+                    FRAMEWORKS="${FRAMEWORKS%,}"
+                    echo "- $pod (ns: $ns) -> $FRAMEWORKS"
+                  fi
+                done
+              done
+
+              echo ""
+              echo "## Existing Panoptes Resources"
+              echo ""
+
+              AW_COUNT=$(kubectl get arguswatchers -A --no-headers 2>/dev/null | wc -l || echo 0)
+              JG_COUNT=$(kubectl get janusguards -A --no-headers 2>/dev/null | wc -l || echo 0)
+
+              echo "ArgusWatchers: $AW_COUNT"
+              echo "JanusGuards: $JG_COUNT"
+
+              if [ "$AW_COUNT" -gt 0 ]; then
+                echo ""
+                echo "ArgusWatchers:"
+                kubectl get arguswatchers -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,COMPLIANCE:.metadata.labels.compliance' 2>/dev/null
+              fi
+
+              if [ "$JG_COUNT" -gt 0 ]; then
+                echo ""
+                echo "JanusGuards:"
+                kubectl get janusguards -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,COMPLIANCE:.metadata.labels.compliance,ENFORCING:.spec.enforcing' 2>/dev/null
+              fi
+
+              echo ""
+              echo "=========================================="
+              echo "Assessment complete"
+              echo "=========================================="
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

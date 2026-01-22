@@ -13,7 +13,75 @@
 #   docker build -f daemons/janusd/Dockerfile --build-arg FEATURES=ebpf -t janusd:latest .
 
 # ============================================================================
-# Stage 1: eBPF bytecode builder (only used when FEATURES contains "ebpf")
+# Stage 1: Chef planner (generates recipe.json for dependency caching)
+# ============================================================================
+FROM rust:1.86-alpine AS planner
+
+RUN apk add --no-cache musl-dev && cargo install cargo-chef --locked
+
+WORKDIR /build
+
+# Copy only what's needed for dependency resolution
+COPY proto/ ./proto/
+COPY daemons/common/ ./daemons/common/
+COPY daemons/janusd/Cargo.toml daemons/janusd/Cargo.lock ./daemons/janusd/
+COPY daemons/janusd/build.rs ./daemons/janusd/
+
+# Create dummy src to satisfy cargo
+RUN mkdir -p daemons/janusd/src daemons/janusd/benches && \
+    echo "fn main() {}" > daemons/janusd/src/main.rs && \
+    echo "fn main() {}" > daemons/janusd/benches/policy_evaluation.rs
+
+WORKDIR /build/daemons/janusd
+RUN cargo chef prepare --recipe-path recipe.json
+
+# ============================================================================
+# Stage 2: Chef cook (builds and caches dependencies)
+# ============================================================================
+FROM rust:1.86-alpine AS cacher
+
+ARG TARGETARCH
+
+RUN apk add --no-cache musl-dev protobuf-dev && \
+    cargo install cargo-chef --locked && \
+    if [ "$TARGETARCH" = "arm64" ]; then \
+      rustup target add aarch64-unknown-linux-musl; \
+    else \
+      rustup target add x86_64-unknown-linux-musl; \
+    fi
+
+WORKDIR /build
+
+# Copy proto files (needed for build.rs)
+COPY proto/ ./proto/
+
+# Copy common crate
+COPY daemons/common/ ./daemons/common/
+
+# Copy recipe from planner
+COPY --from=planner /build/daemons/janusd/recipe.json ./daemons/janusd/recipe.json
+
+# Copy build.rs for proto generation
+COPY daemons/janusd/build.rs ./daemons/janusd/
+
+# Create dummy src and bench files (cargo chef cook needs valid project structure)
+RUN mkdir -p daemons/janusd/src daemons/janusd/benches && \
+    echo "fn main() {}" > daemons/janusd/src/main.rs && \
+    echo "fn main() {}" > daemons/janusd/benches/policy_evaluation.rs
+
+ARG FEATURES=""
+
+# Cook dependencies (this layer is cached if dependencies don't change)
+RUN RUST_TARGET=$(if [ "$TARGETARCH" = "arm64" ]; then echo "aarch64-unknown-linux-musl"; else echo "x86_64-unknown-linux-musl"; fi) && \
+    cd daemons/janusd && \
+    if [ -n "$FEATURES" ]; then \
+      cargo chef cook --release --target $RUST_TARGET --features "$FEATURES" --recipe-path recipe.json; \
+    else \
+      cargo chef cook --release --target $RUST_TARGET --recipe-path recipe.json; \
+    fi
+
+# ============================================================================
+# Stage 3: eBPF bytecode builder (only used when FEATURES contains "ebpf")
 # ============================================================================
 FROM rust:1.86-bookworm AS ebpf-builder
 
@@ -47,7 +115,7 @@ RUN if echo "$FEATURES" | grep -q "ebpf"; then \
     fi
 
 # ============================================================================
-# Stage 2: Userspace binary builder (musl for static linking)
+# Stage 4: Userspace binary builder (uses cached dependencies)
 # ============================================================================
 FROM rust:1.86-alpine AS builder
 
@@ -72,12 +140,16 @@ COPY proto/ ./proto/
 # Copy shared libraries
 COPY daemons/common/ ./daemons/common/
 
+# Copy cached dependencies from cacher stage
+COPY --from=cacher /build/daemons/janusd/target ./daemons/janusd/target
+COPY --from=cacher /usr/local/cargo/registry /usr/local/cargo/registry
+
 # Copy daemon source
 COPY daemons/janusd/ ./daemons/janusd/
 
 ARG FEATURES=""
 
-# Build static binary with musl (architecture-aware)
+# Build static binary with musl (architecture-aware) - deps are cached
 RUN RUST_TARGET=$(if [ "$TARGETARCH" = "arm64" ]; then echo "aarch64-unknown-linux-musl"; else echo "x86_64-unknown-linux-musl"; fi) && \
     cd daemons/janusd && \
     if [ -n "$FEATURES" ]; then \
@@ -87,7 +159,7 @@ RUN RUST_TARGET=$(if [ "$TARGETARCH" = "arm64" ]; then echo "aarch64-unknown-lin
     fi
 
 # ============================================================================
-# Stage 3: Minimal runtime (FROM scratch)
+# Stage 5: Minimal runtime (FROM scratch)
 # ============================================================================
 FROM scratch
 

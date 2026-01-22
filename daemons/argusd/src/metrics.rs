@@ -199,13 +199,34 @@ impl DaemonMetrics for WatcherMetrics {
         }
 
         // Add inotify-specific metrics
-        custom.insert("watches_active".to_string(), self.watches_active.load(Ordering::Relaxed));
-        custom.insert("watches_created".to_string(), self.watches_created.load(Ordering::Relaxed));
-        custom.insert("watches_removed".to_string(), self.watches_removed.load(Ordering::Relaxed));
-        custom.insert("queue_overflows".to_string(), self.queue_overflows.load(Ordering::Relaxed));
-        custom.insert("move_pairs_matched".to_string(), self.move_pairs_matched.load(Ordering::Relaxed));
-        custom.insert("move_pairs_timeout".to_string(), self.move_pairs_timeout.load(Ordering::Relaxed));
-        custom.insert("uptime_seconds".to_string(), self.start_time.elapsed().as_secs());
+        custom.insert(
+            "watches_active".to_string(),
+            self.watches_active.load(Ordering::Relaxed),
+        );
+        custom.insert(
+            "watches_created".to_string(),
+            self.watches_created.load(Ordering::Relaxed),
+        );
+        custom.insert(
+            "watches_removed".to_string(),
+            self.watches_removed.load(Ordering::Relaxed),
+        );
+        custom.insert(
+            "queue_overflows".to_string(),
+            self.queue_overflows.load(Ordering::Relaxed),
+        );
+        custom.insert(
+            "move_pairs_matched".to_string(),
+            self.move_pairs_matched.load(Ordering::Relaxed),
+        );
+        custom.insert(
+            "move_pairs_timeout".to_string(),
+            self.move_pairs_timeout.load(Ordering::Relaxed),
+        );
+        custom.insert(
+            "uptime_seconds".to_string(),
+            self.start_time.elapsed().as_secs(),
+        );
 
         MetricsSnapshot {
             name: self.watcher_name.clone(),

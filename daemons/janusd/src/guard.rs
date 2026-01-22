@@ -153,7 +153,9 @@ pub enum GuardError {
     /// - Increase max_marks_per_guard in guard config
     /// - Increase kernel limit: sysctl -w fs.fanotify.max_user_marks=65536
     /// - Reduce the number of containers per guard
-    #[error("maximum fanotify marks ({max_marks}) exceeded for this guard (active: {marks_active})")]
+    #[error(
+        "maximum fanotify marks ({max_marks}) exceeded for this guard (active: {marks_active})"
+    )]
     MaxMarksExceeded {
         max_marks: usize,
         marks_active: usize,
@@ -254,7 +256,10 @@ impl Guard {
     /// Returns `GuardError::Fanotify` if fanotify_init() fails. Common causes:
     /// - Missing `CAP_SYS_ADMIN` capability
     /// - Kernel doesn't support fanotify
-    pub fn new(config: GuardConfig, metrics: Option<Arc<GuardMetrics>>) -> Result<Self, GuardError> {
+    pub fn new(
+        config: GuardConfig,
+        metrics: Option<Arc<GuardMetrics>>,
+    ) -> Result<Self, GuardError> {
         // Initialize fanotify with appropriate flags
         // FAN_CLASS_CONTENT: Receive permission events for content access
         // FAN_CLASS_NOTIF: Notification only, no permission events
@@ -378,10 +383,7 @@ impl Guard {
     /// Permission responses MUST be written promptly. The kernel blocks the
     /// accessing process until a response is received. Slow responses will
     /// cause applications to hang.
-    pub async fn guard(
-        &self,
-        tx: mpsc::Sender<AccessEvent>,
-    ) -> Result<(), GuardError> {
+    pub async fn guard(&self, tx: mpsc::Sender<AccessEvent>) -> Result<(), GuardError> {
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
 
@@ -451,15 +453,14 @@ impl Guard {
                                 Response::FAN_ALLOW
                             };
 
-                            let response = FanotifyResponse::new(fd.as_fd(), response_type);
-
                             // Retry loop for permission response
                             const MAX_RETRIES: u32 = 3;
                             const RETRY_DELAY_MICROS: u64 = 100;
                             let mut write_success = false;
 
                             for attempt in 0..MAX_RETRIES {
-                                match self.fanotify.write_response(response.clone()) {
+                                let response = FanotifyResponse::new(fd.as_fd(), response_type);
+                                match self.fanotify.write_response(response) {
                                     Ok(()) => {
                                         write_success = true;
                                         break;
@@ -471,7 +472,7 @@ impl Guard {
                                         }
                                         if attempt < MAX_RETRIES - 1 {
                                             std::thread::sleep(std::time::Duration::from_micros(
-                                                RETRY_DELAY_MICROS * (attempt as u64 + 1)
+                                                RETRY_DELAY_MICROS * (attempt as u64 + 1),
                                             ));
                                         }
                                     }
@@ -546,8 +547,20 @@ impl Guard {
         for event in &self.config.events {
             mask |= match event.to_lowercase().as_str() {
                 // For access/open, use _PERM variants when enforcing to enable blocking
-                "access" => if use_perm { MaskFlags::FAN_ACCESS_PERM } else { MaskFlags::FAN_ACCESS },
-                "open" => if use_perm { MaskFlags::FAN_OPEN_PERM } else { MaskFlags::FAN_OPEN },
+                "access" => {
+                    if use_perm {
+                        MaskFlags::FAN_ACCESS_PERM
+                    } else {
+                        MaskFlags::FAN_ACCESS
+                    }
+                }
+                "open" => {
+                    if use_perm {
+                        MaskFlags::FAN_OPEN_PERM
+                    } else {
+                        MaskFlags::FAN_OPEN
+                    }
+                }
                 // Explicit _perm variants always use permission events
                 "open_perm" => MaskFlags::FAN_OPEN_PERM,
                 "access_perm" => MaskFlags::FAN_ACCESS_PERM,
@@ -556,11 +569,19 @@ impl Guard {
                 "close_nowrite" => MaskFlags::FAN_CLOSE_NOWRITE,
                 "modify" => MaskFlags::FAN_MODIFY,
                 // Convenience aliases
-                "all" => if use_perm {
-                    MaskFlags::FAN_ACCESS_PERM | MaskFlags::FAN_OPEN_PERM | MaskFlags::FAN_CLOSE | MaskFlags::FAN_MODIFY
-                } else {
-                    MaskFlags::FAN_ACCESS | MaskFlags::FAN_OPEN | MaskFlags::FAN_CLOSE | MaskFlags::FAN_MODIFY
-                },
+                "all" => {
+                    if use_perm {
+                        MaskFlags::FAN_ACCESS_PERM
+                            | MaskFlags::FAN_OPEN_PERM
+                            | MaskFlags::FAN_CLOSE
+                            | MaskFlags::FAN_MODIFY
+                    } else {
+                        MaskFlags::FAN_ACCESS
+                            | MaskFlags::FAN_OPEN
+                            | MaskFlags::FAN_CLOSE
+                            | MaskFlags::FAN_MODIFY
+                    }
+                }
                 "all_perm" => MaskFlags::FAN_OPEN_PERM | MaskFlags::FAN_ACCESS_PERM,
                 _ => MaskFlags::empty(),
             };
@@ -625,7 +646,9 @@ impl Guard {
         AccessEvent {
             event_type: event_type.to_string(),
             path,
-            is_dir: std::fs::metadata(&raw_path).map(|m| m.is_dir()).unwrap_or(false),
+            is_dir: std::fs::metadata(&raw_path)
+                .map(|m| m.is_dir())
+                .unwrap_or(false),
             pid,
             response,
             matched_pattern,
@@ -686,18 +709,12 @@ mod tests {
 
     #[test]
     fn test_strip_container_prefix_root_only() {
-        assert_eq!(
-            Guard::strip_container_prefix("/proc/12345/root"),
-            "/"
-        );
+        assert_eq!(Guard::strip_container_prefix("/proc/12345/root"), "/");
     }
 
     #[test]
     fn test_strip_container_prefix_no_prefix() {
-        assert_eq!(
-            Guard::strip_container_prefix("/etc/shadow"),
-            "/etc/shadow"
-        );
+        assert_eq!(Guard::strip_container_prefix("/etc/shadow"), "/etc/shadow");
     }
 
     #[test]

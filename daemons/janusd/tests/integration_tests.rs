@@ -120,10 +120,10 @@ mod policy_evaluation_tests {
         // Test: Allow specific patterns, deny by default (via default_response)
         // No deny patterns - just rely on default_response being Deny
         let evaluator = TestPolicyEvaluator::new(
-            &[],  // No deny patterns
-            &["**/*.txt", "**/*.log", "/tmp/**"],  // Only allow these
+            &[],                                  // No deny patterns
+            &["**/*.txt", "**/*.log", "/tmp/**"], // Only allow these
             false,
-            AccessResponse::Deny,  // Default is deny
+            AccessResponse::Deny, // Default is deny
         );
 
         // These should be allowed by the allow patterns
@@ -150,7 +150,7 @@ mod policy_evaluation_tests {
     fn test_policy_deny_takes_precedence() {
         let evaluator = TestPolicyEvaluator::new(
             &["*.secret"],
-            &["*.txt", "*.secret"],  // Allow pattern also matches .secret
+            &["*.txt", "*.secret"], // Allow pattern also matches .secret
             false,
             AccessResponse::Allow,
         );
@@ -169,9 +169,9 @@ mod policy_evaluation_tests {
     #[test]
     fn test_policy_auto_allow_owner() {
         let mut evaluator = TestPolicyEvaluator::new(
-            &["*"],  // Deny all
+            &["*"], // Deny all
             &[],
-            true,  // Enable auto_allow_owner
+            true, // Enable auto_allow_owner
             AccessResponse::Deny,
         );
 
@@ -206,11 +206,7 @@ mod policy_evaluation_tests {
                 "**/node_modules/**",
                 "**/*.env",
             ],
-            &[
-                "/etc/passwd",
-                "/home/**/*.txt",
-                "/tmp/**",
-            ],
+            &["/etc/passwd", "/home/**/*.txt", "/tmp/**"],
             false,
             AccessResponse::Deny,
         );
@@ -284,16 +280,12 @@ mod deduplication_tests {
             }
         }
 
-        fn check_and_record(
-            &mut self,
-            path: &Path,
-            pid: i32,
-            response: AccessResponse,
-        ) -> bool {
+        fn check_and_record(&mut self, path: &Path, pid: i32, response: AccessResponse) -> bool {
             let now = Instant::now();
 
             // Clean expired entries
-            self.entries.retain(|(_, _, _, time)| now.duration_since(*time) < self.window);
+            self.entries
+                .retain(|(_, _, _, time)| now.duration_since(*time) < self.window);
 
             // Check for duplicate
             let is_duplicate = self.entries.iter().any(|(p, id, r, time)| {
@@ -303,12 +295,12 @@ mod deduplication_tests {
             if !is_duplicate {
                 // Record this event
                 if self.entries.len() >= self.max_entries {
-                    self.entries.remove(0);  // Remove oldest
+                    self.entries.remove(0); // Remove oldest
                 }
                 self.entries.push((path.to_path_buf(), pid, response, now));
-                true  // Not a duplicate
+                true // Not a duplicate
             } else {
-                false  // Is a duplicate
+                false // Is a duplicate
             }
         }
 
@@ -321,11 +313,8 @@ mod deduplication_tests {
     fn test_dedupe_first_event_not_duplicate() {
         let mut cache = TestDedupeCache::new(64, Duration::from_millis(100));
 
-        let result = cache.check_and_record(
-            Path::new("/app/file.txt"),
-            1234,
-            AccessResponse::Allow,
-        );
+        let result =
+            cache.check_and_record(Path::new("/app/file.txt"), 1234, AccessResponse::Allow);
 
         assert!(result, "First event should not be a duplicate");
     }
@@ -335,19 +324,13 @@ mod deduplication_tests {
         let mut cache = TestDedupeCache::new(64, Duration::from_millis(100));
 
         // First event
-        let result1 = cache.check_and_record(
-            Path::new("/app/file.txt"),
-            1234,
-            AccessResponse::Allow,
-        );
+        let result1 =
+            cache.check_and_record(Path::new("/app/file.txt"), 1234, AccessResponse::Allow);
         assert!(result1);
 
         // Same event immediately after
-        let result2 = cache.check_and_record(
-            Path::new("/app/file.txt"),
-            1234,
-            AccessResponse::Allow,
-        );
+        let result2 =
+            cache.check_and_record(Path::new("/app/file.txt"), 1234, AccessResponse::Allow);
         assert!(!result2, "Same event should be deduplicated");
     }
 
@@ -357,11 +340,8 @@ mod deduplication_tests {
 
         cache.check_and_record(Path::new("/app/file1.txt"), 1234, AccessResponse::Allow);
 
-        let result = cache.check_and_record(
-            Path::new("/app/file2.txt"),
-            1234,
-            AccessResponse::Allow,
-        );
+        let result =
+            cache.check_and_record(Path::new("/app/file2.txt"), 1234, AccessResponse::Allow);
 
         assert!(result, "Different path should not be a duplicate");
     }
@@ -372,11 +352,8 @@ mod deduplication_tests {
 
         cache.check_and_record(Path::new("/app/file.txt"), 1234, AccessResponse::Allow);
 
-        let result = cache.check_and_record(
-            Path::new("/app/file.txt"),
-            5678,
-            AccessResponse::Allow,
-        );
+        let result =
+            cache.check_and_record(Path::new("/app/file.txt"), 5678, AccessResponse::Allow);
 
         assert!(result, "Different PID should not be a duplicate");
     }
@@ -387,36 +364,29 @@ mod deduplication_tests {
 
         cache.check_and_record(Path::new("/app/file.txt"), 1234, AccessResponse::Allow);
 
-        let result = cache.check_and_record(
-            Path::new("/app/file.txt"),
-            1234,
-            AccessResponse::Deny,
-        );
+        let result = cache.check_and_record(Path::new("/app/file.txt"), 1234, AccessResponse::Deny);
 
         assert!(result, "Different response should not be a duplicate");
     }
 
     #[test]
     fn test_dedupe_expired_not_duplicate() {
-        let mut cache = TestDedupeCache::new(64, Duration::from_millis(10));  // Very short window
+        let mut cache = TestDedupeCache::new(64, Duration::from_millis(10)); // Very short window
 
         cache.check_and_record(Path::new("/app/file.txt"), 1234, AccessResponse::Allow);
 
         // Wait for expiration
         std::thread::sleep(Duration::from_millis(20));
 
-        let result = cache.check_and_record(
-            Path::new("/app/file.txt"),
-            1234,
-            AccessResponse::Allow,
-        );
+        let result =
+            cache.check_and_record(Path::new("/app/file.txt"), 1234, AccessResponse::Allow);
 
         assert!(result, "Expired event should not be considered duplicate");
     }
 
     #[test]
     fn test_dedupe_cache_size_limit() {
-        let mut cache = TestDedupeCache::new(3, Duration::from_secs(60));  // Small cache
+        let mut cache = TestDedupeCache::new(3, Duration::from_secs(60)); // Small cache
 
         // Fill cache
         cache.check_and_record(Path::new("/app/file1.txt"), 1, AccessResponse::Allow);
@@ -427,19 +397,11 @@ mod deduplication_tests {
         cache.check_and_record(Path::new("/app/file4.txt"), 4, AccessResponse::Allow);
 
         // First entry should be evicted
-        let result = cache.check_and_record(
-            Path::new("/app/file1.txt"),
-            1,
-            AccessResponse::Allow,
-        );
+        let result = cache.check_and_record(Path::new("/app/file1.txt"), 1, AccessResponse::Allow);
         assert!(result, "Evicted entry should not be detected as duplicate");
 
         // Recent entries should still be deduplicated
-        let result = cache.check_and_record(
-            Path::new("/app/file4.txt"),
-            4,
-            AccessResponse::Allow,
-        );
+        let result = cache.check_and_record(Path::new("/app/file4.txt"), 4, AccessResponse::Allow);
         assert!(!result, "Recent entry should still be deduplicated");
     }
 
@@ -450,11 +412,8 @@ mod deduplication_tests {
         cache.check_and_record(Path::new("/app/file.txt"), 1234, AccessResponse::Allow);
         cache.clear();
 
-        let result = cache.check_and_record(
-            Path::new("/app/file.txt"),
-            1234,
-            AccessResponse::Allow,
-        );
+        let result =
+            cache.check_and_record(Path::new("/app/file.txt"), 1234, AccessResponse::Allow);
 
         assert!(result, "Event after clear should not be duplicate");
     }
@@ -677,7 +636,7 @@ mod lru_cache_tests {
         cache.put("a", 1);
         cache.put("b", 2);
         cache.put("c", 3);
-        cache.put("d", 4);  // Should evict "a"
+        cache.put("d", 4); // Should evict "a"
 
         assert_eq!(cache.get(&"a"), None);
         assert_eq!(cache.get(&"b"), Some(&2));
@@ -699,8 +658,8 @@ mod lru_cache_tests {
         // Add new entry - should evict "b" (now LRU)
         cache.put("d", 4);
 
-        assert_eq!(cache.get(&"a"), Some(&1));  // Still there
-        assert_eq!(cache.get(&"b"), None);       // Evicted
+        assert_eq!(cache.get(&"a"), Some(&1)); // Still there
+        assert_eq!(cache.get(&"b"), None); // Evicted
         assert_eq!(cache.get(&"c"), Some(&3));
         assert_eq!(cache.get(&"d"), Some(&4));
     }
@@ -711,7 +670,7 @@ mod lru_cache_tests {
 
         cache.put("a", 1);
         cache.put("b", 2);
-        cache.put("a", 10);  // Update existing
+        cache.put("a", 10); // Update existing
 
         assert_eq!(cache.get(&"a"), Some(&10));
         assert_eq!(cache.len(), 2);

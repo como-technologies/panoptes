@@ -9,21 +9,28 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use tonic::transport::Server;
-use tonic_health::server::health_reporter;
 use panoptes_common::{
-    GlogLayer,
-    // Environment abstraction
-    EnvironmentDetector, LinuxEnvironmentDetector, Feature, WarningSeverity,
-    // Capability checking
-    CapabilityChecker, LinuxCapabilityChecker, ARGUSD_REQUIRED_CAPS,
-    missing_capabilities_message,
     // Resource limit checking
-    check_fd_limit, read_inotify_limits, ResourceLimitsInfo,
+    check_fd_limit,
+    missing_capabilities_message,
+    read_inotify_limits,
+    // Capability checking
+    CapabilityChecker,
+    // Environment abstraction
+    EnvironmentDetector,
+    Feature,
+    GlogLayer,
+    LinuxCapabilityChecker,
+    LinuxEnvironmentDetector,
+    ResourceLimitsInfo,
+    WarningSeverity,
+    ARGUSD_REQUIRED_CAPS,
 };
 #[cfg(feature = "ebpf")]
-use panoptes_common::{is_ebpf_supported, is_bpf_lsm_enabled, ARGUSD_REQUIRED_CAPS_EBPF};
-use tracing::{info, warn, error, Level};
+use panoptes_common::{is_bpf_lsm_enabled, is_ebpf_supported, ARGUSD_REQUIRED_CAPS_EBPF};
+use tonic::transport::Server;
+use tonic_health::server::health_reporter;
+use tracing::{error, info, warn, Level};
 use tracing_subscriber::prelude::*;
 
 mod metrics;
@@ -164,7 +171,9 @@ fn detect_runtime_mode(config: &Config, cap_checker: &LinuxCapabilityChecker) ->
 #[cfg(not(feature = "ebpf"))]
 fn detect_runtime_mode(config: &Config, _cap_checker: &LinuxCapabilityChecker) -> RuntimeMode {
     if config.mode.to_lowercase() == "ebpf" {
-        warn!("eBPF mode requested but binary compiled without eBPF support - using traditional mode");
+        warn!(
+            "eBPF mode requested but binary compiled without eBPF support - using traditional mode"
+        );
     }
     RuntimeMode::Traditional
 }
@@ -256,7 +265,10 @@ async fn main() -> Result<()> {
         );
         anyhow::bail!("Insufficient file descriptor limit - daemon cannot start safely");
     }
-    info!(max_watches = config.max_watches, "File descriptor limit verified");
+    info!(
+        max_watches = config.max_watches,
+        "File descriptor limit verified"
+    );
 
     // Check inotify-specific limits
     let (max_user_watches, max_queued_events) = read_inotify_limits();
@@ -333,13 +345,17 @@ async fn main() -> Result<()> {
         health_reporter
             .set_serving::<proto::argusd_service_server::ArgusdServiceServer<Arc<service_ebpf::ArgusdServiceImpl>>>()
             .await;
-        health_reporter.set_service_status(SERVICE_NAME, tonic_health::ServingStatus::Serving).await;
+        health_reporter
+            .set_service_status(SERVICE_NAME, tonic_health::ServingStatus::Serving)
+            .await;
 
         info!(addr = %listen_addr, "Starting gRPC server (v2)");
 
         Server::builder()
             .add_service(health_service)
-            .add_service(proto::argusd_service_server::ArgusdServiceServer::from_arc(argusd_service))
+            .add_service(proto::argusd_service_server::ArgusdServiceServer::from_arc(
+                argusd_service,
+            ))
             .serve(listen_addr)
             .await?;
     } else {
@@ -353,13 +369,17 @@ async fn main() -> Result<()> {
         health_reporter
             .set_serving::<proto::argusd_service_server::ArgusdServiceServer<Arc<service::ArgusdServiceImpl>>>()
             .await;
-        health_reporter.set_service_status(SERVICE_NAME, tonic_health::ServingStatus::Serving).await;
+        health_reporter
+            .set_service_status(SERVICE_NAME, tonic_health::ServingStatus::Serving)
+            .await;
 
         info!(addr = %listen_addr, "Starting gRPC server (v2)");
 
         Server::builder()
             .add_service(health_service)
-            .add_service(proto::argusd_service_server::ArgusdServiceServer::from_arc(argusd_service))
+            .add_service(proto::argusd_service_server::ArgusdServiceServer::from_arc(
+                argusd_service,
+            ))
             .serve(listen_addr)
             .await?;
     }
@@ -376,13 +396,17 @@ async fn main() -> Result<()> {
         health_reporter
             .set_serving::<proto::argusd_service_server::ArgusdServiceServer<Arc<service::ArgusdServiceImpl>>>()
             .await;
-        health_reporter.set_service_status(SERVICE_NAME, tonic_health::ServingStatus::Serving).await;
+        health_reporter
+            .set_service_status(SERVICE_NAME, tonic_health::ServingStatus::Serving)
+            .await;
 
         info!(addr = %listen_addr, "Starting gRPC server (v2)");
 
         Server::builder()
             .add_service(health_service)
-            .add_service(proto::argusd_service_server::ArgusdServiceServer::from_arc(argusd_service))
+            .add_service(proto::argusd_service_server::ArgusdServiceServer::from_arc(
+                argusd_service,
+            ))
             .serve(listen_addr)
             .await?;
     }

@@ -38,7 +38,9 @@ enum EventType {
 impl FileEvent {
     fn new(path: &str, event_type: EventType) -> Self {
         let path_buf = PathBuf::from(path);
-        let filename = path_buf.file_name().map(|s| s.to_string_lossy().to_string());
+        let filename = path_buf
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string());
         Self {
             path: path_buf,
             filename,
@@ -137,7 +139,8 @@ fn bench_event_filtering(c: &mut Criterion) {
     });
 
     // Using HashSet for comparison
-    let allowed_set: std::collections::HashSet<EventType> = allowed_events.iter().copied().collect();
+    let allowed_set: std::collections::HashSet<EventType> =
+        allowed_events.iter().copied().collect();
 
     group.bench_function("filter_hashset_contains", |b| {
         b.iter(|| {
@@ -197,9 +200,7 @@ fn bench_move_pair_tracking(c: &mut Criterion) {
 
             expired
                 .into_iter()
-                .filter_map(|cookie| {
-                    self.pending.remove(&cookie).map(|(path, _)| (cookie, path))
-                })
+                .filter_map(|cookie| self.pending.remove(&cookie).map(|(path, _)| (cookie, path)))
                 .collect()
         }
     }

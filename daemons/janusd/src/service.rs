@@ -27,13 +27,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use panoptes_common::{
-    detect_runtime, ContainerRuntime,
-    Session, SessionManager, SessionMap, SessionState, new_session_map,
-    EventBroadcaster, Filterable,
-    DaemonMetrics, MetricsAggregator,
-};
 use panoptes_common::proc::{ProcessResolver, ProcfsProcessResolver};
+use panoptes_common::{
+    detect_runtime, new_session_map, ContainerRuntime, DaemonMetrics, EventBroadcaster, Filterable,
+    MetricsAggregator, Session, SessionManager, SessionMap, SessionState,
+};
 use prost_types::Timestamp;
 use tokio::sync::{mpsc, Mutex};
 use tokio_stream::wrappers::ReceiverStream;
@@ -41,7 +39,9 @@ use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, warn};
 
 use crate::audit::{AuditAccessEvent, AuditEventType, AuditLogger};
-use crate::guard::{AccessEvent as GuardAccessEvent, AccessResponse as GuardAccessResponse, Guard, GuardConfig};
+use crate::guard::{
+    AccessEvent as GuardAccessEvent, AccessResponse as GuardAccessResponse, Guard, GuardConfig,
+};
 use crate::metrics::GuardMetrics;
 use crate::proto::*;
 
@@ -111,17 +111,14 @@ fn session_to_guard_state(session: &Session<GuardSessionState>) -> GuardState {
         .ok();
 
     // Convert ready_at timestamp if present
-    let ready_at = session
-        .state
-        .ready_at
-        .and_then(|t| {
-            t.duration_since(SystemTime::UNIX_EPOCH)
-                .map(|d| Timestamp {
-                    seconds: d.as_secs() as i64,
-                    nanos: d.subsec_nanos() as i32,
-                })
-                .ok()
-        });
+    let ready_at = session.state.ready_at.and_then(|t| {
+        t.duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| Timestamp {
+                seconds: d.as_secs() as i64,
+                nanos: d.subsec_nanos() as i32,
+            })
+            .ok()
+    });
 
     GuardState {
         guard_name: session.name.clone(),
@@ -186,7 +183,12 @@ impl JanusdServiceImpl {
     /// * `cluster_name` - Cluster name for multi-cluster deployments
     /// * `max_guards` - Maximum number of concurrent guards allowed
     /// * `audit` - Audit logger for writing to kernel audit log
-    pub fn new(node_name: String, cluster_name: String, max_guards: usize, audit: Arc<dyn AuditLogger>) -> Self {
+    pub fn new(
+        node_name: String,
+        cluster_name: String,
+        max_guards: usize,
+        audit: Arc<dyn AuditLogger>,
+    ) -> Self {
         let runtime: Option<Box<dyn ContainerRuntime>> = detect_runtime();
 
         if let Some(ref rt) = runtime {
@@ -467,9 +469,15 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
                     // Log ALL events to kernel audit (for compliance: PCI-DSS, HIPAA, SOC2)
                     // Includes process attribution to answer WHO made the access
                     let (audit_response, audit_event_type) = match event.response {
-                        GuardAccessResponse::Allow => (GuardAccessResponse::Allow, AuditEventType::Access),
-                        GuardAccessResponse::Deny => (GuardAccessResponse::Deny, AuditEventType::Denied),
-                        GuardAccessResponse::Audit => (GuardAccessResponse::Audit, AuditEventType::Open),
+                        GuardAccessResponse::Allow => {
+                            (GuardAccessResponse::Allow, AuditEventType::Access)
+                        }
+                        GuardAccessResponse::Deny => {
+                            (GuardAccessResponse::Deny, AuditEventType::Denied)
+                        }
+                        GuardAccessResponse::Audit => {
+                            (GuardAccessResponse::Audit, AuditEventType::Open)
+                        }
                     };
                     let audit_event = AuditAccessEvent {
                         guard_name: guard_name_clone.clone(),
@@ -846,6 +854,7 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
                 allowed_count: snapshot.events_allowed as i64,
                 audited_count: snapshot.events_audited as i64,
                 event_counts: snapshot.event_counts(),
+                queue_overflows: snapshot.queue_overflows as i64,
             });
 
             // Aggregate totals from per-guard metrics
@@ -880,7 +889,9 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
         );
 
         // Get session
-        let session_arc = self.get(&key).await
+        let session_arc = self
+            .get(&key)
+            .await
             .ok_or_else(|| Status::not_found(format!("Guard not found: {}", key)))?;
 
         let mut session = session_arc.lock().await;
@@ -913,7 +924,7 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
                 // For now, return an error suggesting destroy/recreate
                 // Full resume support would require significant refactoring
                 Err(Status::unimplemented(
-                    "Resume not fully implemented. Please destroy and recreate the guard."
+                    "Resume not fully implemented. Please destroy and recreate the guard.",
                 ))
             }
             UpdateAction::Unspecified => {
@@ -940,7 +951,9 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
         );
 
         // Get session
-        let session_arc = self.get(&key).await
+        let session_arc = self
+            .get(&key)
+            .await
             .ok_or_else(|| Status::not_found(format!("Guard not found: {}", key)))?;
 
         let mut session = session_arc.lock().await;
@@ -959,8 +972,18 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
             }
         }
 
-        let deny_count = session.state.subjects.iter().map(|s| s.deny.len()).sum::<usize>() as i32;
-        let allow_count = session.state.subjects.iter().map(|s| s.allow.len()).sum::<usize>() as i32;
+        let deny_count = session
+            .state
+            .subjects
+            .iter()
+            .map(|s| s.deny.len())
+            .sum::<usize>() as i32;
+        let allow_count = session
+            .state
+            .subjects
+            .iter()
+            .map(|s| s.allow.len())
+            .sum::<usize>() as i32;
 
         info!(
             guard_id = %key,
@@ -1075,7 +1098,12 @@ mod tests {
     async fn test_janusd_service_new() {
         use crate::audit::NullAuditLogger;
         let audit: Arc<dyn AuditLogger> = Arc::new(NullAuditLogger);
-        let service = JanusdServiceImpl::new("test-node".to_string(), "test-cluster".to_string(), 100, audit);
+        let service = JanusdServiceImpl::new(
+            "test-node".to_string(),
+            "test-cluster".to_string(),
+            100,
+            audit,
+        );
         assert_eq!(service.max_guards, 100);
     }
 

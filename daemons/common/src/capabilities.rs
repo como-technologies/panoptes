@@ -89,7 +89,9 @@ impl RequiredCapability {
         match self {
             Self::SysAdmin => "Required for fanotify file access monitoring",
             Self::SysPtrace => "Required to access container filesystems via /proc/<pid>/root",
-            Self::DacReadSearch => "Bypass file permission checks (optional, enables broader access)",
+            Self::DacReadSearch => {
+                "Bypass file permission checks (optional, enables broader access)"
+            }
             Self::AuditWrite => "Write events to kernel audit log",
             Self::AuditRead => "Read events from kernel audit subsystem",
             Self::AuditControl => "Configure kernel audit rules",
@@ -120,9 +122,7 @@ impl fmt::Display for RequiredCapability {
 }
 
 /// Capabilities required by argusd (file integrity monitoring) - inotify mode.
-pub const ARGUSD_REQUIRED_CAPS: &[RequiredCapability] = &[
-    RequiredCapability::SysPtrace,
-];
+pub const ARGUSD_REQUIRED_CAPS: &[RequiredCapability] = &[RequiredCapability::SysPtrace];
 
 /// Capabilities required by argusd with eBPF-based file monitoring.
 /// Note: CAP_SYS_ADMIN can be used instead of CAP_BPF + CAP_PERFMON on older kernels.
@@ -133,15 +133,11 @@ pub const ARGUSD_REQUIRED_CAPS_EBPF: &[RequiredCapability] = &[
 ];
 
 /// Capabilities required by janusd (file access auditing).
-pub const JANUSD_REQUIRED_CAPS: &[RequiredCapability] = &[
-    RequiredCapability::SysAdmin,
-    RequiredCapability::SysPtrace,
-];
+pub const JANUSD_REQUIRED_CAPS: &[RequiredCapability] =
+    &[RequiredCapability::SysAdmin, RequiredCapability::SysPtrace];
 
 /// Optional capabilities for janusd audit logging.
-pub const JANUSD_OPTIONAL_CAPS: &[RequiredCapability] = &[
-    RequiredCapability::AuditWrite,
-];
+pub const JANUSD_OPTIONAL_CAPS: &[RequiredCapability] = &[RequiredCapability::AuditWrite];
 
 /// Capabilities required by janusd with eBPF-based file access auditing.
 /// Note: CAP_SYS_ADMIN can be used instead of CAP_BPF + CAP_PERFMON on older kernels.
@@ -161,9 +157,7 @@ pub enum CapabilityError {
 
     /// A specific capability is missing.
     #[error("Missing capability {capability}: {}", capability.description())]
-    MissingCapability {
-        capability: RequiredCapability,
-    },
+    MissingCapability { capability: RequiredCapability },
 
     /// Failed to query capabilities.
     #[error("Failed to query capabilities: {0}")]
@@ -279,14 +273,20 @@ mod tests {
     fn test_required_capability_display() {
         assert_eq!(RequiredCapability::SysAdmin.to_string(), "CAP_SYS_ADMIN");
         assert_eq!(RequiredCapability::SysPtrace.to_string(), "CAP_SYS_PTRACE");
-        assert_eq!(RequiredCapability::AuditWrite.to_string(), "CAP_AUDIT_WRITE");
+        assert_eq!(
+            RequiredCapability::AuditWrite.to_string(),
+            "CAP_AUDIT_WRITE"
+        );
     }
 
     #[test]
     fn test_k8s_names() {
         assert_eq!(RequiredCapability::SysAdmin.k8s_name(), "SYS_ADMIN");
         assert_eq!(RequiredCapability::SysPtrace.k8s_name(), "SYS_PTRACE");
-        assert_eq!(RequiredCapability::DacReadSearch.k8s_name(), "DAC_READ_SEARCH");
+        assert_eq!(
+            RequiredCapability::DacReadSearch.k8s_name(),
+            "DAC_READ_SEARCH"
+        );
     }
 
     #[test]

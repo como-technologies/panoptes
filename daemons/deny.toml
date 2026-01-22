@@ -11,16 +11,9 @@ targets = [
 # Advisories - Check for known vulnerabilities
 # ============================================================================
 [advisories]
+version = 2
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
-# Fail on any vulnerability
-vulnerability = "deny"
-# Warn on unmaintained crates
-unmaintained = "warn"
-# Warn on yanked crates
-yanked = "warn"
-# Warn on crates with security notices
-notice = "warn"
 # Ignore specific advisories (use sparingly, document why)
 ignore = [
     # Example: "RUSTSEC-2020-0001",
@@ -30,10 +23,7 @@ ignore = [
 # Licenses - Ensure all dependencies have acceptable licenses
 # ============================================================================
 [licenses]
-# Fail on unlicensed crates
-unlicensed = "deny"
-# Copyleft licenses require careful review
-copyleft = "warn"
+version = 2
 # List of allowed licenses (permissive + weak copyleft)
 allow = [
     "MIT",
@@ -44,6 +34,7 @@ allow = [
     "ISC",
     "Zlib",
     "MPL-2.0",
+    "Unicode-3.0",
     "Unicode-DFS-2016",
     "CC0-1.0",
     "BSL-1.0",

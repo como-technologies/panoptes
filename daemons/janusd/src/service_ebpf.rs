@@ -23,11 +23,10 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use panoptes_common::{
-    detect_runtime, ContainerRuntime,
-    Session, SessionManager, SessionMap, SessionState, new_session_map,
-    EventBroadcaster,
-    DaemonMetrics, MetricsAggregator,
-    ebpf::{EbpfLoader, EbpfEventReceiver, EbpfError},
+    detect_runtime,
+    ebpf::{EbpfError, EbpfEventReceiver, EbpfLoader},
+    new_session_map, ContainerRuntime, DaemonMetrics, EventBroadcaster, MetricsAggregator, Session,
+    SessionManager, SessionMap, SessionState,
 };
 use prost_types::Timestamp;
 use tokio::sync::{mpsc, Mutex};
@@ -91,17 +90,14 @@ fn session_to_guard_state(session: &Session<EbpfGuardSessionState>) -> GuardStat
         })
         .ok();
 
-    let ready_at = session
-        .state
-        .ready_at
-        .and_then(|t| {
-            t.duration_since(SystemTime::UNIX_EPOCH)
-                .map(|d| Timestamp {
-                    seconds: d.as_secs() as i64,
-                    nanos: d.subsec_nanos() as i32,
-                })
-                .ok()
-        });
+    let ready_at = session.state.ready_at.and_then(|t| {
+        t.duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| Timestamp {
+                seconds: d.as_secs() as i64,
+                nanos: d.subsec_nanos() as i32,
+            })
+            .ok()
+    });
 
     GuardState {
         guard_name: session.name.clone(),
@@ -156,7 +152,12 @@ impl SessionManager<EbpfGuardSessionState> for JanusdServiceImpl {
 
 impl JanusdServiceImpl {
     /// Create a new Janusd service instance (eBPF mode).
-    pub fn new(node_name: String, cluster_name: String, max_guards: usize, audit: Arc<dyn AuditLogger>) -> Self {
+    pub fn new(
+        node_name: String,
+        cluster_name: String,
+        max_guards: usize,
+        audit: Arc<dyn AuditLogger>,
+    ) -> Self {
         let runtime: Option<Box<dyn ContainerRuntime>> = detect_runtime();
 
         if let Some(ref rt) = runtime {
@@ -263,19 +264,23 @@ impl JanusdServiceImpl {
                     let session = session_arc.lock().await;
 
                     // Check if this event matches any guarded prefix
-                    let matches = session.state.active_prefixes.iter().any(|prefix| {
-                        ebpf_event.path.starts_with(prefix)
-                    });
+                    let matches = session
+                        .state
+                        .active_prefixes
+                        .iter()
+                        .any(|prefix| ebpf_event.path.starts_with(prefix));
 
                     if !matches {
                         continue;
                     }
 
                     // Check if path is in deny list
-                    let denied = session.state.enforcing &&
-                        session.state.active_deny_paths.iter().any(|p| {
-                            ebpf_event.path == *p || ebpf_event.path.starts_with(p)
-                        });
+                    let denied = session.state.enforcing
+                        && session
+                            .state
+                            .active_deny_paths
+                            .iter()
+                            .any(|p| ebpf_event.path == *p || ebpf_event.path.starts_with(p));
 
                     let response = if denied {
                         AccessResponse::Deny
@@ -283,7 +288,9 @@ impl JanusdServiceImpl {
                         AccessResponse::Allow
                     };
 
-                    let container_id = session.container_ids.first()
+                    let container_id = session
+                        .container_ids
+                        .first()
                         .map(|s| s.as_str())
                         .unwrap_or("");
 
@@ -293,10 +300,14 @@ impl JanusdServiceImpl {
                         AccessResponse::Deny => session.state.typed_metrics.record_denied(),
                         _ => session.state.typed_metrics.record_audited(),
                     }
-                    session.state.typed_metrics.record_event_type(ebpf_event.event_type_str());
+                    session
+                        .state
+                        .typed_metrics
+                        .record_event_type(ebpf_event.event_type_str());
 
                     // Get exe path from cache for logging and audit
-                    let exe_path = cached_process.as_ref()
+                    let exe_path = cached_process
+                        .as_ref()
                         .filter(|c| c.has_exe())
                         .map(|c| c.exe_str().to_string())
                         .unwrap_or_default();
@@ -353,16 +364,19 @@ impl JanusdServiceImpl {
                             comm: ebpf_event.comm.clone(),
                             // Use cached process info
                             exe: exe_path,
-                            ppid: cached_process.as_ref()
-                                .map(|c| c.ppid as i32)
-                                .unwrap_or(0),
-                            cmdline: cached_process.as_ref()
-                                .map(|c| c.cmdline_str().split('\0')
-                                    .filter(|s| !s.is_empty())
-                                    .map(String::from)
-                                    .collect())
+                            ppid: cached_process.as_ref().map(|c| c.ppid as i32).unwrap_or(0),
+                            cmdline: cached_process
+                                .as_ref()
+                                .map(|c| {
+                                    c.cmdline_str()
+                                        .split('\0')
+                                        .filter(|s| !s.is_empty())
+                                        .map(String::from)
+                                        .collect()
+                                })
                                 .unwrap_or_default(),
-                            cwd: cached_process.as_ref()
+                            cwd: cached_process
+                                .as_ref()
                                 .map(|c| c.cwd_str().to_string())
                                 .unwrap_or_default(),
                         })
@@ -400,7 +414,8 @@ impl JanusdServiceImpl {
     /// Add guarded prefixes to the eBPF filter map.
     async fn add_guarded_prefixes(&self, prefixes: &[String]) -> Result<(), EbpfError> {
         let mut loader_guard = self.ebpf_loader.lock().await;
-        let loader = loader_guard.as_mut()
+        let loader = loader_guard
+            .as_mut()
             .ok_or_else(|| EbpfError::Map("eBPF not initialized".into()))?;
 
         for prefix in prefixes {
@@ -413,7 +428,8 @@ impl JanusdServiceImpl {
     /// Remove guarded prefixes from the eBPF filter map.
     async fn remove_guarded_prefixes(&self, prefixes: &[String]) -> Result<(), EbpfError> {
         let mut loader_guard = self.ebpf_loader.lock().await;
-        let loader = loader_guard.as_mut()
+        let loader = loader_guard
+            .as_mut()
             .ok_or_else(|| EbpfError::Map("eBPF not initialized".into()))?;
 
         for prefix in prefixes {
@@ -426,7 +442,8 @@ impl JanusdServiceImpl {
     /// Add deny paths to the eBPF DENY_PATHS map (LSM will block access).
     async fn add_deny_paths(&self, paths: &[String]) -> Result<(), EbpfError> {
         let mut loader_guard = self.ebpf_loader.lock().await;
-        let loader = loader_guard.as_mut()
+        let loader = loader_guard
+            .as_mut()
             .ok_or_else(|| EbpfError::Map("eBPF not initialized".into()))?;
 
         for path in paths {
@@ -439,7 +456,8 @@ impl JanusdServiceImpl {
     /// Remove deny paths from the eBPF DENY_PATHS map.
     async fn remove_deny_paths(&self, paths: &[String]) -> Result<(), EbpfError> {
         let mut loader_guard = self.ebpf_loader.lock().await;
-        let loader = loader_guard.as_mut()
+        let loader = loader_guard
+            .as_mut()
             .ok_or_else(|| EbpfError::Map("eBPF not initialized".into()))?;
 
         for path in paths {
@@ -468,7 +486,11 @@ impl JanusdServiceImpl {
     }
 
     /// Build path prefixes from guard subjects.
-    fn build_prefixes(&self, subjects: &[GuardSubject], container_ids: &[String]) -> (Vec<String>, Vec<String>) {
+    fn build_prefixes(
+        &self,
+        subjects: &[GuardSubject],
+        container_ids: &[String],
+    ) -> (Vec<String>, Vec<String>) {
         let Some(ref runtime) = self.runtime else {
             return (vec![], vec![]);
         };
@@ -532,15 +554,20 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
         // Check limits
         if self.count().await >= self.max_sessions() {
             return Err(Status::resource_exhausted(format!(
-                "Maximum guards ({}) exceeded", self.max_guards
+                "Maximum guards ({}) exceeded",
+                self.max_guards
             )));
         }
         if self.exists(&key).await {
-            return Err(Status::already_exists(format!("Guard already exists: {}", key)));
+            return Err(Status::already_exists(format!(
+                "Guard already exists: {}",
+                key
+            )));
         }
 
         // Initialize eBPF subsystem
-        self.ensure_ebpf_initialized().await
+        self.ensure_ebpf_initialized()
+            .await
             .map_err(|e| Status::internal(format!("Failed to initialize eBPF: {}", e)))?;
 
         // Resolve container PIDs
@@ -553,7 +580,8 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
         // Build path prefixes from subjects
         let (all_prefixes, deny_paths) = self.build_prefixes(&req.subjects, &req.container_ids);
 
-        let guarded_paths: i32 = req.subjects
+        let guarded_paths: i32 = req
+            .subjects
             .iter()
             .map(|s| (s.allow.len() + s.deny.len()) as i32)
             .sum();
@@ -663,12 +691,18 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
 
             // Remove eBPF filters
             if !session.state.active_prefixes.is_empty() {
-                if let Err(e) = self.remove_guarded_prefixes(&session.state.active_prefixes).await {
+                if let Err(e) = self
+                    .remove_guarded_prefixes(&session.state.active_prefixes)
+                    .await
+                {
                     warn!(error = %e, "Failed to remove eBPF prefixes");
                 }
             }
             if !session.state.active_deny_paths.is_empty() {
-                if let Err(e) = self.remove_deny_paths(&session.state.active_deny_paths).await {
+                if let Err(e) = self
+                    .remove_deny_paths(&session.state.active_deny_paths)
+                    .await
+                {
                     warn!(error = %e, "Failed to remove deny paths");
                 }
             }
@@ -681,7 +715,8 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
         }
     }
 
-    type GetGuardStateStream = Pin<Box<dyn tokio_stream::Stream<Item = Result<GuardState, Status>> + Send>>;
+    type GetGuardStateStream =
+        Pin<Box<dyn tokio_stream::Stream<Item = Result<GuardState, Status>> + Send>>;
 
     async fn get_guard_state(
         &self,
@@ -716,7 +751,8 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }
 
-    type StreamAccessEventsStream = Pin<Box<dyn tokio_stream::Stream<Item = Result<AccessEvent, Status>> + Send>>;
+    type StreamAccessEventsStream =
+        Pin<Box<dyn tokio_stream::Stream<Item = Result<AccessEvent, Status>> + Send>>;
 
     async fn stream_access_events(
         &self,
@@ -748,7 +784,9 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
                         if !filter_namespace.is_empty() && event.namespace != filter_namespace {
                             continue;
                         }
-                        if !filter_event_types.is_empty() && !filter_event_types.contains(&event.event_type) {
+                        if !filter_event_types.is_empty()
+                            && !filter_event_types.contains(&event.event_type)
+                        {
                             continue;
                         }
                         if !include_allowed && event.response == AccessResponse::Allow as i32 {
@@ -830,7 +868,9 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
             "UpdateGuard request (eBPF mode)"
         );
 
-        let session_arc = self.get(&key).await
+        let session_arc = self
+            .get(&key)
+            .await
             .ok_or_else(|| Status::not_found(format!("Guard not found: {}", key)))?;
 
         let mut session = session_arc.lock().await;
@@ -843,12 +883,16 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
 
                 // Remove eBPF filters
                 if !session.state.active_prefixes.is_empty() {
-                    self.remove_guarded_prefixes(&session.state.active_prefixes).await
+                    self.remove_guarded_prefixes(&session.state.active_prefixes)
+                        .await
                         .map_err(|e| Status::internal(format!("Failed to pause: {}", e)))?;
                 }
                 if !session.state.active_deny_paths.is_empty() {
-                    self.remove_deny_paths(&session.state.active_deny_paths).await
-                        .map_err(|e| Status::internal(format!("Failed to remove deny paths: {}", e)))?;
+                    self.remove_deny_paths(&session.state.active_deny_paths)
+                        .await
+                        .map_err(|e| {
+                            Status::internal(format!("Failed to remove deny paths: {}", e))
+                        })?;
                 }
 
                 session.paused = true;
@@ -868,12 +912,16 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
 
                 // Re-add eBPF filters
                 if !session.state.active_prefixes.is_empty() {
-                    self.add_guarded_prefixes(&session.state.active_prefixes).await
+                    self.add_guarded_prefixes(&session.state.active_prefixes)
+                        .await
                         .map_err(|e| Status::internal(format!("Failed to resume: {}", e)))?;
                 }
                 if session.state.enforcing && !session.state.active_deny_paths.is_empty() {
-                    self.add_deny_paths(&session.state.active_deny_paths).await
-                        .map_err(|e| Status::internal(format!("Failed to add deny paths: {}", e)))?;
+                    self.add_deny_paths(&session.state.active_deny_paths)
+                        .await
+                        .map_err(|e| {
+                            Status::internal(format!("Failed to add deny paths: {}", e))
+                        })?;
                 }
 
                 session.paused = false;
@@ -907,7 +955,9 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
             "UpdatePolicy request (eBPF mode)"
         );
 
-        let session_arc = self.get(&key).await
+        let session_arc = self
+            .get(&key)
+            .await
             .ok_or_else(|| Status::not_found(format!("Guard not found: {}", key)))?;
 
         let mut session = session_arc.lock().await;
@@ -916,16 +966,23 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
         if !req.deny_patterns.is_empty() {
             // Remove old deny paths
             if !session.state.active_deny_paths.is_empty() {
-                self.remove_deny_paths(&session.state.active_deny_paths).await
-                    .map_err(|e| Status::internal(format!("Failed to remove old deny paths: {}", e)))?;
+                self.remove_deny_paths(&session.state.active_deny_paths)
+                    .await
+                    .map_err(|e| {
+                        Status::internal(format!("Failed to remove old deny paths: {}", e))
+                    })?;
             }
 
             // Add new deny paths
-            self.add_deny_paths(&req.deny_patterns).await
+            self.add_deny_paths(&req.deny_patterns)
+                .await
                 .map_err(|e| Status::internal(format!("Failed to add deny paths: {}", e)))?;
 
             session.state.active_deny_paths = req.deny_patterns.clone();
-            session.state.deny_paths_count.store(req.deny_patterns.len() as u64, Ordering::Relaxed);
+            session
+                .state
+                .deny_paths_count
+                .store(req.deny_patterns.len() as u64, Ordering::Relaxed);
 
             // Update subjects
             if let Some(subject) = session.state.subjects.first_mut() {
@@ -939,8 +996,18 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
             }
         }
 
-        let deny_count = session.state.subjects.iter().map(|s| s.deny.len()).sum::<usize>() as i32;
-        let allow_count = session.state.subjects.iter().map(|s| s.allow.len()).sum::<usize>() as i32;
+        let deny_count = session
+            .state
+            .subjects
+            .iter()
+            .map(|s| s.deny.len())
+            .sum::<usize>() as i32;
+        let allow_count = session
+            .state
+            .subjects
+            .iter()
+            .map(|s| s.allow.len())
+            .sum::<usize>() as i32;
 
         Ok(Response::new(UpdatePolicyResponse {
             guard_id: key,

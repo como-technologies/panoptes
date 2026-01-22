@@ -130,10 +130,7 @@ impl LinuxPathProvider {
     /// Create a path provider with optional overrides.
     ///
     /// Uses automatic detection for any `None` values.
-    pub fn with_overrides(
-        host_root: Option<PathBuf>,
-        proc_path: Option<PathBuf>,
-    ) -> Self {
+    pub fn with_overrides(host_root: Option<PathBuf>, proc_path: Option<PathBuf>) -> Self {
         Self {
             host_root: host_root.unwrap_or_else(Self::detect_host_root),
             proc_path: proc_path.unwrap_or_else(|| PathBuf::from("/proc")),
@@ -236,10 +233,7 @@ mod tests {
 
     #[test]
     fn test_runtime_socket_on_host() {
-        let provider = LinuxPathProvider::with_paths(
-            PathBuf::from("/"),
-            PathBuf::from("/proc"),
-        );
+        let provider = LinuxPathProvider::with_paths(PathBuf::from("/"), PathBuf::from("/proc"));
 
         assert_eq!(
             provider.runtime_socket(RuntimeType::Containerd),
@@ -253,10 +247,8 @@ mod tests {
 
     #[test]
     fn test_runtime_socket_in_container() {
-        let provider = LinuxPathProvider::with_paths(
-            PathBuf::from("/host"),
-            PathBuf::from("/proc"),
-        );
+        let provider =
+            LinuxPathProvider::with_paths(PathBuf::from("/host"), PathBuf::from("/proc"));
 
         assert_eq!(
             provider.runtime_socket(RuntimeType::Containerd),
@@ -266,10 +258,7 @@ mod tests {
 
     #[test]
     fn test_resolve_container_path() {
-        let provider = LinuxPathProvider::with_paths(
-            PathBuf::from("/"),
-            PathBuf::from("/proc"),
-        );
+        let provider = LinuxPathProvider::with_paths(PathBuf::from("/"), PathBuf::from("/proc"));
 
         assert_eq!(
             provider.resolve_container_path(1234, Path::new("/etc/passwd")),
@@ -284,10 +273,8 @@ mod tests {
 
     #[test]
     fn test_resolve_path_absolute() {
-        let provider = LinuxPathProvider::with_paths(
-            PathBuf::from("/host"),
-            PathBuf::from("/proc"),
-        );
+        let provider =
+            LinuxPathProvider::with_paths(PathBuf::from("/host"), PathBuf::from("/proc"));
 
         assert_eq!(
             provider.resolve_path(Path::new("/etc/passwd")),
@@ -297,10 +284,8 @@ mod tests {
 
     #[test]
     fn test_resolve_path_relative() {
-        let provider = LinuxPathProvider::with_paths(
-            PathBuf::from("/host"),
-            PathBuf::from("/proc"),
-        );
+        let provider =
+            LinuxPathProvider::with_paths(PathBuf::from("/host"), PathBuf::from("/proc"));
 
         assert_eq!(
             provider.resolve_path(Path::new("relative/path")),
@@ -310,10 +295,7 @@ mod tests {
 
     #[test]
     fn test_with_overrides() {
-        let provider = LinuxPathProvider::with_overrides(
-            Some(PathBuf::from("/custom")),
-            None,
-        );
+        let provider = LinuxPathProvider::with_overrides(Some(PathBuf::from("/custom")), None);
 
         assert_eq!(provider.host_root(), Path::new("/custom"));
         assert_eq!(provider.proc_path(), Path::new("/proc"));

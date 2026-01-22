@@ -39,7 +39,7 @@
 //! - Linux kernel source: `kernel/audit.c`
 
 use std::io;
-use std::os::fd::{AsRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use nix::sys::socket::{bind, sendto, MsgFlags, NetlinkAddr};

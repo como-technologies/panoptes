@@ -152,10 +152,7 @@ pub struct EnvironmentWarning {
 pub enum EnvironmentError {
     /// Feature is not available in this environment.
     #[error("Feature '{feature}' is not available: {reason}")]
-    FeatureUnavailable {
-        feature: Feature,
-        reason: String,
-    },
+    FeatureUnavailable { feature: Feature, reason: String },
 
     /// Environment detection failed.
     #[error("Failed to detect environment: {0}")]
@@ -422,7 +419,9 @@ impl EnvironmentDetector for LinuxEnvironmentDetector {
                 if let Ok(release) = std::fs::read_to_string("/proc/sys/kernel/osrelease") {
                     let parts: Vec<&str> = release.trim().split('.').collect();
                     if parts.len() >= 2 {
-                        if let (Ok(major), Ok(minor)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+                        if let (Ok(major), Ok(minor)) =
+                            (parts[0].parse::<u32>(), parts[1].parse::<u32>())
+                        {
                             if major < 4 || (major == 4 && minor < 4) {
                                 return Err(EnvironmentError::FeatureUnavailable {
                                     feature,
@@ -443,7 +442,9 @@ impl EnvironmentDetector for LinuxEnvironmentDetector {
                 if let Ok(release) = std::fs::read_to_string("/proc/sys/kernel/osrelease") {
                     let parts: Vec<&str> = release.trim().split('.').collect();
                     if parts.len() >= 2 {
-                        if let (Ok(major), Ok(minor)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+                        if let (Ok(major), Ok(minor)) =
+                            (parts[0].parse::<u32>(), parts[1].parse::<u32>())
+                        {
                             if major < 5 || (major == 5 && minor < 7) {
                                 return Err(EnvironmentError::FeatureUnavailable {
                                     feature,

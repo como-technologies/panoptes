@@ -22,17 +22,26 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use panoptes_common::{
-    detect_runtime, runtime_for_container, ContainerRuntime,
-    // Session management
-    Session, SessionManager, SessionMap, SessionState, new_session_map,
-    // Event broadcasting
-    EventBroadcaster, StreamFilter,
-    // Metrics
-    DaemonMetrics, MetricsAggregator,
-    // gRPC streaming helpers
-    filtered_broadcast_stream, stream_from_iter,
+    detect_runtime,
     // eBPF loader
-    ebpf::{EbpfLoader, EbpfEventReceiver, EbpfError},
+    ebpf::{EbpfError, EbpfEventReceiver, EbpfLoader},
+    // gRPC streaming helpers
+    filtered_broadcast_stream,
+    new_session_map,
+    runtime_for_container,
+    stream_from_iter,
+    ContainerRuntime,
+    // Metrics
+    DaemonMetrics,
+    // Event broadcasting
+    EventBroadcaster,
+    MetricsAggregator,
+    // Session management
+    Session,
+    SessionManager,
+    SessionMap,
+    SessionState,
+    StreamFilter,
 };
 use prost_types::Timestamp;
 use tokio::sync::Mutex;
@@ -48,10 +57,10 @@ const EBPF_BYTECODE_PATH: &str = "/usr/lib/argusd/argusd-ebpf";
 
 /// LSM programs to attach for FIM events
 const LSM_PROGRAMS: &[&str] = &[
-    "inode_create",  // File creation
-    "inode_unlink",  // File deletion
-    "inode_rename",  // File rename/move
-    "file_open",     // File open (for write detection)
+    "inode_create", // File creation
+    "inode_unlink", // File deletion
+    "inode_rename", // File rename/move
+    "file_open",    // File open (for write detection)
 ];
 
 /// Convert SystemTime to protobuf Timestamp.
@@ -228,16 +237,20 @@ impl ArgusdServiceImpl {
                     let session = session_arc.lock().await;
 
                     // Check if this event matches any of the session's watched prefixes
-                    let matches = session.state.active_prefixes.iter().any(|prefix| {
-                        ebpf_event.path.starts_with(prefix)
-                    });
+                    let matches = session
+                        .state
+                        .active_prefixes
+                        .iter()
+                        .any(|prefix| ebpf_event.path.starts_with(prefix));
 
                     if !matches {
                         continue;
                     }
 
                     // Convert to proto event
-                    let container_id = session.container_ids.first()
+                    let container_id = session
+                        .container_ids
+                        .first()
                         .map(|s| s.as_str())
                         .unwrap_or("");
 
@@ -249,19 +262,23 @@ impl ArgusdServiceImpl {
                         gid: raw_event.gid as i32,
                         comm: ebpf_event.comm.clone(),
                         // Use cached process info if available
-                        exe: cached_process.as_ref()
+                        exe: cached_process
+                            .as_ref()
                             .map(|c| c.exe_str().to_string())
                             .unwrap_or_default(),
-                        ppid: cached_process.as_ref()
-                            .map(|c| c.ppid as i32)
-                            .unwrap_or(0),
-                        cmdline: cached_process.as_ref()
-                            .map(|c| c.cmdline_str().split('\0')
-                                .filter(|s| !s.is_empty())
-                                .map(String::from)
-                                .collect())
+                        ppid: cached_process.as_ref().map(|c| c.ppid as i32).unwrap_or(0),
+                        cmdline: cached_process
+                            .as_ref()
+                            .map(|c| {
+                                c.cmdline_str()
+                                    .split('\0')
+                                    .filter(|s| !s.is_empty())
+                                    .map(String::from)
+                                    .collect()
+                            })
                             .unwrap_or_default(),
-                        cwd: cached_process.as_ref()
+                        cwd: cached_process
+                            .as_ref()
                             .map(|c| c.cwd_str().to_string())
                             .unwrap_or_default(),
                     });
@@ -288,7 +305,8 @@ impl ArgusdServiceImpl {
                     };
 
                     // Log the event with process attribution
-                    let exe_info = cached_process.as_ref()
+                    let exe_info = cached_process
+                        .as_ref()
                         .filter(|c| c.has_exe())
                         .map(|c| format!(" ({})", c.exe_str()))
                         .unwrap_or_default();
@@ -307,7 +325,10 @@ impl ArgusdServiceImpl {
                     let _ = broadcaster.send(proto_event);
 
                     // Update metrics
-                    session.state.typed_metrics.record_event_typed(ebpf_event.event_type_str());
+                    session
+                        .state
+                        .typed_metrics
+                        .record_event_typed(ebpf_event.event_type_str());
                 }
             }
         });
@@ -316,7 +337,8 @@ impl ArgusdServiceImpl {
     /// Add watched prefixes to the eBPF filter map.
     async fn add_watched_prefixes(&self, prefixes: &[String]) -> Result<(), EbpfError> {
         let mut loader_guard = self.ebpf_loader.lock().await;
-        let loader = loader_guard.as_mut()
+        let loader = loader_guard
+            .as_mut()
             .ok_or_else(|| EbpfError::Map("eBPF not initialized".into()))?;
 
         for prefix in prefixes {
@@ -329,7 +351,8 @@ impl ArgusdServiceImpl {
     /// Remove watched prefixes from the eBPF filter map.
     async fn remove_watched_prefixes(&self, prefixes: &[String]) -> Result<(), EbpfError> {
         let mut loader_guard = self.ebpf_loader.lock().await;
-        let loader = loader_guard.as_mut()
+        let loader = loader_guard
+            .as_mut()
             .ok_or_else(|| EbpfError::Map("eBPF not initialized".into()))?;
 
         for prefix in prefixes {
@@ -342,15 +365,19 @@ impl ArgusdServiceImpl {
     /// Resolve container ID to PID using the detected runtime.
     fn resolve_container_pid(&self, container_id: &str) -> Result<i32, Status> {
         if let Ok(runtime) = runtime_for_container(container_id) {
-            return runtime.resolve_pid(container_id)
+            return runtime
+                .resolve_pid(container_id)
                 .map(|pid| pid as i32)
                 .map_err(|e| Status::not_found(format!("Failed to resolve container PID: {}", e)));
         }
 
-        let runtime = self.runtime.as_ref()
+        let runtime = self
+            .runtime
+            .as_ref()
             .ok_or_else(|| Status::failed_precondition("No container runtime available"))?;
 
-        runtime.resolve_pid(container_id)
+        runtime
+            .resolve_pid(container_id)
             .map(|pid| pid as i32)
             .map_err(|e| Status::not_found(format!("Failed to resolve container PID: {}", e)))
     }
@@ -361,7 +388,9 @@ impl ArgusdServiceImpl {
         subjects: &[WatchSubject],
         container_id: &str,
     ) -> Result<Vec<String>, Status> {
-        let runtime = self.runtime.as_ref()
+        let runtime = self
+            .runtime
+            .as_ref()
             .ok_or_else(|| Status::failed_precondition("No container runtime"))?;
 
         let pid = self.resolve_container_pid(container_id)? as u32;
@@ -427,12 +456,14 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
         // Check if watch already exists
         if self.exists(&watch_id).await {
             return Err(Status::already_exists(format!(
-                "Watch already exists: {}", watch_id
+                "Watch already exists: {}",
+                watch_id
             )));
         }
 
         // Initialize eBPF subsystem if needed
-        self.ensure_ebpf_initialized().await
+        self.ensure_ebpf_initialized()
+            .await
             .map_err(|e| Status::internal(format!("Failed to initialize eBPF: {}", e)))?;
 
         // Resolve PIDs for all containers
@@ -492,7 +523,9 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
         );
 
         // Insert session
-        let session_arc = self.insert(watch_id.clone(), session).await
+        let session_arc = self
+            .insert(watch_id.clone(), session)
+            .await
             .map_err(|e| Status::resource_exhausted(e.to_string()))?;
 
         let mut watched_paths = 0;
@@ -558,7 +591,10 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
 
             // Remove eBPF filters
             if !session.state.active_prefixes.is_empty() {
-                if let Err(e) = self.remove_watched_prefixes(&session.state.active_prefixes).await {
+                if let Err(e) = self
+                    .remove_watched_prefixes(&session.state.active_prefixes)
+                    .await
+                {
                     warn!(error = %e, "Failed to remove eBPF filters");
                 }
             }
@@ -574,9 +610,8 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
         Ok(Response::new(()))
     }
 
-    type GetWatchStateStream = Pin<
-        Box<dyn tokio_stream::Stream<Item = Result<WatchState, Status>> + Send>
-    >;
+    type GetWatchStateStream =
+        Pin<Box<dyn tokio_stream::Stream<Item = Result<WatchState, Status>> + Send>>;
 
     /// Get current state of all watches.
     async fn get_watch_state(
@@ -617,7 +652,8 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
                 paused: session.paused,
                 watches_ready: session.state.watches_ready,
                 ready_at: session.state.ready_at.and_then(system_time_to_timestamp),
-                active_watch_descriptors: session.state.watched_prefixes.load(Ordering::Relaxed) as i32,
+                active_watch_descriptors: session.state.watched_prefixes.load(Ordering::Relaxed)
+                    as i32,
             };
 
             states.push(state);
@@ -626,9 +662,8 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
         Ok(stream_from_iter(states, 100))
     }
 
-    type StreamEventsStream = Pin<
-        Box<dyn tokio_stream::Stream<Item = Result<FileEvent, Status>> + Send>
-    >;
+    type StreamEventsStream =
+        Pin<Box<dyn tokio_stream::Stream<Item = Result<FileEvent, Status>> + Send>>;
 
     /// Stream real-time file events.
     async fn stream_events(
@@ -651,7 +686,8 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
             filter = filter.with_namespace(req.namespace);
         }
         if !req.event_types.is_empty() {
-            let event_type_strings: Vec<String> = req.event_types
+            let event_type_strings: Vec<String> = req
+                .event_types
                 .iter()
                 .map(|e| inotify_event_to_string(*e as i32))
                 .filter(|s| !s.is_empty())
@@ -679,7 +715,8 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
             .iter()
             .filter(|s| req.watcher_name.is_empty() || s.name.contains(&req.watcher_name))
             .map(|s| {
-                let event_counts: HashMap<String, i64> = s.custom
+                let event_counts: HashMap<String, i64> = s
+                    .custom
                     .iter()
                     .map(|(k, v)| (k.clone(), *v as i64))
                     .collect();
@@ -688,6 +725,7 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
                     watcher_name: s.name.clone(),
                     namespace: String::new(),
                     event_counts,
+                    queue_overflows: s.custom.get("queue_overflows").copied().unwrap_or(0) as i64,
                 }
             })
             .collect();
@@ -721,7 +759,9 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
             "UpdateWatch request (eBPF mode)"
         );
 
-        let session_arc = self.get(&key).await
+        let session_arc = self
+            .get(&key)
+            .await
             .ok_or_else(|| Status::not_found(format!("Watch not found: {}", key)))?;
 
         let mut session = session_arc.lock().await;
@@ -734,7 +774,8 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
 
                 // Remove prefixes from eBPF filter
                 if !session.state.active_prefixes.is_empty() {
-                    self.remove_watched_prefixes(&session.state.active_prefixes).await
+                    self.remove_watched_prefixes(&session.state.active_prefixes)
+                        .await
                         .map_err(|e| Status::internal(format!("Failed to pause: {}", e)))?;
                 }
 
@@ -754,7 +795,8 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
 
                 // Re-add prefixes to eBPF filter
                 if !session.state.active_prefixes.is_empty() {
-                    self.add_watched_prefixes(&session.state.active_prefixes).await
+                    self.add_watched_prefixes(&session.state.active_prefixes)
+                        .await
                         .map_err(|e| Status::internal(format!("Failed to resume: {}", e)))?;
                 }
 
@@ -788,9 +830,18 @@ mod tests {
 
     #[test]
     fn test_inotify_event_to_string() {
-        assert_eq!(inotify_event_to_string(InotifyEvent::Create as i32), "create");
-        assert_eq!(inotify_event_to_string(InotifyEvent::Modify as i32), "modify");
-        assert_eq!(inotify_event_to_string(InotifyEvent::Delete as i32), "delete");
+        assert_eq!(
+            inotify_event_to_string(InotifyEvent::Create as i32),
+            "create"
+        );
+        assert_eq!(
+            inotify_event_to_string(InotifyEvent::Modify as i32),
+            "modify"
+        );
+        assert_eq!(
+            inotify_event_to_string(InotifyEvent::Delete as i32),
+            "delete"
+        );
     }
 
     #[tokio::test]

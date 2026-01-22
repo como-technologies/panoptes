@@ -21,15 +21,25 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use panoptes_common::{
-    detect_runtime, runtime_for_container, ContainerRuntime,
-    // Session management
-    Session, SessionManager, SessionMap, SessionState, new_session_map,
-    // Event broadcasting
-    EventBroadcaster, Filterable, StreamFilter,
-    // Metrics
-    DaemonMetrics, MetricsAggregator,
+    detect_runtime,
     // gRPC streaming helpers
-    filtered_broadcast_stream, stream_from_iter,
+    filtered_broadcast_stream,
+    new_session_map,
+    runtime_for_container,
+    stream_from_iter,
+    ContainerRuntime,
+    // Metrics
+    DaemonMetrics,
+    // Event broadcasting
+    EventBroadcaster,
+    Filterable,
+    MetricsAggregator,
+    // Session management
+    Session,
+    SessionManager,
+    SessionMap,
+    SessionState,
+    StreamFilter,
 };
 use prost_types::Timestamp;
 use tokio::sync::{mpsc, Mutex};
@@ -150,16 +160,20 @@ impl ArgusdServiceImpl {
     fn resolve_container_pid(&self, container_id: &str) -> Result<i32, Status> {
         // Try to get runtime for this specific container first
         if let Ok(runtime) = runtime_for_container(container_id) {
-            return runtime.resolve_pid(container_id)
+            return runtime
+                .resolve_pid(container_id)
                 .map(|pid| pid as i32)
                 .map_err(|e| Status::not_found(format!("Failed to resolve container PID: {}", e)));
         }
 
         // Fall back to detected runtime
-        let runtime = self.runtime.as_ref()
+        let runtime = self
+            .runtime
+            .as_ref()
             .ok_or_else(|| Status::failed_precondition("No container runtime available"))?;
 
-        runtime.resolve_pid(container_id)
+        runtime
+            .resolve_pid(container_id)
             .map(|pid| pid as i32)
             .map_err(|e| Status::not_found(format!("Failed to resolve container PID: {}", e)))
     }
@@ -170,7 +184,9 @@ impl ArgusdServiceImpl {
         subjects: &[WatchSubject],
         container_id: &str,
     ) -> Result<WatchConfig, Status> {
-        let runtime = self.runtime.as_ref()
+        let runtime = self
+            .runtime
+            .as_ref()
             .ok_or_else(|| Status::failed_precondition("No container runtime"))?;
 
         let pid = self.resolve_container_pid(container_id)? as u32;
@@ -223,7 +239,6 @@ impl ArgusdServiceImpl {
             max_depth,
         })
     }
-
 }
 
 /// Convert InotifyEvent enum to string.
@@ -288,7 +303,8 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
         // Check if watch already exists (using SessionManager trait method)
         if self.exists(&watch_id).await {
             return Err(Status::already_exists(format!(
-                "Watch already exists: {}", watch_id
+                "Watch already exists: {}",
+                watch_id
             )));
         }
 
@@ -324,7 +340,7 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
             watcher: None,
             typed_metrics: typed_metrics.clone(),
             watch_config: None,
-            watches_ready: false,  // Will be set true after inotify registration
+            watches_ready: false, // Will be set true after inotify registration
             ready_at: None,
         };
 
@@ -343,7 +359,9 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
         );
 
         // Insert session using SessionManager trait method
-        let session_arc = self.insert(watch_id.clone(), session).await
+        let session_arc = self
+            .insert(watch_id.clone(), session)
+            .await
             .map_err(|e| Status::resource_exhausted(e.to_string()))?;
 
         let mut watched_paths = 0;
@@ -385,7 +403,10 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
                                             let mut session_guard = session_arc.lock().await;
                                             session_guard.state.watches_ready = true;
                                             session_guard.state.ready_at = Some(ready_time);
-                                            session_guard.state.watch_descriptors.store(wd_count as u64, Ordering::Relaxed);
+                                            session_guard
+                                                .state
+                                                .watch_descriptors
+                                                .store(wd_count as u64, Ordering::Relaxed);
                                         }
                                         watches_ready = true;
                                     }
@@ -424,7 +445,8 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
                                             node_name: node_name.clone(),
                                             pod_name: pod_name.clone(),
                                             container_id: container_id_clone.clone(),
-                                            event_type: event_type_to_proto(&event.event_type) as i32,
+                                            event_type: event_type_to_proto(&event.event_type)
+                                                as i32,
                                             path: event.path.to_string_lossy().to_string(),
                                             filename: event.filename.clone().unwrap_or_default(),
                                             is_directory: event.is_dir,
@@ -524,9 +546,8 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
         Ok(Response::new(()))
     }
 
-    type GetWatchStateStream = Pin<
-        Box<dyn tokio_stream::Stream<Item = Result<WatchState, Status>> + Send>
-    >;
+    type GetWatchStateStream =
+        Pin<Box<dyn tokio_stream::Stream<Item = Result<WatchState, Status>> + Send>>;
 
     /// Get current state of all watches.
     async fn get_watch_state(
@@ -571,7 +592,8 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
                 // Readiness fields for watcher-wait init container
                 watches_ready: session.state.watches_ready,
                 ready_at: session.state.ready_at.and_then(system_time_to_timestamp),
-                active_watch_descriptors: session.state.watch_descriptors.load(Ordering::Relaxed) as i32,
+                active_watch_descriptors: session.state.watch_descriptors.load(Ordering::Relaxed)
+                    as i32,
             };
 
             states.push(state);
@@ -581,9 +603,8 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
         Ok(stream_from_iter(states, 100))
     }
 
-    type StreamEventsStream = Pin<
-        Box<dyn tokio_stream::Stream<Item = Result<FileEvent, Status>> + Send>
-    >;
+    type StreamEventsStream =
+        Pin<Box<dyn tokio_stream::Stream<Item = Result<FileEvent, Status>> + Send>>;
 
     /// Stream real-time file events.
     async fn stream_events(
@@ -607,7 +628,8 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
             filter = filter.with_namespace(req.namespace);
         }
         if !req.event_types.is_empty() {
-            let event_type_strings: Vec<String> = req.event_types
+            let event_type_strings: Vec<String> = req
+                .event_types
                 .iter()
                 .map(|e| inotify_event_to_string(*e as i32))
                 .filter(|s| !s.is_empty())
@@ -637,7 +659,8 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
             .filter(|s| req.watcher_name.is_empty() || s.name.contains(&req.watcher_name))
             .map(|s| {
                 // Convert custom metrics to event counts
-                let event_counts: HashMap<String, i64> = s.custom
+                let event_counts: HashMap<String, i64> = s
+                    .custom
                     .iter()
                     .map(|(k, v)| (k.clone(), *v as i64))
                     .collect();
@@ -646,6 +669,7 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
                     watcher_name: s.name.clone(),
                     namespace: String::new(), // Would need to parse from name
                     event_counts,
+                    queue_overflows: s.custom.get("queue_overflows").copied().unwrap_or(0) as i64,
                 }
             })
             .collect();
@@ -680,7 +704,9 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
         );
 
         // Get session
-        let session_arc = self.get(&key).await
+        let session_arc = self
+            .get(&key)
+            .await
             .ok_or_else(|| Status::not_found(format!("Watch not found: {}", key)))?;
 
         let mut session = session_arc.lock().await;
@@ -718,7 +744,10 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
                     if let Some(ref tx) = session.state.event_tx {
                         let mut watcher = watcher_arc.lock().await;
                         if let Err(e) = watcher.resume(tx.clone()).await {
-                            return Err(Status::internal(format!("Failed to resume watcher: {}", e)));
+                            return Err(Status::internal(format!(
+                                "Failed to resume watcher: {}",
+                                e
+                            )));
                         }
                     } else {
                         return Err(Status::internal("No event channel available for resume"));
@@ -728,7 +757,9 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
                 }
 
                 session.paused = false;
-                let watched_paths = session.state.watch_config
+                let watched_paths = session
+                    .state
+                    .watch_config
                     .as_ref()
                     .map(|c| c.paths.len() as i32)
                     .unwrap_or(0);
@@ -761,18 +792,39 @@ mod tests {
 
     #[test]
     fn test_inotify_event_to_string() {
-        assert_eq!(inotify_event_to_string(InotifyEvent::Create as i32), "create");
-        assert_eq!(inotify_event_to_string(InotifyEvent::Modify as i32), "modify");
-        assert_eq!(inotify_event_to_string(InotifyEvent::Delete as i32), "delete");
+        assert_eq!(
+            inotify_event_to_string(InotifyEvent::Create as i32),
+            "create"
+        );
+        assert_eq!(
+            inotify_event_to_string(InotifyEvent::Modify as i32),
+            "modify"
+        );
+        assert_eq!(
+            inotify_event_to_string(InotifyEvent::Delete as i32),
+            "delete"
+        );
         assert_eq!(inotify_event_to_string(InotifyEvent::All as i32), "all");
     }
 
     #[test]
     fn test_event_type_to_proto() {
-        assert_eq!(event_type_to_proto(&EventType::Create), InotifyEvent::Create);
-        assert_eq!(event_type_to_proto(&EventType::Modify), InotifyEvent::Modify);
-        assert_eq!(event_type_to_proto(&EventType::Delete), InotifyEvent::Delete);
-        assert_eq!(event_type_to_proto(&EventType::Unknown), InotifyEvent::Unspecified);
+        assert_eq!(
+            event_type_to_proto(&EventType::Create),
+            InotifyEvent::Create
+        );
+        assert_eq!(
+            event_type_to_proto(&EventType::Modify),
+            InotifyEvent::Modify
+        );
+        assert_eq!(
+            event_type_to_proto(&EventType::Delete),
+            InotifyEvent::Delete
+        );
+        assert_eq!(
+            event_type_to_proto(&EventType::Unknown),
+            InotifyEvent::Unspecified
+        );
     }
 
     #[test]
@@ -787,7 +839,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_service_creation() {
-        let service = ArgusdServiceImpl::new("test-node".to_string(), "test-cluster".to_string(), 1000);
+        let service =
+            ArgusdServiceImpl::new("test-node".to_string(), "test-cluster".to_string(), 1000);
         assert_eq!(service.node_name, "test-node");
         assert_eq!(service.cluster_name, "test-cluster");
         assert_eq!(service.max_watches, 1000);
