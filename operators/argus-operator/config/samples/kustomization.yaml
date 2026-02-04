@@ -3,6 +3,10 @@ resources:
 # Recommended v2 API (current)
 - argus_v2_arguswatcher.yaml
 - argus_v2_arguswatcher_minimal.yaml
+# Use-case samples
+- argus_v2_compliance_pci_dss.yaml
+- argus_v2_compliance_hipaa.yaml
+- argus_v2_incident_detection.yaml
 # Deprecated v1 API (for migration only)
 - argus_v1_arguswatcher.yaml
 - argus_v1_arguswatcher_minimal.yaml

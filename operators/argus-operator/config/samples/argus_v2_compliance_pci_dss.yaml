@@ -1,0 +1,180 @@
+# PCI-DSS 4.0 Compliance File Integrity Monitoring (FIM) Configuration
+# ========================================================================
+# This ArgusWatcher monitors critical system files to satisfy PCI-DSS 4.0
+# requirements for file integrity monitoring (Requirement 11.5).
+#
+# Key PCI-DSS Requirements Addressed:
+# - Req 10.3.4: Monitor all access to audit logs
+# - Req 10.7: Ensure audit trail integrity (detect modifications)
+# - Req 11.5.2: Deploy FIM on critical system files and content files
+# - Req 11.5.3: Alert on unauthorized modification of critical files
+#
+# Reference: PCI DSS v4.0 (March 2022)
+# https://www.pcisecuritystandards.org/document_library/
+
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: pci-dss-4-compliance-watcher
+  namespace: default
+  labels:
+    app.kubernetes.io/name: argus-operator
+    app.kubernetes.io/managed-by: kustomize
+    # Label indicating this resource is for PCI-DSS compliance
+    panoptes.como-technologies.io/compliance: pci-dss-4.0
+    panoptes.como-technologies.io/severity: critical
+
+spec:
+  # Pod Selector: Monitor only pods in PCI-DSS Cardholder Data Environment (CDE)
+  # ============================================================================
+  # Apply this watcher to pods labeled as "in-scope" for PCI-DSS.
+  # Pods outside the CDE (e.g., development environments) should NOT have this label.
+  selector:
+    matchLabels:
+      pci-dss/scope: in-scope
+
+  # File Integrity Monitoring Subjects
+  # ===================================
+  # Each subject defines a group of files/directories to monitor and how to monitor them.
+  subjects:
+    # Subject 1: User Authentication Files (PCI-DSS Req 11.5.2)
+    # ----------------------------------------------------------
+    # Monitor system files controlling user authentication and access control.
+    # Unauthorized modifications may indicate privilege escalation or account compromise.
+    - paths:
+        # /etc/passwd - User account information (UID, GID, home directory)
+        - /etc/passwd
+        # /etc/shadow - Password hashes and aging information (requires root access)
+        - /etc/shadow
+        # /etc/group - Group membership definitions
+        - /etc/group
+        # /etc/sudoers - Sudo privilege configuration (who can run commands as root)
+        - /etc/sudoers
+      # Events to monitor:
+      # - modify: File contents changed (most critical for integrity)
+      # - delete: File removed (may disable authentication)
+      # - attrib: Permissions/ownership changed (e.g., chmod, chown)
+      events:
+        - modify
+        - delete
+        - attrib
+      # Tags for SIEM/alerting integration
+      tags:
+        # Compliance framework identifier
+        compliance: pci-dss-4.0
+        # PCI-DSS requirement number for audit trail
+        pci-requirement: "11.5.2"
+        # Alert priority (critical = immediate response required)
+        severity: critical
+        # File category for filtering in dashboards
+        category: authentication
+      # Recursive: false (these are files, not directories)
+      # No ignore patterns needed for individual files
+
+    # Subject 2: Audit Log Files (PCI-DSS Req 10.3.4, 10.7)
+    # -------------------------------------------------------
+    # Monitor audit logs to detect tampering or unauthorized access.
+    # PCI-DSS requires that audit logs themselves be monitored for integrity.
+    - paths:
+        # /var/log/audit - Linux auditd logs (if using auditd)
+        - /var/log/audit
+        # /var/log/syslog - System logging facility (rsyslog/syslog-ng)
+        - /var/log/syslog
+      events:
+        # Monitor all events on audit logs to detect any manipulation
+        - modify   # Log file content changed (appending is normal, truncation is suspicious)
+        - delete   # Log file deleted (violation of retention policy)
+        - attrib   # Permissions changed (may allow unauthorized access)
+        - create   # New log files created (normal, but track for completeness)
+        - move     # Log files moved/renamed (may indicate hiding evidence)
+      # Recursive monitoring for /var/log/audit directory
+      recursive: true
+      # Limit recursion depth to avoid monitoring transient files deep in hierarchy
+      maxDepth: 2
+      # Ignore temporary/swap files created by log rotation or editors
+      ignore:
+        - "*.tmp"    # Temporary files
+        - "*.swp"    # Vim swap files
+        - "*.old"    # Rotated logs (already archived)
+        - "*.gz"     # Compressed rotated logs
+      tags:
+        compliance: pci-dss-4.0
+        pci-requirement: "10.3.4,10.7"
+        severity: critical
+        category: audit-logs
+
+    # Subject 3: System Executables and Libraries (PCI-DSS Req 11.5.2)
+    # -----------------------------------------------------------------
+    # Monitor critical system binaries to detect rootkits, backdoors, or malware.
+    # Modifications to these files may indicate system compromise.
+    - paths:
+        # /usr/bin - Standard user executable binaries (ls, cat, grep, etc.)
+        - /usr/bin
+        # /usr/sbin - System administrator binaries (iptables, systemctl, etc.)
+        - /usr/sbin
+        # /usr/lib - Shared libraries used by system executables
+        - /usr/lib
+      events:
+        # Focus on modifications and deletions (creation may occur during updates)
+        - modify   # Binary replaced with trojan/backdoor
+        - delete   # Binary removed (may break system or hide malware)
+        - attrib   # Permissions changed (e.g., adding setuid bit for privilege escalation)
+      # Recursive monitoring to catch libraries in subdirectories
+      recursive: true
+      # Limit depth to avoid deep library hierarchies that change frequently
+      maxDepth: 3
+      # Ignore cache files and temporary build artifacts
+      ignore:
+        - "*.tmp"
+        - "*.cache"
+        - "*.swp"
+        - "*.pyc"      # Python bytecode (changes on every run)
+        - "__pycache__" # Python cache directories
+      tags:
+        compliance: pci-dss-4.0
+        pci-requirement: "11.5.2"
+        # High severity (not critical) - some changes may be legitimate OS updates
+        severity: high
+        category: system-executables
+
+    # Subject 4: System Configuration Files (PCI-DSS Req 11.5.2)
+    # -----------------------------------------------------------
+    # Monitor network and service configuration files that affect security posture.
+    - paths:
+        # /etc/ssh/sshd_config - SSH server configuration (e.g., PermitRootLogin)
+        - /etc/ssh
+        # /etc/security - PAM security configuration (password policies, access controls)
+        - /etc/security
+        # /etc/pam.d - Pluggable Authentication Modules configuration
+        - /etc/pam.d
+        # /etc/hosts - Static hostname to IP mappings (may be abused for redirects)
+        - /etc/hosts
+        # /etc/hosts.allow, /etc/hosts.deny - TCP wrapper access controls
+        - /etc/hosts.allow
+        - /etc/hosts.deny
+      events:
+        - modify
+        - delete
+        - attrib
+      recursive: true
+      maxDepth: 2
+      ignore:
+        - "*.tmp"
+        - "*.swp"
+      tags:
+        compliance: pci-dss-4.0
+        pci-requirement: "11.5.2"
+        severity: critical
+        category: security-configuration
+
+  # Container Runtime Detection
+  # ============================
+  # Auto-detect containerd, CRI-O, or Docker runtime.
+  # This is required to access container filesystems via /proc/{pid}/root.
+  containerRuntime: auto
+
+  # Watcher State
+  # =============
+  # paused: false - Watcher is actively monitoring
+  # Set to true to temporarily disable monitoring without deleting the resource.
+  paused: false

@@ -59,6 +59,7 @@ const (
 	ConditionTypeAvailable   = "Available"
 	ConditionTypeProgressing = "Progressing"
 	ConditionTypeDegraded    = "Degraded"
+	ConditionTypeStalled     = "Stalled"
 )
 
 // JanusGuardReconciler reconciles a JanusGuard object
@@ -163,6 +164,15 @@ func (r *JanusGuardReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		r.setCondition(&guard, ConditionTypeAvailable, metav1.ConditionFalse, "NoMatchingPods", "No pods match the selector")
 	} else {
 		r.setCondition(&guard, ConditionTypeAvailable, metav1.ConditionFalse, "NoPodsGuarded", "No pods are being guarded")
+	}
+
+	// Detect stalled state: observable pods exist but none can be guarded
+	if guard.Status.ObservablePods > 0 && guardedCount == 0 && err != nil {
+		r.setCondition(&guard, ConditionTypeStalled, metav1.ConditionTrue, "NoDaemonReachable",
+			"No daemon pods are reachable; guards cannot be established")
+		r.Recorder.Event(&guard, corev1.EventTypeWarning, "Stalled", "Unable to reach any daemon pods for guard creation")
+	} else {
+		r.setCondition(&guard, ConditionTypeStalled, metav1.ConditionFalse, "Operational", "Controller is operating normally")
 	}
 
 	r.setCondition(&guard, ConditionTypeProgressing, metav1.ConditionFalse, "ReconcileComplete", "Reconciliation complete")

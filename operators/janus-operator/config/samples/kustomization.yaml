@@ -3,6 +3,9 @@ resources:
 # Recommended v2 API (current)
 - janus_v2_janusguard.yaml
 - janus_v2_janusguard_minimal.yaml
+# Use-case samples
+- janus_v2_runtime_protection.yaml
+- janus_v2_audit_only.yaml
 # Deprecated v1 API (for migration only)
 - janus_v1_janusguard.yaml
 - janus_v1_janusguard_minimal.yaml

@@ -1,0 +1,17 @@
+# Panoptes Argus Pack Value Schema
+# Validates pack configuration before deployment via Spectro Cloud Palette
+
+pack.namespace:
+  schema: '{{ required | format "${string}" }}'
+
+controller.image.tag:
+  schema: '{{ required | format "${string}" }}'
+
+controller.replicas:
+  schema: '{{ format "${number:[1-10]}" }}'
+
+daemon.image.tag:
+  schema: '{{ required | format "${string}" }}'
+
+observability.prometheus.serviceMonitor.interval:
+  schema: '{{ format "${string}" }}'

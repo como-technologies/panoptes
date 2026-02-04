@@ -1,181 +1,198 @@
-# Panoptes Quick Start: Local Kubernetes Testing
+# Panoptes Quick Start
 
-Get Panoptes running locally in 5 minutes. No fluff. Just commands.
+**Panoptes** is a Kubernetes-native file integrity monitoring (FIM) and file access auditing system:
+- **Argus**: FIM using Linux inotify (ArgusWatcher CRD, short name: `aw`)
+- **Janus**: Access auditing/enforcement using Linux fanotify (JanusGuard CRD, short name: `jg`)
+- **Panoptes Eye**: Real-time web dashboard
+
+**API groups**: `argus.como-technologies.io/v2`, `janus.como-technologies.io/v2`
 
 ---
 
-## Prerequisites
+## 1. See It in 60 Seconds
+
+If you already have a Kubernetes cluster with Panoptes deployed, you can create a watcher in seconds:
 
 ```bash
-# Docker (or Podman)
+# Create a simple watcher
+kubectl apply -f - <<EOF
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: quick-test
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  subjects:
+    - paths: ["/etc/passwd", "/etc/shadow"]
+      events: [create, modify, delete]
+      tags:
+        severity: critical
+EOF
+
+# Check status
+kubectl get aw
+
+# See events (if Panoptes Eye is deployed)
+kubectl port-forward -n panoptes-system svc/panoptes-eye 3000:3000
+```
+
+**Don't have Panoptes deployed yet?** Follow the full setup below.
+
+---
+
+## 2. Prerequisites
+
+```bash
+# Docker
 docker --version  # 20.10+
 
 # kind (Kubernetes in Docker)
-# Install: https://kind.sigs.k8s.io/docs/user/quick-start/#installation
 kind --version    # 0.20+
 
 # kubectl
 kubectl version --client  # 1.28+
-
-# Optional: Helm
-helm version      # 3.12+
 ```
+
+Install kind: https://kind.sigs.k8s.io/docs/user/quick-start/#installation
 
 ---
 
-## 1. Create Local Cluster
+## 3. One-Command Setup
 
 ```bash
-cd /path/to/panoptes
+# Clone the repo
+git clone https://github.com/como-technologies/panoptes.git
+cd panoptes
 
-# Create kind cluster with privileged container support
-kind create cluster --name panoptes-dev --config hack/kind-config.yaml
-
-# Verify
-kubectl cluster-info --context kind-panoptes-dev
+# Deploy everything (creates Kind cluster, builds images, deploys stack)
+./hack/local-deploy.sh all
 ```
+
+**For WSL2 users:** Use `./hack/local-wsl-deploy.sh all` instead.
+
+This command:
+1. Creates a Kind cluster named `panoptes-dev`
+2. Builds all container images (operators, daemons, UI)
+3. Loads images into Kind
+4. Deploys CRDs, operators, daemons, and dashboard
+
+Takes ~5-7 minutes on first run (image builds are cached).
 
 ---
 
-## 2. Build Container Images
+## 4. What You'll See
+
+After deployment, you'll have the `panoptes-system` namespace with:
 
 ```bash
-# Build all images and load into kind (takes ~5 min first time)
-./hack/local-deploy.sh build
-
-# Or build individually:
-# Operators
-docker build -t localhost/argus-operator:dev operators/argus-operator/
-docker build -t localhost/janus-operator:dev operators/janus-operator/
-
-# Daemons
-docker build -t localhost/argusd:dev daemons/argusd/
-docker build -t localhost/janusd:dev daemons/janusd/
-
-# UI
-docker build -t localhost/panoptes-eye:dev ui/panoptes-eye/
-
-# Load into kind
-kind load docker-image localhost/argus-operator:dev --name panoptes-dev
-kind load docker-image localhost/janus-operator:dev --name panoptes-dev
-kind load docker-image localhost/argusd:dev --name panoptes-dev
-kind load docker-image localhost/janusd:dev --name panoptes-dev
-kind load docker-image localhost/panoptes-eye:dev --name panoptes-dev
-```
-
----
-
-## 3. Deploy Panoptes Stack
-
-```bash
-# One command deployment
-./hack/local-deploy.sh deploy
-
-# Or step-by-step:
-
-# Create namespace
-kubectl create namespace panoptes-system
-
-# Install CRDs
-kubectl apply -f operators/argus-operator/config/crd/bases/
-kubectl apply -f operators/janus-operator/config/crd/bases/
-
-# Deploy operators (using kustomize)
-kubectl apply -k operators/argus-operator/config/default/
-kubectl apply -k operators/janus-operator/config/default/
-
-# Deploy Panoptes Eye UI
-kubectl apply -f hack/panoptes-eye-local.yaml
-
-# Verify pods are running
-kubectl get pods -n panoptes-system -w
+kubectl get pods -n panoptes-system
 ```
 
 Expected output:
 ```
 NAME                                READY   STATUS    RESTARTS   AGE
-argus-operator-6d9b8c7f5-xxxxx     1/1     Running   0          30s
-argusd-xxxxx                        1/1     Running   0          30s
-janus-operator-7c8d9e6f4-xxxxx     1/1     Running   0          30s
-janusd-xxxxx                        1/1     Running   0          30s
-panoptes-eye-5f4e3d2c1-xxxxx       1/1     Running   0          30s
+argus-operator-6d9b8c7f5-xxxxx     1/1     Running   0          2m
+argusd-xxxxx                        1/1     Running   0          2m
+janus-operator-7c8d9e6f4-xxxxx     1/1     Running   0          2m
+janusd-xxxxx                        1/1     Running   0          2m
+panoptes-eye-5f4e3d2c1-xxxxx       1/1     Running   0          2m
+```
+
+Check for active watchers and guards (should be empty initially):
+
+```bash
+kubectl get aw,jg -A
+# No resources found
 ```
 
 ---
 
-## 4. Create Test Application
+## 5. Create Your First Watcher
+
+Deploy a test workload and monitor it:
 
 ```bash
 # Deploy nginx test pod
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: Pod
-metadata:
-  name: test-app
-  namespace: default
-  labels:
-    app: test-app
-    panoptes.como-technologies.io/monitored: "true"
-spec:
-  containers:
-  - name: nginx
-    image: nginx:alpine
-    command: ["sleep", "infinity"]
-EOF
+kubectl run nginx --image=nginx --labels="app=nginx"
 
 # Wait for pod
-kubectl wait --for=condition=Ready pod/test-app -n default --timeout=60s
+kubectl wait --for=condition=Ready pod/nginx --timeout=60s
+
+# Apply watcher from samples
+kubectl apply -f operators/argus-operator/config/samples/argus_v2_arguswatcher_minimal.yaml
+
+# Verify watcher is active
+kubectl get aw
 ```
 
----
+Expected output:
+```
+NAME            AGE
+basic-watcher   5s
+```
 
-## 5. Create ArgusWatcher (File Integrity Monitoring)
+Trigger a file event:
+
+```bash
+# Modify watched file
+kubectl exec nginx -- sh -c "echo test >> /app/data"
+
+# Check watcher status for events
+kubectl get aw basic-watcher -o yaml
+```
+
+**Note:** The minimal sample watches `/app/data` for the `myapp` label. To watch nginx specifically, create a custom watcher:
 
 ```bash
 kubectl apply -f - <<EOF
-apiVersion: argus.como-technologies.io/v1
+apiVersion: argus.como-technologies.io/v2
 kind: ArgusWatcher
 metadata:
-  name: test-watcher
+  name: nginx-watcher
   namespace: default
 spec:
   selector:
     matchLabels:
-      app: test-app
+      run: nginx
   subjects:
     - paths:
         - /etc/passwd
         - /etc/shadow
-        - /etc/hosts
       events:
-        - modify
         - create
+        - modify
         - delete
-      recursive: false
       tags:
-        severity: high
-        compliance: pci-dss
+        severity: critical
 EOF
 
-# Verify watcher is active
-kubectl get arguswatcher test-watcher -o wide
+# Trigger an event
+kubectl exec nginx -- sh -c "echo '# test' >> /etc/passwd"
+
+# View events in operator logs
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argus-operator --tail=20
 ```
 
 ---
 
-## 6. Create JanusGuard (Access Auditing)
+## 6. Try Access Control (Optional)
+
+Deploy a JanusGuard to audit and block access to sensitive files:
 
 ```bash
 kubectl apply -f - <<EOF
-apiVersion: janus.como-technologies.io/v1
+apiVersion: janus.como-technologies.io/v2
 kind: JanusGuard
 metadata:
-  name: test-guard
+  name: block-shadow
   namespace: default
 spec:
   selector:
     matchLabels:
-      app: test-app
+      run: nginx
   subjects:
     - deny:
         - /etc/shadow
@@ -183,81 +200,92 @@ spec:
         - access
         - open
       audit: true
-      enforcing: false  # Dry-run mode for testing
+      enforcing: false  # Dry-run mode (logs only)
       tags:
         severity: critical
+        compliance: pci-dss
 EOF
 
-# Verify guard is active
-kubectl get janusguard test-guard -o wide
+# Test access (will be audited but not blocked in dry-run mode)
+kubectl exec nginx -- cat /etc/shadow
+
+# View audit logs
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=janus-operator --tail=20
+
+# Enable enforcement (blocks access)
+kubectl patch jg block-shadow -p '{"spec":{"subjects":[{"deny":["/etc/shadow"],"events":["access","open"],"audit":true,"enforcing":true,"tags":{"severity":"critical","compliance":"pci-dss"}}]}}'
+
+# Test again (should fail with permission denied)
+kubectl exec nginx -- cat /etc/shadow
 ```
 
 ---
 
-## 7. Access Panoptes Eye Dashboard
+## 7. Open the Dashboard
+
+Access Panoptes Eye for real-time visibility:
 
 ```bash
-# Port-forward the UI
-kubectl port-forward -n panoptes-system svc/panoptes-eye 3000:3000 &
-
-# Open browser
-open http://localhost:3000  # macOS
-# or: xdg-open http://localhost:3000  # Linux
-# or: start http://localhost:3000     # Windows
+# Port-forward the UI service
+kubectl port-forward -n panoptes-system svc/panoptes-eye 3000:3000
 ```
+
+Open http://localhost:3000 in your browser.
 
 Dashboard features:
-- **Watchers**: View all ArgusWatcher resources
-- **Guards**: View all JanusGuard resources
-- **Events**: Real-time file event stream
-- **Explorer**: Browse container filesystems
+- **Watchers**: View all ArgusWatcher resources across namespaces
+- **Guards**: View all JanusGuard resources and enforcement status
+- **Events**: Real-time file event stream from both Argus and Janus
+- **Explorer**: Browse container filesystems (coming soon)
 
 ---
 
-## 8. Generate Test Events
+## 8. Next Steps
 
-```bash
-# Trigger file modification (detected by Argus)
-kubectl exec test-app -- sh -c "echo 'test' >> /etc/hosts"
+**Use-case quickstarts:**
+- Security monitoring: `guides/quick-start-security.md`
+- Compliance by framework: `guides/monitoring-by-compliance.md`
+- Multi-cluster setup: `guides/multi-cluster.md`
+- Enabling enforcement: `guides/enabling-enforcement.md`
 
-# Trigger file access (audited by Janus)
-kubectl exec test-app -- cat /etc/shadow
+**Deployment guides:**
+- Spectro Cloud Palette: `docs/SPECTRO_QUICK_START.md`
+- Webhook injection for pre-app protection: `docs/WEBHOOK_DEPLOYMENT.md`
 
-# View events in operator logs
-kubectl logs -n panoptes-system -l app=argus-operator --tail=20
-kubectl logs -n panoptes-system -l app=janus-operator --tail=20
+**Best practices:**
+- What to monitor: `guides/what-to-monitor.md`
+- Sample gallery: `operators/argus-operator/config/samples/` and `operators/janus-operator/config/samples/`
 
-# View events in Panoptes Eye
-# Navigate to Events tab in the dashboard
-```
-
----
-
-## 9. Check Metrics (Optional)
-
+**Metrics and observability:**
 ```bash
 # Argus operator metrics
-kubectl port-forward -n panoptes-system svc/argus-operator-metrics 8080:8080 &
+kubectl port-forward -n panoptes-system svc/argus-operator-metrics 8080:8080
 curl localhost:8080/metrics | grep argus_
 
 # Janus operator metrics
-kubectl port-forward -n panoptes-system svc/janus-operator-metrics 8081:8080 &
+kubectl port-forward -n panoptes-system svc/janus-operator-metrics 8081:8080
 curl localhost:8081/metrics | grep janus_
 ```
 
 ---
 
-## 10. Cleanup
+## 9. Clean Up
 
 ```bash
 # Delete test resources
-kubectl delete arguswatcher test-watcher
-kubectl delete janusguard test-guard
-kubectl delete pod test-app
+kubectl delete aw --all
+kubectl delete jg --all
+kubectl delete pod nginx
 
 # Delete entire cluster
-kind delete cluster --name panoptes-dev
+./hack/local-deploy.sh clean
 ```
+
+---
+
+## 10. Coming Soon
+
+Pre-built container images will be available on GHCR soon, enabling one-command `helm install` without building from source.
 
 ---
 
@@ -265,39 +293,29 @@ kind delete cluster --name panoptes-dev
 
 ### Pods stuck in Pending
 ```bash
-# Check events
 kubectl describe pod -n panoptes-system <pod-name>
 
-# Common issues:
-# - Image not loaded into kind: kind load docker-image <image> --name panoptes-dev
-# - Insufficient resources: Increase Docker memory to 4GB+
+# Common fixes:
+# - Image not loaded: kind load docker-image <image> --name panoptes-dev
+# - Insufficient memory: Increase Docker to 4GB+
 ```
 
-### Daemon pods failing
+### Daemons failing to start
 ```bash
-# Daemons need privileged access - check security context
+# Daemons require privileged access
 kubectl get pod -n panoptes-system argusd-xxx -o yaml | grep -A5 securityContext
 
-# Verify hostPID is enabled
-kubectl get daemonset -n panoptes-system argusd -o yaml | grep hostPID
+# Required capabilities: SYS_ADMIN, SYS_PTRACE, DAC_READ_SEARCH
 ```
 
 ### No events detected
 ```bash
-# Verify watcher is targeting correct pods
-kubectl get arguswatcher test-watcher -o jsonpath='{.status.watchedPods}'
+# Verify watcher targets the correct pods
+kubectl get aw <name> -o jsonpath='{.spec.selector}'
+kubectl get pods -l <selector-labels>
 
-# Check daemon gRPC connectivity
+# Check daemon connectivity
 kubectl logs -n panoptes-system argusd-xxx | grep -i grpc
-```
-
-### UI not loading
-```bash
-# Check UI pod logs
-kubectl logs -n panoptes-system -l app=panoptes-eye
-
-# Verify service account has permissions
-kubectl auth can-i list pods --as=system:serviceaccount:panoptes-system:panoptes-eye
 ```
 
 ---
@@ -306,34 +324,14 @@ kubectl auth can-i list pods --as=system:serviceaccount:panoptes-system:panoptes
 
 | Command | Description |
 |---------|-------------|
+| `./hack/local-deploy.sh all` | Full automated setup |
 | `./hack/local-deploy.sh build` | Build all images |
-| `./hack/local-deploy.sh deploy` | Deploy full stack |
-| `./hack/local-deploy.sh test` | Run test scenario |
-| `./hack/local-deploy.sh clean` | Remove everything |
+| `./hack/local-deploy.sh deploy` | Deploy to cluster |
+| `./hack/local-deploy.sh clean` | Delete cluster |
 | `kubectl get aw` | List ArgusWatchers |
 | `kubectl get jg` | List JanusGuards |
 
----
-
-## Next Steps
-
-1. **Enable webhook injection**: See [WEBHOOK_DEPLOYMENT.md](WEBHOOK_DEPLOYMENT.md) to ensure protection is active before apps start
-2. **Add more watchers**: See `operators/argus-operator/config/samples/`
-3. **Configure alerting**: Enable PrometheusRules in Helm values
-4. **Deploy to Spectro Cloud**: Use `packs/panoptes/` for Palette deployment
-5. **Read the docs**: `docs/FUTURE_STATE.md` for roadmap
-
----
-
-## Optional: Enable Webhook Injection
-
-By default, the local deployment runs without webhooks for simplicity. In production, you should enable webhooks to ensure file monitoring is active **before** your application containers start.
-
-See [WEBHOOK_DEPLOYMENT.md](WEBHOOK_DEPLOYMENT.md) for complete instructions on:
-- Installing cert-manager for TLS certificates
-- Configuring the operators to enable webhooks
-- Deploying MutatingWebhookConfigurations
-- Enabling injection on namespaces
+**WSL2 users:** Use `./hack/local-wsl-deploy.sh` instead.
 
 ---
 

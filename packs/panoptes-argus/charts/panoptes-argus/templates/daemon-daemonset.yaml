@@ -16,6 +16,9 @@ spec:
     spec:
       serviceAccountName: {{ include "panoptes-argus.serviceAccountName" . }}
       hostPID: true
+      {{- with .Values.daemon.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       containers:
         - name: argusd
           image: "{{ .Values.daemon.image.repository }}:{{ .Values.daemon.image.tag }}"

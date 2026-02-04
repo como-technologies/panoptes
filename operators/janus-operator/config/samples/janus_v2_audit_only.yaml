@@ -1,0 +1,222 @@
+# Audit-Only File Access Monitoring Configuration
+# ================================================
+# This JanusGuard operates in AUDIT-ONLY mode (no enforcement).
+# It logs all access attempts to sensitive files without blocking them.
+#
+# Use Case: Deploy this configuration when:
+# - Testing Janus in a new environment (avoid breaking applications)
+# - Establishing baseline access patterns before enforcing policies
+# - Operating in "shadow mode" for compliance reporting without risk
+# - Investigating suspicious activity without alerting attackers
+#
+# This configuration implements a "learning mode" approach:
+# 1. Deploy audit-only guard
+# 2. Collect access logs for 1-2 weeks
+# 3. Analyze logs to identify legitimate vs. suspicious access
+# 4. Switch to enforcing mode (janus_v2_runtime_protection.yaml)
+
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: audit-only-guard
+  namespace: default
+  labels:
+    app.kubernetes.io/name: janus-operator
+    app.kubernetes.io/managed-by: kustomize
+    # Label indicating this resource is for audit-only monitoring
+    panoptes.como-technologies.io/mode: audit-only
+
+spec:
+  # Pod Selector: Monitor all pods with Panoptes monitoring enabled
+  # ================================================================
+  selector:
+    matchLabels:
+      panoptes.como-technologies.io/monitored: "true"
+
+  # Audit-Only Subjects
+  # ===================
+  subjects:
+    # Subject 1: System Credential Files (Audit Only)
+    # ------------------------------------------------
+    # Monitor access to credential files to establish baseline access patterns.
+    # In audit-only mode, access is logged but NOT blocked.
+    - deny:
+        # /etc/shadow - Encrypted password hashes
+        # Expected access: None (applications should not read /etc/shadow)
+        # Suspicious access: Any access may indicate credential dumping
+        - /etc/shadow
+        # /etc/sudoers - Sudo configuration
+        # Expected access: sudo, visudo during configuration changes
+        # Suspicious access: Containerized applications reading sudoers
+        - /etc/sudoers
+      # Allow list for files that applications may legitimately read
+      allow:
+        # /etc/passwd - User account information
+        # Expected access: Any application performing UID/username lookups
+        # This is normal and expected for many applications
+        - /etc/passwd
+        # /etc/group - Group membership information
+        # Expected access: Any application performing GID/groupname lookups
+        - /etc/group
+      events:
+        # Monitor open and access events
+        - open     # File opened for reading/writing
+        - access   # File metadata accessed
+      # defaultResponse: audit - LOG access without blocking
+      # This is the key difference from enforcing mode.
+      defaultResponse: audit
+      # audit: true - Ensure all events are logged
+      audit: true
+      tags:
+        mode: audit-only
+        severity: high
+        category: credential-access
+
+    # Subject 2: Kubernetes Secrets (Audit Only with Owner Allow)
+    # ------------------------------------------------------------
+    # Monitor secret access but allow pods to read their own secrets.
+    # This helps identify cross-pod secret access attempts.
+    - deny:
+        # /var/run/secrets/kubernetes.io - Service account tokens
+        - /var/run/secrets/kubernetes.io
+        # /var/run/secrets - Additional secret mounts
+        - /var/run/secrets
+      allow: []
+      events:
+        - open
+        - access
+      # autoAllowOwner: true - Allow pods to access their own secrets
+      # This prevents false positives from normal secret usage while still
+      # detecting cross-pod secret access.
+      autoAllowOwner: true
+      defaultResponse: audit
+      audit: true
+      tags:
+        mode: audit-only
+        severity: critical
+        category: kubernetes-secrets
+
+    # Subject 3: Container Runtime Sockets (Audit Only)
+    # --------------------------------------------------
+    # Monitor runtime socket access to detect container breakout attempts.
+    # In audit-only mode, access is logged but not blocked (useful for testing).
+    - deny:
+        # Docker socket
+        - /var/run/docker.sock
+        # containerd socket
+        - /run/containerd/containerd.sock
+        - /var/run/containerd/containerd.sock
+        # CRI-O socket
+        - /var/run/crio/crio.sock
+      allow: []
+      events:
+        - open
+        - access
+      defaultResponse: audit
+      audit: true
+      tags:
+        mode: audit-only
+        severity: critical
+        category: container-runtime
+        # MITRE ATT&CK: Escape to Host (T1611)
+        mitre-attack: T1611
+
+    # Subject 4: System Binaries (Audit Only)
+    # ----------------------------------------
+    # Monitor access to system executables to detect reconnaissance or attacks.
+    - deny:
+        # Network tools often abused by attackers
+        - /usr/bin/curl
+        - /usr/bin/wget
+        - /usr/bin/nc
+        - /usr/bin/ncat
+        - /usr/bin/netcat
+        # Process inspection tools
+        - /usr/bin/ps
+        - /usr/bin/top
+        - /usr/bin/htop
+        # File transfer tools
+        - /usr/bin/scp
+        - /usr/bin/rsync
+      # Allow list for binaries that applications may legitimately use
+      allow:
+        # /bin/sh, /bin/bash - Shell interpreters (common in containers)
+        - /bin/sh
+        - /bin/bash
+        # /usr/bin/ls - Directory listing (benign)
+        - /usr/bin/ls
+      events:
+        # Monitor execute events to detect command execution
+        - execute  # Binary executed (most interesting for security)
+        - open     # Binary opened (may be preparing to execute)
+      defaultResponse: audit
+      audit: true
+      tags:
+        mode: audit-only
+        severity: medium
+        category: system-binaries
+
+    # Subject 5: Temporary Directories (Audit Only)
+    # ----------------------------------------------
+    # Monitor temporary directories for malware staging.
+    # High volume of events - useful for establishing baseline.
+    - deny:
+        # Temporary directories often used for malware staging
+        - /tmp
+        - /var/tmp
+        - /dev/shm
+      allow: []
+      events:
+        # Focus on file creation (new payloads)
+        - open     # File opened (may be writing payload)
+        - access   # File accessed (checking if exists)
+      defaultResponse: audit
+      audit: true
+      tags:
+        mode: audit-only
+        # Medium severity due to high false positive rate
+        severity: medium
+        category: temporary-directories
+
+    # Subject 6: SSH Configuration (Audit Only)
+    # ------------------------------------------
+    # Monitor SSH configuration access to detect lateral movement attempts.
+    - deny:
+        # SSH configuration directory
+        - /etc/ssh
+        # User SSH keys (all users)
+        - /root/.ssh
+        - /home/*/.ssh
+      allow: []
+      events:
+        - open
+        - access
+        - modify
+      defaultResponse: audit
+      audit: true
+      tags:
+        mode: audit-only
+        severity: high
+        category: ssh-access
+
+  # Container Runtime Detection
+  # ============================
+  containerRuntime: auto
+
+  # Enforcement Mode
+  # ================
+  # enforcing: false - AUDIT-ONLY MODE (no blocking)
+  # This is the key setting that makes this guard non-blocking.
+  # All access attempts are logged but NOT denied.
+  #
+  # To enable enforcement after establishing baseline:
+  # 1. Analyze audit logs to identify false positives
+  # 2. Update allow/deny lists based on findings
+  # 3. Set enforcing: true
+  # 4. Monitor for application breakage
+  enforcing: false
+
+  # Guard State
+  # ===========
+  # paused: false - Guard is actively monitoring (but not blocking)
+  paused: false

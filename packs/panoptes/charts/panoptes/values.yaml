@@ -191,3 +191,12 @@ compliance:
     enforcing: false
     podSelector:
       gdpr/scope: "personal-data"
+
+# Network policies (default-deny with explicit allows for all components)
+networkPolicy:
+  enabled: true
+
+# Pod disruption budgets for controller Deployments
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

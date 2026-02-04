@@ -1,0 +1,204 @@
+# Container Runtime Protection Configuration
+# ===========================================
+# This JanusGuard enforces active protection against container breakout attempts,
+# credential theft, and unauthorized access to sensitive system resources.
+#
+# Use Case: Prevent security incidents by actively BLOCKING access to:
+# - Container runtime sockets (Docker, containerd, CRI-O)
+# - System credentials (/etc/shadow, SSH keys)
+# - Kubernetes secrets mounted as volumes
+#
+# This configuration implements CIS Kubernetes Benchmark recommendations:
+# - 5.7.3: Apply Security Context to Your Pods and Containers
+# - 5.7.4: The default namespace should not be used
+#
+# Reference: CIS Kubernetes Benchmark v1.8.0
+# https://www.cisecurity.org/benchmark/kubernetes
+
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: runtime-protection-guard
+  namespace: default
+  labels:
+    app.kubernetes.io/name: janus-operator
+    app.kubernetes.io/managed-by: kustomize
+    # Label indicating this resource is for CIS Kubernetes compliance
+    panoptes.como-technologies.io/compliance: cis-kubernetes
+    panoptes.como-technologies.io/severity: critical
+
+spec:
+  # Pod Selector: Monitor all pods in scope for CIS Kubernetes audit
+  # =================================================================
+  # Apply this guard to pods labeled for Kubernetes security auditing.
+  selector:
+    matchLabels:
+      cis/scope: kubernetes-audit
+
+  # Access Control Subjects
+  # =======================
+  # Each subject defines access control policies for specific files/directories.
+  subjects:
+    # Subject 1: Container Runtime Socket Protection (CIS 5.7.3)
+    # -----------------------------------------------------------
+    # CRITICAL: Container runtime sockets provide root-equivalent access to the host.
+    # Mounting these sockets into containers allows container breakout and host compromise.
+    #
+    # Attack Scenario:
+    # 1. Attacker gains code execution in container
+    # 2. Container has /var/run/docker.sock mounted
+    # 3. Attacker uses docker CLI to spawn privileged container
+    # 4. Privileged container provides full host access
+    - deny:
+        # Docker socket (legacy but still common)
+        - /var/run/docker.sock
+        # containerd socket (most Kubernetes clusters)
+        - /run/containerd/containerd.sock
+        # CRI-O socket (OpenShift, some Kubernetes distributions)
+        - /var/run/crio/crio.sock
+        # Additional containerd paths
+        - /var/run/containerd/containerd.sock
+      # No allow list - ALL access to runtime sockets should be denied
+      allow: []
+      events:
+        # Monitor open and access events (read/write operations)
+        - open     # File opened for reading/writing
+        - access   # File metadata accessed (still dangerous)
+      # defaultResponse: deny - BLOCK all access attempts
+      # This is the most restrictive setting - no exceptions.
+      defaultResponse: deny
+      # audit: true - Log all access attempts (even those that are blocked)
+      # This creates an audit trail for security investigations.
+      audit: true
+      tags:
+        compliance: cis-kubernetes
+        cis-requirement: "5.7.3"
+        severity: critical
+        category: container-breakout
+        # MITRE ATT&CK: Escape to Host (T1611)
+        mitre-attack: T1611
+
+    # Subject 2: System Credential Protection
+    # ----------------------------------------
+    # Protect system credential files from unauthorized access.
+    # These files should NEVER be accessed by containerized applications.
+    - deny:
+        # /etc/shadow - Encrypted password hashes (requires root to read)
+        - /etc/shadow
+        # /etc/sudoers - Sudo privilege configuration
+        - /etc/sudoers
+        # /etc/sudoers.d - Additional sudo configuration files
+        - /etc/sudoers.d
+        # /root/.ssh - Root user SSH keys (private keys = full host access)
+        - /root/.ssh
+        # /etc/ssh/ssh_host_*_key - SSH host private keys
+        - /etc/ssh/ssh_host_rsa_key
+        - /etc/ssh/ssh_host_ecdsa_key
+        - /etc/ssh/ssh_host_ed25519_key
+      # Allow limited read access to non-sensitive authentication files
+      allow:
+        # /etc/passwd - User account info (UID/GID mapping, needed by many apps)
+        - /etc/passwd
+        # /etc/group - Group membership (needed for permission checks)
+        - /etc/group
+      events:
+        - open     # File opened
+        - access   # File accessed
+      defaultResponse: deny
+      audit: true
+      tags:
+        compliance: cis-kubernetes
+        severity: critical
+        category: credential-theft
+        # MITRE ATT&CK: Unsecured Credentials (T1552)
+        mitre-attack: T1552
+
+    # Subject 3: Kubernetes Secret Protection
+    # ----------------------------------------
+    # Protect Kubernetes secrets mounted as volumes from unauthorized access.
+    # autoAllowOwner: true allows the pod that owns the secret to read it.
+    - deny:
+        # /var/run/secrets/kubernetes.io - Default service account token path
+        - /var/run/secrets/kubernetes.io
+        # /var/run/secrets - Additional secret mount paths
+        - /var/run/secrets
+      allow: []
+      events:
+        - open     # Secret file opened
+        - access   # Secret accessed
+        - execute  # Attempt to execute secret as binary (unusual)
+      # autoAllowOwner: true - Allow the pod that mounted the secret to read it
+      # This prevents other containers/processes from accessing secrets they don't own.
+      autoAllowOwner: true
+      defaultResponse: deny
+      audit: true
+      tags:
+        compliance: cis-kubernetes
+        severity: critical
+        category: kubernetes-secrets
+        # MITRE ATT&CK: Container API (T1552.007)
+        mitre-attack: T1552.007
+
+    # Subject 4: Sensitive System Directories
+    # ----------------------------------------
+    # Protect additional sensitive directories from unauthorized access.
+    - deny:
+        # /proc/sys/kernel - Kernel tuning parameters (can disable security features)
+        - /proc/sys/kernel
+        # /sys/kernel - Kernel sysfs interface
+        - /sys/kernel
+        # /etc/kubernetes - Kubernetes configuration (kubeconfig, manifests)
+        - /etc/kubernetes
+        # /var/lib/kubelet - Kubelet data directory (pods, volumes, credentials)
+        - /var/lib/kubelet
+      allow: []
+      events:
+        - open
+        - access
+        - modify   # Modifications to these directories are especially dangerous
+      defaultResponse: deny
+      audit: true
+      tags:
+        compliance: cis-kubernetes
+        severity: critical
+        category: system-directories
+
+    # Subject 5: Kernel Module Protection
+    # ------------------------------------
+    # Prevent loading malicious kernel modules (rootkits).
+    - deny:
+        # /lib/modules - Kernel module directory
+        - /lib/modules
+        # /usr/lib/modules - Additional module paths
+        - /usr/lib/modules
+        # /sys/module - Loaded module information
+        - /sys/module
+      allow: []
+      events:
+        - open
+        - access
+        - modify
+      defaultResponse: deny
+      audit: true
+      tags:
+        compliance: cis-kubernetes
+        severity: critical
+        category: kernel-module-protection
+        # MITRE ATT&CK: Kernel Modules and Extensions (T1547.006)
+        mitre-attack: T1547.006
+
+  # Container Runtime Detection
+  # ============================
+  containerRuntime: auto
+
+  # Enforcement Mode
+  # ================
+  # enforcing: true - ACTIVELY BLOCK access attempts
+  # This is a BLOCKING guard - violations will be denied, not just logged.
+  # Set to false for dry-run mode (audit only, no blocking).
+  enforcing: true
+
+  # Guard State
+  # ===========
+  # paused: false - Guard is actively protecting
+  paused: false

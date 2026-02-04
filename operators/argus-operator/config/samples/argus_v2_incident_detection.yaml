@@ -1,0 +1,262 @@
+# Security Incident Detection File Integrity Monitoring Configuration
+# =====================================================================
+# This ArgusWatcher monitors common persistence mechanisms, credential access
+# locations, and staging areas used by attackers during security incidents.
+#
+# Use Case: Detect suspicious file modifications indicating:
+# - Persistence via cron jobs, systemd services, or shell profiles
+# - Credential access via SSH key injection or password file manipulation
+# - Library injection attacks (LD_PRELOAD, shared library hijacking)
+# - Malware staging in temporary directories
+#
+# This configuration is based on MITRE ATT&CK tactics:
+# - TA0003 Persistence
+# - TA0006 Credential Access
+# - TA0005 Defense Evasion
+#
+# Reference: MITRE ATT&CK Framework
+# https://attack.mitre.org/
+
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: incident-detection-watcher
+  namespace: default
+  labels:
+    app.kubernetes.io/name: argus-operator
+    app.kubernetes.io/managed-by: kustomize
+    # Label indicating this resource is for incident detection
+    panoptes.como-technologies.io/use-case: incident-detection
+
+spec:
+  # Pod Selector: Monitor all pods with Panoptes monitoring enabled
+  # ================================================================
+  # This watcher applies broadly to detect incidents across your infrastructure.
+  selector:
+    matchLabels:
+      panoptes.como-technologies.io/monitored: "true"
+
+  # Security Incident Detection Subjects
+  # =====================================
+  subjects:
+    # Subject 1: Cron-based Persistence (MITRE ATT&CK T1053.003)
+    # -----------------------------------------------------------
+    # Attackers use cron to establish persistence (execute malware on schedule).
+    # Monitor cron configuration files for unauthorized scheduled tasks.
+    - paths:
+        # /etc/cron.d - System-wide cron job definitions
+        - /etc/cron.d
+        # /etc/crontab - Main cron configuration file
+        - /etc/crontab
+        # /var/spool/cron - Per-user cron files (crontab -e)
+        - /var/spool/cron
+        # /etc/cron.daily, /etc/cron.hourly, etc. - Periodic job directories
+        - /etc/cron.daily
+        - /etc/cron.hourly
+        - /etc/cron.weekly
+        - /etc/cron.monthly
+      events:
+        # Create events are most suspicious (new persistent task added)
+        - create   # New cron job created
+        - modify   # Existing cron job modified
+        - delete   # Cron job deleted (may remove defensive monitoring)
+      recursive: true
+      maxDepth: 2
+      ignore:
+        - "*.tmp"
+        - "*.swp"
+      tags:
+        use-case: incident-detection
+        # MITRE ATT&CK technique identifier
+        mitre-attack: T1053.003
+        severity: high
+        category: persistence-cron
+
+    # Subject 2: Systemd-based Persistence (MITRE ATT&CK T1543.002)
+    # --------------------------------------------------------------
+    # Attackers create malicious systemd services to maintain persistence.
+    # Monitor systemd unit files for suspicious service creation.
+    - paths:
+        # /etc/systemd/system - System-wide service unit files
+        - /etc/systemd/system
+        # /usr/lib/systemd/system - Distribution-provided service files
+        - /usr/lib/systemd/system
+        # /etc/systemd/user - Per-user service files
+        - /etc/systemd/user
+      events:
+        - create   # New service unit created (highly suspicious)
+        - modify   # Existing service modified (may hijack legitimate service)
+        - delete   # Service deleted (may disable security tools)
+      recursive: true
+      maxDepth: 3
+      ignore:
+        - "*.tmp"
+        - "*.swp"
+      tags:
+        use-case: incident-detection
+        mitre-attack: T1543.002
+        severity: critical
+        category: persistence-systemd
+
+    # Subject 3: SSH Key Injection (MITRE ATT&CK T1098.004)
+    # ------------------------------------------------------
+    # Attackers inject SSH authorized_keys to maintain remote access.
+    # Monitor SSH key files for unauthorized additions.
+    - paths:
+        # /root/.ssh - Root user SSH keys (highly privileged)
+        - /root/.ssh
+        # /home/*/.ssh - All user SSH key directories (glob pattern)
+        # Note: This monitors existing user directories only
+        - /home/*/.ssh
+      events:
+        - create   # New authorized_keys or private key added
+        - modify   # Keys modified (new key added to authorized_keys)
+        - delete   # Keys deleted (may lock out legitimate users)
+        - attrib   # Permissions changed (e.g., private key made readable)
+      recursive: true
+      maxDepth: 1
+      ignore:
+        - "*.tmp"
+        - "*.swp"
+        - "known_hosts"  # Known hosts change frequently (not security critical)
+      tags:
+        use-case: incident-detection
+        mitre-attack: T1098.004
+        severity: critical
+        category: credential-access-ssh
+
+    # Subject 4: Library Injection Attacks (MITRE ATT&CK T1574.006)
+    # --------------------------------------------------------------
+    # Attackers use LD_PRELOAD and ld.so.conf to inject malicious libraries.
+    # This allows them to hook system calls and hide malware.
+    - paths:
+        # /etc/ld.so.preload - Preloaded libraries for ALL processes
+        - /etc/ld.so.preload
+        # /etc/ld.so.conf.d - Additional library search paths
+        - /etc/ld.so.conf.d
+        # /etc/ld.so.conf - Main dynamic linker configuration
+        - /etc/ld.so.conf
+      events:
+        # Creation of ld.so.preload is EXTREMELY suspicious
+        - create   # File created (almost always malicious)
+        - modify   # File modified (library path hijacking)
+        - delete   # File deleted (may remove evidence)
+      recursive: true
+      maxDepth: 1
+      ignore:
+        - "*.tmp"
+        - "*.swp"
+      tags:
+        use-case: incident-detection
+        mitre-attack: T1574.006
+        severity: critical
+        category: defense-evasion-library-injection
+
+    # Subject 5: Temporary Directory Staging (MITRE ATT&CK T1105)
+    # ------------------------------------------------------------
+    # Attackers stage malware in /tmp, /var/tmp, /dev/shm before execution.
+    # These directories are world-writable and often noexec is not enforced.
+    - paths:
+        # /tmp - Temporary file storage (cleared on reboot)
+        - /tmp
+        # /var/tmp - Persistent temporary files (NOT cleared on reboot)
+        - /var/tmp
+        # /dev/shm - Shared memory filesystem (memory-backed, stealthy)
+        - /dev/shm
+      events:
+        # Focus on executable creation (scripts, binaries)
+        - create   # New file created (may be malware payload)
+        - modify   # File modified (unpacking/decrypting payload)
+        # Note: Delete events are noisy in temp directories, not monitored
+      recursive: true
+      # Limit depth to avoid monitoring deep temporary hierarchies
+      maxDepth: 3
+      ignore:
+        # Exclude known benign temporary files to reduce noise
+        - "*.tmp"
+        - "*.swp"
+        - "systemd-*"        # systemd temporary files
+        - ".X11-unix"        # X11 sockets
+        - ".ICE-unix"        # ICE protocol sockets
+        - ".font-unix"       # Font server sockets
+        - "pulse-*"          # PulseAudio temporary files
+        - "snap.*"           # Snap package temporary files
+      tags:
+        use-case: incident-detection
+        mitre-attack: T1105
+        # Medium severity (high volume, many false positives)
+        severity: medium
+        category: staging-areas
+
+    # Subject 6: Shell Profile Persistence (MITRE ATT&CK T1546.004)
+    # --------------------------------------------------------------
+    # Attackers modify shell startup files to execute malware on login.
+    - paths:
+        # /etc/profile - System-wide shell initialization
+        - /etc/profile
+        # /etc/profile.d - System-wide shell scripts
+        - /etc/profile.d
+        # /etc/bash.bashrc - System-wide bash configuration
+        - /etc/bash.bashrc
+        # /etc/zsh - Zsh configuration
+        - /etc/zsh
+        # /root/.bashrc, /root/.bash_profile - Root user shell config
+        - /root/.bashrc
+        - /root/.bash_profile
+        - /root/.zshrc
+        # /home/*/.bashrc - All user shell configs
+        - /home/*/.bashrc
+        - /home/*/.bash_profile
+        - /home/*/.zshrc
+      events:
+        - modify   # Shell config modified (most common)
+        - create   # New shell config created
+        - delete   # Shell config deleted
+      recursive: true
+      maxDepth: 2
+      ignore:
+        - "*.tmp"
+        - "*.swp"
+        - ".bash_history"  # History changes are noisy, not security critical
+      tags:
+        use-case: incident-detection
+        mitre-attack: T1546.004
+        severity: high
+        category: persistence-shell-profile
+
+    # Subject 7: Package Manager Configuration (Supply Chain Attacks)
+    # ----------------------------------------------------------------
+    # Attackers modify package manager configs to point to malicious repos.
+    - paths:
+        # /etc/apt/sources.list - Debian/Ubuntu package sources
+        - /etc/apt/sources.list
+        # /etc/apt/sources.list.d - Additional package sources
+        - /etc/apt/sources.list.d
+        # /etc/yum.repos.d - RedHat/CentOS package repositories
+        - /etc/yum.repos.d
+        # /etc/dnf/dnf.conf - Fedora package manager
+        - /etc/dnf/dnf.conf
+      events:
+        - create   # New repository added (may be malicious)
+        - modify   # Repository configuration changed
+        - delete   # Repository removed
+      recursive: true
+      maxDepth: 2
+      ignore:
+        - "*.tmp"
+        - "*.swp"
+        - "*.save"
+        - "*.distUpgrade"
+      tags:
+        use-case: incident-detection
+        mitre-attack: T1195.001
+        severity: high
+        category: supply-chain-attack
+
+  # Container Runtime Detection
+  # ============================
+  containerRuntime: auto
+
+  # Watcher State
+  # =============
+  paused: false

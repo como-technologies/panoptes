@@ -1,0 +1,53 @@
+# Panoptes Pack Value Schema
+# Validates pack configuration before deployment via Spectro Cloud Palette
+
+pack.namespace:
+  schema: '{{ required | format "${string}" }}'
+
+components.argus.enabled:
+  schema: '{{ format "${boolean}" }}'
+
+components.janus.enabled:
+  schema: '{{ format "${boolean}" }}'
+
+components.dashboard.enabled:
+  schema: '{{ format "${boolean}" }}'
+
+argus.controller.image.tag:
+  schema: '{{ required | format "${string}" }}'
+
+argus.controller.replicas:
+  schema: '{{ format "${number:[1-10]}" }}'
+
+argus.daemon.image.tag:
+  schema: '{{ required | format "${string}" }}'
+
+janus.controller.image.tag:
+  schema: '{{ required | format "${string}" }}'
+
+janus.controller.replicas:
+  schema: '{{ format "${number:[1-10]}" }}'
+
+janus.daemon.image.tag:
+  schema: '{{ required | format "${string}" }}'
+
+dashboard.image.tag:
+  schema: '{{ required | format "${string}" }}'
+
+dashboard.replicas:
+  schema: '{{ format "${number:[1-5]}" }}'
+
+dashboard.service.type:
+  schema: '{{ format "${string}" }}'
+
+dashboard.service.port:
+  schema: '{{ format "${number:[1-65535]}" }}'
+
+observability.prometheus.serviceMonitor.interval:
+  schema: '{{ format "${string}" }}'
+
+observability.opentelemetry.protocol:
+  schema: '{{ format "${string}" }}'
+
+alerting.rules.highEventRate.threshold:
+  schema: '{{ format "${number:[1-10000]}" }}'

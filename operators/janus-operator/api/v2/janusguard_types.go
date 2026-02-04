@@ -20,117 +20,157 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// JanusEvent represents a fanotify event type for file access auditing
+// JanusEvent represents a Linux fanotify event type for file access auditing.
+// These map to fanotify_mark(2) event flags. Unlike inotify, fanotify can
+// block access (when enforcing is true), not just detect it.
 // +kubebuilder:validation:Enum=access;open;execute;close;all
 type JanusEvent string
 
 const (
-	EventAccess  JanusEvent = "access"
-	EventOpen    JanusEvent = "open"
+	// EventAccess fires when a file is read. Maps to FAN_ACCESS_PERM (enforcing) or FAN_ACCESS (audit).
+	EventAccess JanusEvent = "access"
+	// EventOpen fires when a file is opened. Maps to FAN_OPEN_PERM (enforcing) or FAN_OPEN (audit).
+	EventOpen JanusEvent = "open"
+	// EventExecute fires when a file is executed. Maps to FAN_OPEN_EXEC_PERM. Requires kernel 5.0+.
 	EventExecute JanusEvent = "execute"
-	EventClose   JanusEvent = "close"
-	EventAll     JanusEvent = "all"
+	// EventClose fires when a file descriptor is closed. Maps to FAN_CLOSE.
+	EventClose JanusEvent = "close"
+	// EventAll monitors all event types. Generates high event volume; use specific events in production.
+	EventAll JanusEvent = "all"
 )
 
-// JanusResponse represents the action to take when an access event is detected
+// JanusResponse represents the action to take when a file access event is detected.
+// When spec.enforcing is false, deny responses are logged but access is still allowed (dry-run).
 // +kubebuilder:validation:Enum=allow;deny;audit
 type JanusResponse string
 
 const (
+	// ResponseAllow permits access and records the event.
 	ResponseAllow JanusResponse = "allow"
-	ResponseDeny  JanusResponse = "deny"
+	// ResponseDeny blocks access with EACCES. Only enforced when spec.enforcing is true.
+	ResponseDeny JanusResponse = "deny"
+	// ResponseAudit records the event without affecting access. Use for monitoring without impact.
 	ResponseAudit JanusResponse = "audit"
 )
 
-// ContainerRuntime specifies the container runtime for PID detection
+// ContainerRuntime specifies the container runtime used for resolving container
+// PIDs to filesystem paths. The daemon accesses container filesystems via /proc/{pid}/root.
 // +kubebuilder:validation:Enum=containerd;cri-o;auto
 type ContainerRuntime string
 
 const (
+	// RuntimeContainerd uses the containerd socket for container PID resolution.
 	RuntimeContainerd ContainerRuntime = "containerd"
-	RuntimeCRIO       ContainerRuntime = "cri-o"
-	RuntimeAuto       ContainerRuntime = "auto"
+	// RuntimeCRIO uses the CRI-O socket for container PID resolution.
+	RuntimeCRIO ContainerRuntime = "cri-o"
+	// RuntimeAuto detects the container runtime automatically by probing known socket paths.
+	RuntimeAuto ContainerRuntime = "auto"
 )
 
-// JanusGuardSubject defines file access control rules
+// JanusGuardSubject defines file access control rules for a set of paths.
+// Each subject evaluates deny rules first, then allow rules, then falls back to defaultResponse.
+// Multiple subjects can target different paths with independent rules and tags.
 type JanusGuardSubject struct {
 	// allow is the list of paths to explicitly allow access to.
 	// Paths support glob patterns (e.g., "/app/**", "/etc/*.conf").
+	// Allow rules are evaluated after deny rules; if a path matches both, deny wins.
 	// +optional
 	// +kubebuilder:validation:MaxItems=100
 	Allow []string `json:"allow,omitempty"`
 
-	// deny is the list of paths to explicitly deny access to.
-	// Deny rules take precedence over allow rules.
+	// deny is the list of paths to block access to.
+	// Paths support glob patterns (e.g., "/etc/shadow", "/var/run/docker.sock").
+	// Deny rules take precedence over allow rules. When spec.enforcing is true,
+	// access is blocked with EACCES. When false, access is logged but permitted.
 	// +optional
 	// +kubebuilder:validation:MaxItems=100
 	Deny []string `json:"deny,omitempty"`
 
 	// events is the list of fanotify event types to monitor.
-	// Use "all" to monitor all event types.
+	// Use "all" to monitor all event types. For access control, "open" and "access"
+	// are the most common. "execute" requires kernel 5.0+.
 	// +kubebuilder:validation:MinItems=1
 	Events []JanusEvent `json:"events"`
 
-	// onlyDir restricts monitoring to directories only.
+	// onlyDir restricts fanotify marks to directories only.
 	// +optional
 	OnlyDir bool `json:"onlyDir,omitempty"`
 
-	// autoAllowOwner automatically allows access for the file owner.
-	// Useful for applications that need to access their own files.
+	// autoAllowOwner automatically allows access when the accessing process UID
+	// matches the file owner UID. Useful for applications that need to read their
+	// own config files or Kubernetes service account tokens.
 	// +optional
 	AutoAllowOwner bool `json:"autoAllowOwner,omitempty"`
 
-	// audit enables kernel audit log integration.
-	// When true, events are also written to the kernel audit log.
+	// audit enables kernel audit log integration via AUDIT_WRITE.
+	// When true, access events are written to the kernel audit log in addition
+	// to being reported via gRPC. Useful for compliance frameworks requiring
+	// kernel-level audit trails (NIST 800-53 AU-2).
 	// +optional
 	Audit bool `json:"audit,omitempty"`
 
-	// defaultResponse is the action when no allow/deny rule matches.
+	// defaultResponse is the action taken when a file access matches no allow or deny rule.
+	// "audit" (default) logs without affecting access. "allow" silently permits.
+	// "deny" blocks access (only when spec.enforcing is true).
 	// +kubebuilder:validation:Enum=allow;deny;audit
 	// +kubebuilder:default=audit
 	// +optional
 	DefaultResponse JanusResponse `json:"defaultResponse,omitempty"`
 
 	// tags are custom key-value metadata attached to events from this subject.
-	// Useful for categorization, compliance tracking, or alert routing.
+	// Useful for compliance tracking (e.g., "compliance": "pci-dss", "severity": "critical"),
+	// alert routing, or categorization in downstream SIEM systems.
 	// +optional
 	// +kubebuilder:validation:MaxProperties=20
 	Tags map[string]string `json:"tags,omitempty"`
 }
 
-// JanusGuardSpec defines the desired state of JanusGuard
+// JanusGuardSpec defines the desired state of JanusGuard.
+// The operator watches for pods matching the selector and instructs the janusd
+// daemon (via gRPC on port 50052) to create fanotify marks on each pod's filesystem.
+// Requires: janusd DaemonSet with CAP_SYS_ADMIN, CAP_SYS_PTRACE, and CAP_DAC_READ_SEARCH.
 type JanusGuardSpec struct {
 	// selector is the label selector for pods to guard.
-	// Only pods matching this selector will have access control applied.
+	// Only pods matching this selector will have fanotify access control applied.
+	// Use matchLabels for simple key-value matching, or matchExpressions for
+	// set-based requirements. Example: {"matchLabels": {"pci-dss/scope": "in-scope"}}.
 	// +kubebuilder:validation:Required
 	Selector metav1.LabelSelector `json:"selector"`
 
 	// subjects is the list of access control rules to apply.
-	// Each subject defines allow/deny rules for file access.
+	// Each subject defines independent allow/deny rules for file access paths.
+	// Use multiple subjects to apply different policies with different tags.
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=20
 	Subjects []JanusGuardSubject `json:"subjects"`
 
 	// containerRuntime specifies which container runtime to use for PID detection.
-	// Use "auto" to automatically detect the runtime.
+	// "auto" probes for containerd and CRI-O sockets in standard locations.
+	// Set explicitly if auto-detection fails or if using a non-standard socket path.
 	// +kubebuilder:validation:Enum=containerd;cri-o;auto
 	// +kubebuilder:default=auto
 	// +optional
 	ContainerRuntime ContainerRuntime `json:"containerRuntime,omitempty"`
 
-	// logFormat is the custom log format template for events.
-	// Supports Go template syntax with access to event fields.
+	// logFormat is a custom Go template for formatting event log output.
+	// Available fields: .Event, .Path, .Response, .Timestamp, .Pod, .Node.
+	// Leave empty to use the default structured JSON format.
 	// +optional
 	// +kubebuilder:validation:MaxLength=1024
 	LogFormat string `json:"logFormat,omitempty"`
 
-	// paused indicates whether guarding is paused for this resource.
-	// When true, no access control is enforced but existing guards are maintained.
+	// paused temporarily suspends all access control for this resource.
+	// When true, all fanotify marks are removed and no access control is applied.
+	// Use this during planned maintenance windows or emergency response.
+	// Set back to false to resume guarding.
 	// +optional
 	Paused bool `json:"paused,omitempty"`
 
-	// enforcing indicates whether access denials are enforced.
-	// When false, denials are logged but access is allowed (dry-run mode).
+	// enforcing controls whether deny rules actively block file access.
+	// When true (default), denied paths return EACCES to the accessing process.
+	// When false (dry-run mode), denials are logged but access is permitted.
+	// IMPORTANT: Start with enforcing=false in production to validate rules
+	// before enabling enforcement. See docs/guides/enabling-enforcement.md.
 	// +kubebuilder:default=true
 	// +optional
 	Enforcing bool `json:"enforcing,omitempty"`
@@ -240,9 +280,37 @@ type JanusGuardStatus struct {
 // +kubebuilder:printcolumn:name="Enforcing",type=boolean,JSONPath=`.spec.enforcing`,description="Whether denials are enforced"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// JanusGuard is the Schema for the janusguards API.
-// It defines file access auditing and control rules for pods matching a selector.
-// This is the v2 API - the current recommended version for new deployments.
+// JanusGuard is the Schema for the janusguards API (short name: jg).
+// It defines file access auditing and enforcement rules using Linux fanotify for pods
+// matching a label selector. The janus-operator watches JanusGuard resources and instructs
+// the janusd daemon on each node to create kernel-level access control marks.
+//
+// Unlike ArgusWatcher (which detects changes), JanusGuard can actively block file access
+// when spec.enforcing is true. This makes it suitable for runtime protection scenarios
+// like blocking container runtime socket access or protecting sensitive credentials.
+//
+// Requires: janusd DaemonSet with CAP_SYS_ADMIN (fanotify), CAP_SYS_PTRACE, CAP_DAC_READ_SEARCH.
+// Kernel requirements: Linux 5.x+ with fanotify support.
+//
+// Quick example:
+//
+//	kubectl apply -f - <<EOF
+//	apiVersion: janus.panoptes.io/v2
+//	kind: JanusGuard
+//	metadata:
+//	  name: block-runtime-sockets
+//	spec:
+//	  enforcing: true
+//	  selector:
+//	    matchLabels:
+//	      app: my-app
+//	  subjects:
+//	    - deny: ["/var/run/docker.sock", "/run/containerd/containerd.sock"]
+//	      events: [open, access]
+//	      tags:
+//	        severity: critical
+//	        compliance: cis-kubernetes
+//	EOF
 type JanusGuard struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

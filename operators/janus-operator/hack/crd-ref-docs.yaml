@@ -1,0 +1,26 @@
+processor:
+  customMarkers:
+    - name: "kubebuilder:validation:Enum"
+    - name: "kubebuilder:validation:Required"
+    - name: "kubebuilder:validation:Optional"
+    - name: "kubebuilder:validation:MinItems"
+    - name: "kubebuilder:validation:MaxItems"
+    - name: "kubebuilder:validation:MaxLength"
+    - name: "kubebuilder:validation:MaxProperties"
+    - name: "kubebuilder:default"
+    - name: "kubebuilder:printcolumn"
+
+render:
+  knownTypes:
+    - package: k8s.io/apimachinery/pkg/apis/meta/v1
+      name: LabelSelector
+      link: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#labelselector-v1-meta
+    - package: k8s.io/apimachinery/pkg/apis/meta/v1
+      name: Time
+      link: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#time-v1-meta
+    - package: k8s.io/apimachinery/pkg/apis/meta/v1
+      name: Condition
+      link: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#condition-v1-meta
+    - package: k8s.io/apimachinery/pkg/apis/meta/v1
+      name: ObjectMeta
+      link: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#objectmeta-v1-meta

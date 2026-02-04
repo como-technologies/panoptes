@@ -25,6 +25,7 @@ controller:
     limits:
       cpu: 500m
       memory: 256Mi
+  priorityClassName: ""
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -50,9 +51,13 @@ daemon:
   tolerations:
     - operator: Exists
       effect: NoSchedule
+  priorityClassName: system-node-critical
   # Required capabilities for inotify monitoring
   securityContext:
     privileged: false
+    runAsNonRoot: false
+    seccompProfile:
+      type: RuntimeDefault
     capabilities:
       add:
         - SYS_ADMIN
@@ -77,3 +82,12 @@ observability:
 # Container runtime detection
 containerRuntime:
   detection: auto  # auto, containerd, or cri-o
+
+# Network policies (default-deny with explicit allows)
+networkPolicy:
+  enabled: true
+
+# Pod disruption budget for controller
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

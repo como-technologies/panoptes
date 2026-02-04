@@ -107,6 +107,20 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 lint-config: golangci-lint ## Verify golangci-lint linter configuration
 	"$(GOLANGCI_LINT)" config verify
 
+##@ Documentation
+
+CRD_REF_DOCS ?= $(LOCALBIN)/crd-ref-docs
+CRD_REF_DOCS_VERSION ?= v0.1.0
+
+.PHONY: docs
+docs: crd-ref-docs ## Generate CRD API reference documentation.
+	"$(CRD_REF_DOCS)" --source-path=./api/v2 --config=./hack/crd-ref-docs.yaml --output-path=../../docs/api/janusguard-v2.md --renderer=markdown
+
+.PHONY: crd-ref-docs
+crd-ref-docs: $(CRD_REF_DOCS)
+$(CRD_REF_DOCS): $(LOCALBIN)
+	$(call go-install-tool,$(CRD_REF_DOCS),github.com/elastic/crd-ref-docs,$(CRD_REF_DOCS_VERSION))
+
 ##@ Build
 
 .PHONY: build

@@ -1,0 +1,692 @@
+# Panoptes Spectro Cloud Palette Presets
+# These presets appear in the Palette UI when configuring the pack.
+# Presets in the same group are mutually exclusive.
+#
+# Groups:
+#   - "Deployment Profile": Controls which components are deployed and resource sizing
+#   - "Compliance Framework": Selects which compliance monitoring templates are activated
+
+presets:
+  # ============================================================
+  # Deployment Profile presets (mutually exclusive)
+  # ============================================================
+
+  - name: "default"
+    displayName: "Standard Deployment"
+    group: "Deployment Profile"
+    remove:
+      - "components.janus.enabled"
+      - "components.dashboard.enabled"
+    add: |
+      components:
+        argus:
+          enabled: true
+        janus:
+          enabled: true
+        dashboard:
+          enabled: true
+      observability:
+        prometheus:
+          enabled: true
+          serviceMonitor:
+            enabled: true
+        grafana:
+          dashboards:
+            enabled: true
+      alerting:
+        enabled: true
+
+  - name: "minimal"
+    displayName: "Minimal (FIM Only)"
+    group: "Deployment Profile"
+    remove:
+      - "janus"
+      - "dashboard"
+      - "observability.opentelemetry"
+      - "observability.grafana"
+      - "alerting"
+    add: |
+      components:
+        argus:
+          enabled: true
+        janus:
+          enabled: false
+        dashboard:
+          enabled: false
+      argus:
+        controller:
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+        daemon:
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      observability:
+        prometheus:
+          enabled: true
+          serviceMonitor:
+            enabled: false
+        grafana:
+          dashboards:
+            enabled: false
+      alerting:
+        enabled: false
+
+  # ============================================================
+  # Compliance Framework presets (mutually exclusive)
+  # ============================================================
+
+  - name: "no-compliance"
+    displayName: "No Compliance Templates"
+    group: "Compliance Framework"
+    remove:
+      - "compliance"
+    add: |
+      compliance:
+        baseSecurity:
+          enabled: false
+        pciDss:
+          enabled: false
+        hipaa:
+          enabled: false
+        soc2:
+          enabled: false
+        cisKubernetes:
+          enabled: false
+        nist80053:
+          enabled: false
+        gdpr:
+          enabled: false
+
+  - name: "pci-dss"
+    displayName: "PCI-DSS 4.0"
+    group: "Compliance Framework"
+    remove:
+      - "compliance"
+    add: |
+      compliance:
+        baseSecurity:
+          enabled: false
+        pciDss:
+          enabled: true
+          namespace: ""
+          enforcing: false
+          podSelector:
+            pci-dss/scope: "in-scope"
+        hipaa:
+          enabled: false
+        soc2:
+          enabled: false
+        cisKubernetes:
+          enabled: false
+        nist80053:
+          enabled: false
+        gdpr:
+          enabled: false
+      argus:
+        controller:
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+        daemon:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      janus:
+        controller:
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+        daemon:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      observability:
+        prometheus:
+          serviceMonitor:
+            enabled: true
+            interval: 15s
+        opentelemetry:
+          enabled: true
+      alerting:
+        enabled: true
+        rules:
+          criticalFileModified:
+            enabled: true
+            severity: critical
+          highEventRate:
+            enabled: true
+            threshold: 50
+            severity: warning
+          unauthorizedAccess:
+            enabled: true
+            severity: critical
+
+  - name: "hipaa"
+    displayName: "HIPAA"
+    group: "Compliance Framework"
+    remove:
+      - "compliance"
+    add: |
+      compliance:
+        baseSecurity:
+          enabled: false
+        pciDss:
+          enabled: false
+        hipaa:
+          enabled: true
+          namespace: ""
+          enforcing: false
+          podSelector:
+            hipaa/scope: "ephi"
+        soc2:
+          enabled: false
+        cisKubernetes:
+          enabled: false
+        nist80053:
+          enabled: false
+        gdpr:
+          enabled: false
+      argus:
+        controller:
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+        daemon:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      janus:
+        controller:
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+        daemon:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      observability:
+        prometheus:
+          serviceMonitor:
+            enabled: true
+            interval: 15s
+        opentelemetry:
+          enabled: true
+      alerting:
+        enabled: true
+        rules:
+          criticalFileModified:
+            enabled: true
+            severity: critical
+          highEventRate:
+            enabled: true
+            threshold: 50
+            severity: warning
+          unauthorizedAccess:
+            enabled: true
+            severity: critical
+
+  - name: "soc2"
+    displayName: "SOC 2 Type II"
+    group: "Compliance Framework"
+    remove:
+      - "compliance"
+    add: |
+      compliance:
+        baseSecurity:
+          enabled: false
+        pciDss:
+          enabled: false
+        hipaa:
+          enabled: false
+        soc2:
+          enabled: true
+          namespace: ""
+          enforcing: false
+          podSelector:
+            soc2/scope: "in-scope"
+        cisKubernetes:
+          enabled: false
+        nist80053:
+          enabled: false
+        gdpr:
+          enabled: false
+      argus:
+        controller:
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+        daemon:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      janus:
+        controller:
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+        daemon:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      observability:
+        prometheus:
+          serviceMonitor:
+            enabled: true
+            interval: 15s
+        opentelemetry:
+          enabled: true
+      alerting:
+        enabled: true
+        rules:
+          criticalFileModified:
+            enabled: true
+            severity: critical
+          highEventRate:
+            enabled: true
+            threshold: 50
+            severity: warning
+          unauthorizedAccess:
+            enabled: true
+            severity: critical
+
+  - name: "cis-kubernetes"
+    displayName: "CIS Kubernetes v1.8"
+    group: "Compliance Framework"
+    remove:
+      - "compliance"
+    add: |
+      compliance:
+        baseSecurity:
+          enabled: false
+        pciDss:
+          enabled: false
+        hipaa:
+          enabled: false
+        soc2:
+          enabled: false
+        cisKubernetes:
+          enabled: true
+          namespace: ""
+          enforcing: true
+          podSelector:
+            cis/scope: "kubernetes-audit"
+        nist80053:
+          enabled: false
+        gdpr:
+          enabled: false
+      argus:
+        controller:
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+        daemon:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      janus:
+        controller:
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+        daemon:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      observability:
+        prometheus:
+          serviceMonitor:
+            enabled: true
+            interval: 15s
+        opentelemetry:
+          enabled: true
+      alerting:
+        enabled: true
+        rules:
+          criticalFileModified:
+            enabled: true
+            severity: critical
+          highEventRate:
+            enabled: true
+            threshold: 50
+            severity: warning
+          unauthorizedAccess:
+            enabled: true
+            severity: critical
+
+  - name: "nist-800-53"
+    displayName: "NIST 800-53"
+    group: "Compliance Framework"
+    remove:
+      - "compliance"
+    add: |
+      compliance:
+        baseSecurity:
+          enabled: false
+        pciDss:
+          enabled: false
+        hipaa:
+          enabled: false
+        soc2:
+          enabled: false
+        cisKubernetes:
+          enabled: false
+        nist80053:
+          enabled: true
+          namespace: ""
+          enforcing: false
+          podSelector:
+            nist-800-53/scope: "moderate"
+        gdpr:
+          enabled: false
+      argus:
+        controller:
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+        daemon:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      janus:
+        controller:
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+        daemon:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      observability:
+        prometheus:
+          serviceMonitor:
+            enabled: true
+            interval: 15s
+        opentelemetry:
+          enabled: true
+      alerting:
+        enabled: true
+        rules:
+          criticalFileModified:
+            enabled: true
+            severity: critical
+          highEventRate:
+            enabled: true
+            threshold: 50
+            severity: warning
+          unauthorizedAccess:
+            enabled: true
+            severity: critical
+
+  - name: "gdpr"
+    displayName: "GDPR"
+    group: "Compliance Framework"
+    remove:
+      - "compliance"
+    add: |
+      compliance:
+        baseSecurity:
+          enabled: false
+        pciDss:
+          enabled: false
+        hipaa:
+          enabled: false
+        soc2:
+          enabled: false
+        cisKubernetes:
+          enabled: false
+        nist80053:
+          enabled: false
+        gdpr:
+          enabled: true
+          namespace: ""
+          enforcing: false
+          podSelector:
+            gdpr/scope: "personal-data"
+      argus:
+        controller:
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+        daemon:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      janus:
+        controller:
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+        daemon:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      observability:
+        prometheus:
+          serviceMonitor:
+            enabled: true
+            interval: 15s
+        opentelemetry:
+          enabled: true
+      alerting:
+        enabled: true
+        rules:
+          criticalFileModified:
+            enabled: true
+            severity: critical
+          highEventRate:
+            enabled: true
+            threshold: 50
+            severity: warning
+          unauthorizedAccess:
+            enabled: true
+            severity: critical
+
+  - name: "full-compliance"
+    displayName: "All Frameworks"
+    group: "Compliance Framework"
+    remove:
+      - "compliance"
+    add: |
+      compliance:
+        baseSecurity:
+          enabled: true
+          namespace: ""
+          enforcing: false
+          podSelector:
+            panoptes.como-technologies.io/monitored: "true"
+        pciDss:
+          enabled: true
+          namespace: ""
+          enforcing: false
+          podSelector:
+            pci-dss/scope: "in-scope"
+        hipaa:
+          enabled: true
+          namespace: ""
+          enforcing: false
+          podSelector:
+            hipaa/scope: "ephi"
+        soc2:
+          enabled: true
+          namespace: ""
+          enforcing: false
+          podSelector:
+            soc2/scope: "in-scope"
+        cisKubernetes:
+          enabled: true
+          namespace: ""
+          enforcing: true
+          podSelector:
+            cis/scope: "kubernetes-audit"
+        nist80053:
+          enabled: true
+          namespace: ""
+          enforcing: false
+          podSelector:
+            nist-800-53/scope: "moderate"
+        gdpr:
+          enabled: true
+          namespace: ""
+          enforcing: false
+          podSelector:
+            gdpr/scope: "personal-data"
+      argus:
+        controller:
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 1Gi
+        daemon:
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+      janus:
+        controller:
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 1Gi
+        daemon:
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+      observability:
+        prometheus:
+          serviceMonitor:
+            enabled: true
+            interval: 15s
+        opentelemetry:
+          enabled: true
+      alerting:
+        enabled: true
+        rules:
+          criticalFileModified:
+            enabled: true
+            severity: critical
+          highEventRate:
+            enabled: true
+            threshold: 25
+            severity: warning
+          unauthorizedAccess:
+            enabled: true
+            severity: critical

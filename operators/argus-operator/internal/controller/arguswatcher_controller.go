@@ -59,6 +59,7 @@ const (
 	ConditionTypeAvailable   = "Available"
 	ConditionTypeProgressing = "Progressing"
 	ConditionTypeDegraded    = "Degraded"
+	ConditionTypeStalled     = "Stalled"
 )
 
 // ArgusWatcherReconciler reconciles a ArgusWatcher object
@@ -175,6 +176,15 @@ func (r *ArgusWatcherReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		r.setCondition(&watcher, ConditionTypeAvailable, metav1.ConditionFalse, "NoMatchingPods", "No pods match the selector")
 	} else {
 		r.setCondition(&watcher, ConditionTypeAvailable, metav1.ConditionFalse, "NoPodsWatched", "No pods are being watched")
+	}
+
+	// Detect stalled state: observable pods exist but none can be watched
+	if watcher.Status.ObservablePods > 0 && watchedCount == 0 && err != nil {
+		r.setCondition(&watcher, ConditionTypeStalled, metav1.ConditionTrue, "NoDaemonReachable",
+			"No daemon pods are reachable; watches cannot be established")
+		r.Recorder.Event(&watcher, corev1.EventTypeWarning, "Stalled", "Unable to reach any daemon pods for watch creation")
+	} else {
+		r.setCondition(&watcher, ConditionTypeStalled, metav1.ConditionFalse, "Operational", "Controller is operating normally")
 	}
 
 	r.setCondition(&watcher, ConditionTypeProgressing, metav1.ConditionFalse, "ReconcileComplete", "Reconciliation complete")

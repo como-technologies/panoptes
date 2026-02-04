@@ -1,0 +1,192 @@
+# HIPAA Security Rule File Integrity Monitoring Configuration
+# ==============================================================
+# This ArgusWatcher monitors critical system files to satisfy HIPAA Security Rule
+# requirements for audit controls and access controls protecting ePHI.
+#
+# Key HIPAA Requirements Addressed:
+# - 45 CFR 164.312(b) Audit Controls: Hardware, software, and/or procedural
+#   mechanisms that record and examine activity in information systems that
+#   contain or use electronic protected health information (ePHI).
+# - 45 CFR 164.308(a)(1)(ii)(D) Information System Activity Review: Implement
+#   procedures to regularly review records of information system activity.
+# - 45 CFR 164.312(a)(1) Access Control: Implement technical policies and
+#   procedures for electronic information systems that maintain ePHI.
+#
+# Reference: HIPAA Security Rule (45 CFR Part 164 Subpart C)
+# https://www.hhs.gov/hipaa/for-professionals/security/
+
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: hipaa-security-rule-watcher
+  namespace: default
+  labels:
+    app.kubernetes.io/name: argus-operator
+    app.kubernetes.io/managed-by: kustomize
+    # Label indicating this resource is for HIPAA compliance
+    panoptes.como-technologies.io/compliance: hipaa
+    panoptes.como-technologies.io/severity: critical
+
+spec:
+  # Pod Selector: Monitor only pods that process or store ePHI
+  # ===========================================================
+  # Apply this watcher to pods labeled as "ephi" (Electronic Protected Health Information).
+  # This ensures that only systems handling sensitive health data are monitored,
+  # as required by HIPAA's focus on protecting patient information.
+  selector:
+    matchLabels:
+      hipaa/scope: ephi
+
+  # File Integrity Monitoring Subjects
+  # ===================================
+  subjects:
+    # Subject 1: Authentication and Access Control Files
+    # ---------------------------------------------------
+    # HIPAA 164.312(a)(1) requires access controls to protect ePHI.
+    # Monitor files that control user authentication and authorization.
+    - paths:
+        # /etc/passwd - User account database
+        - /etc/passwd
+        # /etc/shadow - Encrypted passwords and account expiration
+        - /etc/shadow
+        # /etc/pam.d - PAM configuration (password policies, MFA, session controls)
+        - /etc/pam.d
+      events:
+        # Monitor all modification types to detect unauthorized access changes
+        - modify   # Configuration modified (e.g., password policies weakened)
+        - delete   # File deleted (disables authentication mechanisms)
+        - attrib   # Permissions changed (e.g., world-readable shadow file)
+        - create   # New PAM module added (may bypass security controls)
+      # Recursive for /etc/pam.d directory
+      recursive: true
+      maxDepth: 2
+      ignore:
+        - "*.tmp"
+        - "*.swp"
+      tags:
+        compliance: hipaa
+        # Reference to specific HIPAA Security Rule requirement
+        hipaa-requirement: "164.312(a)(1)"
+        severity: critical
+        category: access-control
+
+    # Subject 2: Audit Log Files
+    # ---------------------------
+    # HIPAA 164.312(b) requires audit controls that record and examine system activity.
+    # Monitor audit logs to ensure they are not tampered with or deleted.
+    - paths:
+        # /var/log - System log directory (syslog, auth.log, etc.)
+        - /var/log
+      events:
+        # Monitor all events to detect any log manipulation
+        - modify   # Log modified (e.g., truncated to hide activity)
+        - delete   # Log deleted (violation of retention requirements)
+        - attrib   # Permissions changed (may allow unauthorized access)
+        - create   # New log file created (track for completeness)
+        - move     # Log renamed/moved (may indicate attempt to hide logs)
+      recursive: true
+      # Limit depth to avoid monitoring deep subdirectories with temporary files
+      maxDepth: 3
+      ignore:
+        # Exclude rotated/compressed logs and temporary files
+        - "*.tmp"
+        - "*.swp"
+        - "*.gz"       # Compressed rotated logs
+        - "*.bz2"      # Compressed rotated logs
+        - "*.old"      # Rotated logs
+        - "*.1"        # Numbered log rotations
+        - "*.2"
+      tags:
+        compliance: hipaa
+        hipaa-requirement: "164.312(b)"
+        severity: critical
+        category: audit-logs
+
+    # Subject 3: SSH Configuration Files
+    # -----------------------------------
+    # HIPAA 164.312(a) requires access controls including unique user identification.
+    # Monitor SSH configuration to detect weakened security settings.
+    - paths:
+        # /etc/ssh - SSH server and client configuration directory
+        - /etc/ssh
+      events:
+        - modify   # Configuration changed (e.g., PasswordAuthentication enabled)
+        - delete   # Configuration removed (may disable SSH access)
+        - attrib   # Permissions changed (e.g., private keys made world-readable)
+        - create   # New keys or config added (track for audit purposes)
+      recursive: true
+      maxDepth: 2
+      ignore:
+        - "*.tmp"
+        - "*.swp"
+      tags:
+        compliance: hipaa
+        hipaa-requirement: "164.312(a)(1)"
+        severity: critical
+        category: remote-access
+
+    # Subject 4: System Authentication Configuration
+    # -----------------------------------------------
+    # Monitor files controlling system-wide authentication policies.
+    - paths:
+        # /etc/login.defs - Login defaults (password aging, UID ranges)
+        - /etc/login.defs
+        # /etc/security - PAM security configuration directory
+        - /etc/security
+        # /etc/sudoers - Sudo privilege escalation configuration
+        - /etc/sudoers
+        # /etc/sudoers.d - Additional sudo configuration files
+        - /etc/sudoers.d
+      events:
+        - modify
+        - delete
+        - attrib
+        - create
+      recursive: true
+      maxDepth: 2
+      ignore:
+        - "*.tmp"
+        - "*.swp"
+      tags:
+        compliance: hipaa
+        hipaa-requirement: "164.312(a)(1)"
+        severity: critical
+        category: authentication-policy
+
+    # Subject 5: Application Configuration Files
+    # -------------------------------------------
+    # Monitor application-specific configuration that may contain ePHI access settings.
+    # Adjust paths based on your specific healthcare application deployments.
+    - paths:
+        # Example: Healthcare application configuration directories
+        # Customize these paths for your specific applications
+        - /etc/app
+        - /opt/healthcare-app/config
+      events:
+        - modify
+        - delete
+        - attrib
+        - create
+      recursive: true
+      maxDepth: 3
+      ignore:
+        - "*.tmp"
+        - "*.swp"
+        - "*.cache"
+        - "*.lock"
+      tags:
+        compliance: hipaa
+        hipaa-requirement: "164.312(a)(1)"
+        # High severity (not critical) - depends on application criticality
+        severity: high
+        category: application-config
+
+  # Container Runtime Detection
+  # ============================
+  # Auto-detect containerd, CRI-O, or Docker runtime.
+  containerRuntime: auto
+
+  # Watcher State
+  # =============
+  # paused: false - Watcher is actively monitoring
+  paused: false

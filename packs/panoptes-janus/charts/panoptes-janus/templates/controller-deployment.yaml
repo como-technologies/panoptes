@@ -16,6 +16,12 @@ spec:
         {{- include "panoptes-janus.controller.labels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "panoptes-janus.serviceAccountName" . }}
+      {{- with .Values.controller.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: controller
           image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag }}"

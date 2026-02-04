@@ -6,14 +6,45 @@
   "layer": "addon",
   "name": "panoptes",
   "version": "2.0.0",
+  "eol": "2028-01-01",
+  "group": "LTS",
   "constraints": {
-    "minKubeVersion": "1.28.0"
+    "dependencies": [
+      {
+        "packName": "kubernetes",
+        "layer": "k8s",
+        "minVersion": "1.28.0",
+        "type": "required"
+      }
+    ],
+    "resources": [
+      {
+        "type": "cpu",
+        "minLimit": 500,
+        "components": [
+          {
+            "scheduleType": "all",
+            "resourceRequestParamName": "argus.daemon.resources.requests.cpu"
+          }
+        ]
+      },
+      {
+        "type": "memory",
+        "minLimit": 256,
+        "components": [
+          {
+            "scheduleType": "all",
+            "resourceRequestParamName": "argus.daemon.resources.requests.memory"
+          }
+        ]
+      }
+    ]
   },
   "annotations": {
     "category": "Security",
     "subcategory": "File Integrity & Access Auditing",
-    "description": "All-seeing Kubernetes security: Argus (FIM) + Janus (Audit) + Panoptes Eye (Dashboard)"
-  },
-  "supportedOS": ["linux"],
-  "supportedArchitectures": ["amd64", "arm64"]
+    "description": "All-seeing Kubernetes security: Argus (FIM) + Janus (Audit) + Panoptes Eye (Dashboard)",
+    "supportedOS": "linux",
+    "supportedArchitectures": "amd64,arm64"
+  }
 }

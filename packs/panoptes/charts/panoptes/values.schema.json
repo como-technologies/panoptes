@@ -1,0 +1,423 @@
+{
+  "$schema": "https://json-schema.org/draft/07/schema#",
+  "title": "Panoptes Suite Values",
+  "description": "Configuration for the Panoptes Security Suite umbrella Helm chart (Argus + Janus + Dashboard)",
+  "type": "object",
+  "properties": {
+    "global": {
+      "type": "object",
+      "description": "Global configuration shared across all components",
+      "properties": {
+        "cluster": {
+          "type": "object",
+          "description": "Cluster identification for multi-cluster deployments",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Cluster name used in event labels and multi-cluster correlation"
+            },
+            "environment": {
+              "type": "string",
+              "description": "Environment name (e.g., production, staging, dev)"
+            },
+            "region": {
+              "type": "string",
+              "description": "Cloud region or datacenter identifier"
+            }
+          }
+        }
+      }
+    },
+    "components": {
+      "type": "object",
+      "description": "Enable or disable individual suite components",
+      "properties": {
+        "argus": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Deploy Argus (File Integrity Monitoring via inotify)"
+            }
+          }
+        },
+        "janus": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Deploy Janus (File Access Auditing via fanotify)"
+            }
+          }
+        },
+        "dashboard": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Deploy Panoptes Eye web dashboard"
+            }
+          }
+        }
+      }
+    },
+    "argus": {
+      "type": "object",
+      "description": "Argus File Integrity Monitoring configuration",
+      "properties": {
+        "controller": {
+          "$ref": "#/definitions/controllerConfig",
+          "description": "Argus operator deployment configuration"
+        },
+        "daemon": {
+          "$ref": "#/definitions/daemonConfig",
+          "description": "argusd DaemonSet configuration"
+        }
+      }
+    },
+    "janus": {
+      "type": "object",
+      "description": "Janus File Access Auditing configuration",
+      "properties": {
+        "controller": {
+          "$ref": "#/definitions/controllerConfig",
+          "description": "Janus operator deployment configuration"
+        },
+        "daemon": {
+          "$ref": "#/definitions/daemonConfig",
+          "description": "janusd DaemonSet configuration"
+        }
+      }
+    },
+    "dashboard": {
+      "type": "object",
+      "description": "Panoptes Eye web dashboard configuration",
+      "properties": {
+        "image": {
+          "type": "object",
+          "required": ["repository", "tag"],
+          "properties": {
+            "repository": {
+              "type": "string",
+              "description": "Container image repository for the dashboard"
+            },
+            "tag": {
+              "type": "string",
+              "description": "Container image tag"
+            },
+            "pullPolicy": {
+              "type": "string",
+              "enum": ["IfNotPresent", "Always", "Never"],
+              "description": "Image pull policy"
+            }
+          }
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "description": "Number of dashboard replicas"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "service": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["ClusterIP", "NodePort", "LoadBalancer"],
+              "description": "Kubernetes Service type for the dashboard"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "description": "Service port (default: 80)"
+            },
+            "targetPort": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "description": "Container port (default: 3000)"
+            }
+          }
+        },
+        "ingress": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Create an Ingress resource for the dashboard"
+            },
+            "className": {
+              "type": "string",
+              "description": "Ingress class name (e.g., nginx, traefik)"
+            },
+            "host": {
+              "type": "string",
+              "description": "Hostname for the Ingress rule"
+            },
+            "tls": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Enable TLS on the Ingress"
+                },
+                "secretName": {
+                  "type": "string",
+                  "description": "Name of the TLS Secret"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "observability": {
+      "type": "object",
+      "description": "Monitoring and observability configuration",
+      "properties": {
+        "prometheus": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable Prometheus metrics endpoints on all components"
+            },
+            "serviceMonitor": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Create Prometheus ServiceMonitor resources"
+                },
+                "interval": {
+                  "type": "string",
+                  "pattern": "^[0-9]+(s|m|h)$",
+                  "description": "Scrape interval (e.g., 30s, 1m)"
+                }
+              }
+            }
+          }
+        },
+        "opentelemetry": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable OpenTelemetry trace export"
+            },
+            "endpoint": {
+              "type": "string",
+              "description": "OTLP collector endpoint URL"
+            }
+          }
+        },
+        "grafana": {
+          "type": "object",
+          "properties": {
+            "dashboards": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Create Grafana dashboard ConfigMaps for auto-provisioning"
+                },
+                "namespace": {
+                  "type": "string",
+                  "description": "Namespace where Grafana is installed"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "alerting": {
+      "type": "object",
+      "description": "Prometheus alerting rules",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Create PrometheusRule resources for alerting"
+        },
+        "rules": {
+          "type": "object",
+          "properties": {
+            "criticalFileModified": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean", "description": "Alert when critical system files are modified" }
+              }
+            },
+            "highEventRate": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean", "description": "Alert when event rate exceeds threshold" },
+                "threshold": { "type": "integer", "minimum": 1, "description": "Events per second threshold" }
+              }
+            },
+            "unauthorizedAccess": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean", "description": "Alert on denied file access attempts" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "compliance": {
+      "type": "object",
+      "description": "Pre-configured compliance monitoring templates. Enable one or more frameworks to automatically create ArgusWatcher and JanusGuard resources with framework-appropriate settings.",
+      "properties": {
+        "baseSecurity": {
+          "$ref": "#/definitions/complianceFramework",
+          "description": "Basic security monitoring for critical system files"
+        },
+        "pciDss": {
+          "$ref": "#/definitions/complianceFramework",
+          "description": "PCI-DSS v4.0 compliance monitoring (Req 10.3, 11.5)"
+        },
+        "hipaa": {
+          "$ref": "#/definitions/complianceFramework",
+          "description": "HIPAA Security Rule compliance monitoring (164.312)"
+        },
+        "soc2": {
+          "$ref": "#/definitions/complianceFramework",
+          "description": "SOC 2 Type II compliance monitoring (CC6, CC7, CC8)"
+        },
+        "cisKubernetes": {
+          "$ref": "#/definitions/complianceFramework",
+          "description": "CIS Kubernetes Benchmark compliance monitoring"
+        },
+        "nist80053": {
+          "$ref": "#/definitions/complianceFramework",
+          "description": "NIST 800-53 Moderate baseline compliance monitoring"
+        },
+        "gdpr": {
+          "$ref": "#/definitions/complianceFramework",
+          "description": "GDPR data protection compliance monitoring (Art 32, 33)"
+        }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "description": "NetworkPolicy configuration for all components",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Create NetworkPolicy resources for all components"
+        }
+      }
+    },
+    "podDisruptionBudget": {
+      "type": "object",
+      "description": "PodDisruptionBudget configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Create PodDisruptionBudgets for controller Deployments"
+        },
+        "minAvailable": {
+          "oneOf": [
+            { "type": "integer", "minimum": 0 },
+            { "type": "string", "pattern": "^[0-9]+%$" }
+          ],
+          "description": "Minimum available pods (integer or percentage)"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "resources": {
+      "type": "object",
+      "properties": {
+        "requests": {
+          "type": "object",
+          "properties": {
+            "cpu": { "type": "string", "description": "CPU request (e.g., 100m, 0.5)" },
+            "memory": { "type": "string", "description": "Memory request (e.g., 128Mi, 1Gi)" }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "cpu": { "type": "string", "description": "CPU limit (e.g., 500m, 1)" },
+            "memory": { "type": "string", "description": "Memory limit (e.g., 256Mi, 2Gi)" }
+          }
+        }
+      }
+    },
+    "controllerConfig": {
+      "type": "object",
+      "properties": {
+        "image": {
+          "type": "object",
+          "required": ["repository", "tag"],
+          "properties": {
+            "repository": { "type": "string" },
+            "tag": { "type": "string" },
+            "pullPolicy": { "type": "string", "enum": ["IfNotPresent", "Always", "Never"] }
+          }
+        },
+        "replicas": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "resources": { "$ref": "#/definitions/resources" },
+        "nodeSelector": { "type": "object", "additionalProperties": { "type": "string" } },
+        "tolerations": { "type": "array" },
+        "affinity": { "type": "object" }
+      }
+    },
+    "daemonConfig": {
+      "type": "object",
+      "properties": {
+        "image": {
+          "type": "object",
+          "required": ["repository", "tag"],
+          "properties": {
+            "repository": { "type": "string" },
+            "tag": { "type": "string" },
+            "pullPolicy": { "type": "string", "enum": ["IfNotPresent", "Always", "Never"] }
+          }
+        },
+        "resources": { "$ref": "#/definitions/resources" },
+        "nodeSelector": { "type": "object", "additionalProperties": { "type": "string" } },
+        "tolerations": { "type": "array" }
+      }
+    },
+    "complianceFramework": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable this compliance framework"
+        },
+        "namespace": {
+          "type": "string",
+          "description": "Target namespace. If empty, uses the release namespace."
+        },
+        "enforcing": {
+          "type": "boolean",
+          "description": "Enable enforcement mode (block denied access). If false, audit-only."
+        },
+        "podSelector": {
+          "type": "object",
+          "description": "Label selector to match target pods for this framework",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "toleration": {
+      "type": "object",
+      "properties": {
+        "key": { "type": "string" },
+        "operator": { "type": "string", "enum": ["Exists", "Equal"] },
+        "value": { "type": "string" },
+        "effect": { "type": "string", "enum": ["NoSchedule", "PreferNoSchedule", "NoExecute"] },
+        "tolerationSeconds": { "type": "integer" }
+      }
+    }
+  }
+}
