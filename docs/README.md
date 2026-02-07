@@ -29,6 +29,7 @@ Deep dives into specific topics and workflows.
 
 - [**What to Monitor**](guides/what-to-monitor.md) - Recommended paths, exclusions, and monitoring strategies
 - [**Monitoring by Compliance Framework**](guides/monitoring-by-compliance.md) - Framework-specific path mappings (PCI-DSS, HIPAA, SOC2, CIS)
+- [**Monitoring & Alerting**](guides/monitoring-alerting.md) - Prometheus metrics, Grafana dashboards, alert rules
 - [**Enabling Enforcement**](guides/enabling-enforcement.md) - Block unauthorized file access with Janus policies
 - [**Multi-Cluster Monitoring**](guides/multi-cluster.md) - Central aggregation and cross-cluster correlation
 - [**5-Minute Security Setup**](guides/quick-start-security.md) - Essential security configurations for production
@@ -72,16 +73,17 @@ Auto-generated CRD documentation from Go source code.
 
 ## Architecture & Reference
 
-Design decisions, migration guides, and future roadmap.
+Design decisions and future roadmap.
 
 - [**Future State & Roadmap**](FUTURE_STATE.md) - Planned features and architectural evolution
-- [**C to Rust Migration**](C_TO_RUST_MIGRATION.md) - Legacy daemon rewrite rationale and progress
 
 ---
 
 **Quick Reference:**
 - ArgusWatcher short name: `aw` (e.g., `kubectl get aw`)
 - JanusGuard short name: `jg` (e.g., `kubectl get jg`)
-- Required capabilities: `SYS_ADMIN`, `SYS_PTRACE`, `DAC_READ_SEARCH`
+- Required capabilities:
+  - argusd: `SYS_PTRACE` (required), `DAC_READ_SEARCH` (optional)
+  - janusd: `SYS_ADMIN`, `SYS_PTRACE` (required), `AUDIT_WRITE` (optional)
 - Daemon ports: argusd (50051), janusd (50052)
 - Operator metrics: port 8080

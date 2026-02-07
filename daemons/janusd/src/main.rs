@@ -145,13 +145,13 @@ fn detect_runtime_mode(config: &Config, cap_checker: &LinuxCapabilityChecker) ->
                 return RuntimeMode::Traditional;
             }
             info!("eBPF mode explicitly enabled via --mode flag");
-            return RuntimeMode::Ebpf;
+            RuntimeMode::Ebpf
         }
         "traditional" | "fanotify" => {
             info!("Traditional mode selected via --mode flag");
-            return RuntimeMode::Traditional;
+            RuntimeMode::Traditional
         }
-        "auto" | _ => {
+        _ => {
             // Auto mode: try eBPF first if supported, fall back to traditional
             if !is_ebpf_supported() {
                 info!("Auto mode: eBPF not supported - using traditional (fanotify)");
@@ -167,7 +167,7 @@ fn detect_runtime_mode(config: &Config, cap_checker: &LinuxCapabilityChecker) ->
                 return RuntimeMode::Traditional;
             }
             info!("Auto mode: eBPF supported and capabilities present - using eBPF");
-            return RuntimeMode::Ebpf;
+            RuntimeMode::Ebpf
         }
     }
 }
@@ -183,32 +183,28 @@ fn detect_runtime_mode(config: &Config, _cap_checker: &LinuxCapabilityChecker) -
     RuntimeMode::Traditional
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    // Parse configuration
-    let config = Config::parse();
-
-    // Initialize logging
-    let level = match config.log_level.to_lowercase().as_str() {
+/// Parse log level string to tracing Level.
+fn parse_log_level(level_str: &str) -> Level {
+    match level_str.to_lowercase().as_str() {
         "trace" => Level::TRACE,
         "debug" => Level::DEBUG,
         "warn" => Level::WARN,
         "error" => Level::ERROR,
         _ => Level::INFO,
-    };
+    }
+}
 
-    // Use glog-compatible format for consistency with C daemon
+/// Initialize tracing with glog-compatible format.
+fn setup_logging(level: Level) {
     tracing_subscriber::registry()
         .with(GlogLayer::new())
         .with(tracing_subscriber::filter::LevelFilter::from_level(level))
         .init();
+}
 
-    // ═══════════════════════════════════════════════════════════════
-    // Environment Detection & Validation
-    // ═══════════════════════════════════════════════════════════════
-    let env_detector = LinuxEnvironmentDetector::new();
+/// Validate the deployment environment for required features.
+fn validate_environment(env_detector: &LinuxEnvironmentDetector) -> Result<()> {
     let environment = env_detector.detect();
-
     info!(environment = %environment, "Detected deployment environment");
 
     // Log any environment warnings
@@ -228,10 +224,11 @@ async fn main() -> Result<()> {
         .validate_for_feature(Feature::ProcAccess)
         .context("/proc access validation failed")?;
 
-    // ═══════════════════════════════════════════════════════════════
-    // Capability Verification (fail fast if missing base caps)
-    // ═══════════════════════════════════════════════════════════════
-    let cap_checker = LinuxCapabilityChecker::new();
+    Ok(())
+}
+
+/// Verify required Linux capabilities are present.
+fn validate_capabilities(cap_checker: &LinuxCapabilityChecker) -> Result<()> {
     let missing_caps = cap_checker.check_required(JANUSD_REQUIRED_CAPS);
 
     if !missing_caps.is_empty() {
@@ -241,58 +238,54 @@ async fn main() -> Result<()> {
     }
 
     info!("Base capabilities verified");
+    Ok(())
+}
 
-    // ═══════════════════════════════════════════════════════════════
-    // Resource Limit Verification (fail fast if insufficient)
-    // ═══════════════════════════════════════════════════════════════
-    //
-    // Verify system resource limits are sufficient BEFORE starting.
-    // This prevents cryptic failures partway through operation when
-    // the daemon runs out of file descriptors or mark slots.
-    //
-    // Key limits for janusd:
-    // - RLIMIT_NOFILE: File descriptors (fanotify opens FDs for each event!)
-    // - max_user_marks: Per-user fanotify mark limit
-    // - max_queued_events: fanotify event queue size (overflow = lost events)
-    //
-    // IMPORTANT: Each fanotify permission event includes an open FD to the
-    // accessed file. If events arrive faster than we can process them,
-    // we can exhaust FD limits. The safety margin must account for this.
+/// Safety margin for file descriptors.
+/// Larger than argusd because fanotify events consume FDs - each concurrent
+/// event holds an open FD until response is written.
+const FD_SAFETY_MARGIN: u64 = 4096;
 
+/// Verify system resource limits are sufficient.
+///
+/// Checks file descriptor limits and fanotify-specific limits.
+/// Fails fast if limits would cause cryptic failures later.
+fn validate_resource_limits(max_guards: usize) -> Result<()> {
     // Log all resource limits for diagnostics
     let limits_info = ResourceLimitsInfo::collect();
     limits_info.log();
 
     // Check file descriptor limit
-    // Larger safety margin than argusd because fanotify events consume FDs
-    // Each concurrent event holds an open FD until response is written
-    const FD_SAFETY_MARGIN: u64 = 4096;
-    if let Err(e) = check_fd_limit(config.max_guards as u64 * 100, FD_SAFETY_MARGIN) {
+    if let Err(e) = check_fd_limit(max_guards as u64 * 100, FD_SAFETY_MARGIN) {
         error!("{}", e);
         error!(
             "Increase with: ulimit -n {} (or update container securityContext)",
-            config.max_guards as u64 * 100 + FD_SAFETY_MARGIN
+            max_guards as u64 * 100 + FD_SAFETY_MARGIN
         );
         anyhow::bail!("Insufficient file descriptor limit - daemon cannot start safely");
     }
-    info!(
-        max_guards = config.max_guards,
-        "File descriptor limit verified"
-    );
+    info!(max_guards = max_guards, "File descriptor limit verified");
 
     // Check fanotify-specific limits
+    validate_fanotify_limits(max_guards);
+
+    Ok(())
+}
+
+/// Check fanotify-specific kernel limits and warn if insufficient.
+fn validate_fanotify_limits(max_guards: usize) {
     let (max_user_marks, max_queued_events) = read_fanotify_limits();
 
     // Note: max_user_marks sysctl may not exist on older kernels
-    if max_user_marks > 0 && max_user_marks < config.max_guards as u64 * 10 {
+    if max_user_marks > 0 && max_user_marks < max_guards as u64 * 10 {
         warn!(
             kernel_limit = max_user_marks,
-            estimated_need = config.max_guards * 10,
+            estimated_need = max_guards * 10,
             "max_user_marks may be insufficient for configured max_guards"
         );
         warn!(
             "Fix with: sysctl -w fs.fanotify.max_user_marks={}",
-            config.max_guards * 10
+            max_guards * 10
         );
     }
 
@@ -307,13 +300,11 @@ async fn main() -> Result<()> {
         warn!("Fix with: sysctl -w fs.fanotify.max_queued_events=65536");
         warn!("Queue overflow causes SILENT event loss - critical for security monitoring!");
     }
+}
 
-    // ═══════════════════════════════════════════════════════════════
-    // Runtime Mode Selection (auto-detect with fallback)
-    // ═══════════════════════════════════════════════════════════════
-    let runtime_mode = detect_runtime_mode(&config, &cap_checker);
-
-    let mode_str = match runtime_mode {
+/// Log runtime mode and return mode string for startup info.
+fn log_runtime_mode(mode: RuntimeMode) -> &'static str {
+    match mode {
         RuntimeMode::Ebpf => {
             info!("eBPF mode: LSM-based file access auditing with atomic process attribution");
             info!("Permission control via LSM hooks (deny paths supported)");
@@ -326,13 +317,11 @@ async fn main() -> Result<()> {
             );
             "traditional (fanotify)"
         }
-    };
+    }
+}
 
-    // ═══════════════════════════════════════════════════════════════
-    // Daemon Startup
-    // ═══════════════════════════════════════════════════════════════
-    let listen_addr = config.effective_addr();
-
+/// Log daemon startup information.
+fn log_startup_info(config: &Config, listen_addr: SocketAddr, mode_str: &str) {
     info!(
         version = "2.0.0",
         node = %config.node_name,
@@ -342,6 +331,35 @@ async fn main() -> Result<()> {
         mode = mode_str,
         "Starting janusd"
     );
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Parse configuration
+    let config = Config::parse();
+
+    // Initialize logging
+    let level = parse_log_level(&config.log_level);
+    setup_logging(level);
+
+    // Environment detection & validation
+    let env_detector = LinuxEnvironmentDetector::new();
+    validate_environment(&env_detector)?;
+
+    // Capability verification (fail fast if missing base caps)
+    let cap_checker = LinuxCapabilityChecker::new();
+    validate_capabilities(&cap_checker)?;
+
+    // Resource limit verification (fail fast if insufficient)
+    validate_resource_limits(config.max_guards)?;
+
+    // Runtime mode selection (auto-detect with fallback)
+    let runtime_mode = detect_runtime_mode(&config, &cap_checker);
+    let mode_str = log_runtime_mode(runtime_mode);
+
+    // Log startup info
+    let listen_addr = config.effective_addr();
+    log_startup_info(&config, listen_addr, mode_str);
 
     // Create audit logger (falls back to null logger if CAP_AUDIT_WRITE unavailable)
     let audit_logger: Arc<dyn audit::AuditLogger> = Arc::from(create_audit_logger());

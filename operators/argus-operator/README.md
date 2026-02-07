@@ -27,40 +27,30 @@ functionality.
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         Argus Architecture                              │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  ┌─────────────────────┐        ┌────────────────────────────────────┐  │
-│  │   ArgusWatcher CR   │───────▶│         Argus Operator             │  │
-│  │                     │        │  ┌──────────────────────────────┐  │  │
-│  │ spec:               │        │  │     Reconciler Loop          │  │  │
-│  │   selector: {...}   │        │  │  • Watch ArgusWatcher CRs    │  │  │
-│  │   subjects:         │        │  │  • Find matching pods        │  │  │
-│  │     - paths: [...]  │        │  │  • Call argusd via gRPC      │  │  │
-│  │       events: [...] │        │  │  • Update status             │  │  │
-│  └─────────────────────┘        │  └──────────────────────────────┘  │  │
-│                                 └───────────────┬────────────────────┘  │
-│                                                 │ gRPC                  │
-│                                                 ▼                       │
-│  ┌──────────────────────────────────────────────────────────────────┐   │
-│  │                    argusd DaemonSet                              │   │
-│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐              │   │
-│  │  │ argusd  │  │ argusd  │  │ argusd  │  │ argusd  │   (per node) │   │
-│  │  │ Node 1  │  │ Node 2  │  │ Node 3  │  │ Node N  │              │   │
-│  │  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘              │   │
-│  │       │            │            │            │                   │   │
-│  │       └────────────┴────────────┴────────────┘                   │   │
-│  │                         │                                        │   │
-│  │                    inotify_add_watch()                           │   │
-│  │                         ▼                                        │   │
-│  │  ┌──────────────────────────────────────────────────────────┐    │   │
-│  │  │              Linux Kernel (inotify subsystem)            │    │   │
-│  │  │  • IN_ACCESS, IN_MODIFY, IN_CREATE, IN_DELETE, etc.      │    │   │
-│  │  └──────────────────────────────────────────────────────────┘    │   │
-│  └──────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Cluster["Kubernetes Cluster"]
+        AW["ArgusWatcher CR<br/>spec.selector, spec.subjects"]
+        AW --> AO
+
+        subgraph AO["Argus Operator"]
+            RC["Reconciler Loop<br/>• Watch ArgusWatcher CRs<br/>• Find matching pods<br/>• Call argusd via gRPC<br/>• Update status"]
+        end
+
+        AO -->|"gRPC"| DS
+
+        subgraph DS["argusd DaemonSet"]
+            A1["argusd<br/>Node 1"]
+            A2["argusd<br/>Node 2"]
+            AN["argusd<br/>Node N"]
+        end
+
+        A1 & A2 & AN -->|"inotify_add_watch()"| K
+
+        subgraph K["Linux Kernel"]
+            IN["inotify subsystem<br/>IN_ACCESS, IN_MODIFY, IN_CREATE, IN_DELETE"]
+        end
+    end
 ```
 
 ## Hardening: Init Container Injection
@@ -71,26 +61,27 @@ protection is in place.
 
 ### Architecture
 
+```mermaid
+sequenceDiagram
+    participant Pod as Pod CREATE
+    participant Webhook as Admission Webhook
+    participant Init as watcher-wait init
+    participant Argusd as argusd
+    participant Main as Main Containers
+
+    Pod->>Webhook: 1. CREATE request
+    Webhook->>Pod: 2. Inject watcher-wait init container
+    Pod->>Init: 3. Schedule, init starts
+    Init->>Argusd: 4. Poll GetWatchState RPC
+    Argusd->>Argusd: 5. Create watch SYNCHRONOUSLY
+    Argusd->>Init: 6. Return watches_ready=true
+    Init->>Main: 7. Exit 0 → PROTECTED
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Pod Startup Flow (Hardened)                  │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  1. Pod CREATE request → Admission Webhook                      │
-│  2. Webhook injects watcher-wait init container                 │
-│  3. Pod scheduled, init container starts                        │
-│  4. watcher-wait polls GetWatchState RPC                        │
-│  5. Argusd creates watch SYNCHRONOUSLY (watches initialized)    │
-│  6. GetWatchState returns watches_ready=true                    │
-│  7. watcher-wait exits 0 → main containers start (PROTECTED)    │
-│                                                                 │
-│  Defense layers:                                                │
-│  ✓ Synchronous watch init (watches registered before response)  │
-│  ✓ Readiness fields in proto (watches_ready, ready_at)          │
-│  ✓ Webhook + init container (blocks pod until ready)            │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+
+**Defense layers:**
+- Synchronous watch init (watches registered before response)
+- Readiness fields in proto (`watches_ready`, `ready_at`)
+- Webhook + init container (blocks pod until ready)
 
 ### Enabling Webhook Injection
 
@@ -395,13 +386,15 @@ The operator requires these permissions:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `argus_reconcile_total` | Counter | Total reconciliations |
-| `argus_reconcile_duration_seconds` | Histogram | Reconciliation duration |
-| `argus_watched_pods` | Gauge | Pods with active watches |
-| `argus_active_watches` | Gauge | Total inotify watches |
-| `argus_events_total` | Counter | File events by type |
-| `argus_grpc_requests_total` | Counter | gRPC requests to daemons |
-| `argus_grpc_request_duration_seconds` | Histogram | gRPC request duration |
+| `argus_controller_reconcile_total` | Counter | Total reconciliations |
+| `argus_controller_reconcile_duration_seconds` | Histogram | Reconciliation duration |
+| `argus_controller_watched_pods_total` | Gauge | Pods with active watches |
+| `argus_controller_observable_pods_total` | Gauge | Pods matching selector |
+| `argus_controller_watch_descriptors_total` | Gauge | Total inotify descriptors |
+| `argus_controller_events_detected_total` | Counter | File events by type |
+| `argus_controller_daemon_requests_total` | Counter | gRPC requests to daemons |
+| `argus_controller_daemon_request_duration_seconds` | Histogram | gRPC request duration |
+| `argus_controller_watcher_condition` | Gauge | Watcher condition status |
 
 ### Health Endpoints
 
@@ -488,12 +481,12 @@ spec:
 
 2. Verify daemon is running:
    ```bash
-   kubectl get pods -n argus-system -l app=argusd
+   kubectl get pods -n argus-system -l app.kubernetes.io/component=daemon
    ```
 
 3. Check daemon logs:
    ```bash
-   kubectl logs -n argus-system -l app=argusd
+   kubectl logs -n argus-system -l app.kubernetes.io/component=daemon
    ```
 
 4. Verify selector matches pods:
@@ -516,9 +509,8 @@ echo 524288 | sudo tee /proc/sys/fs/inotify/max_user_watches
 ### Permission denied errors
 
 Ensure argusd has required capabilities:
-- `SYS_ADMIN` - Access container namespaces
-- `SYS_PTRACE` - Access /proc for container PIDs
-- `DAC_READ_SEARCH` - Traverse container filesystems
+- `SYS_PTRACE` - Access /proc for container PIDs (required)
+- `DAC_READ_SEARCH` - Bypass file read permission checks (optional)
 
 ## Development
 

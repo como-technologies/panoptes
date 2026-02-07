@@ -18,37 +18,37 @@ This document models attack scenarios against Panoptes and its monitored environ
 
 ## Trust Boundaries
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           Kubernetes Cluster                             │
-│                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                     Control Plane                                │   │
-│  │  ┌─────────────────┐  ┌─────────────────┐                       │   │
-│  │  │ argus-operator  │  │ janus-operator  │  ← Trust Boundary 1   │   │
-│  │  └────────┬────────┘  └────────┬────────┘                       │   │
-│  └───────────│────────────────────│────────────────────────────────┘   │
-│              │ gRPC (TLS)         │ gRPC (TLS)                          │
-│  ┌───────────│────────────────────│────────────────────────────────┐   │
-│  │           │      Worker Node   │                                 │   │
-│  │  ┌────────▼────────┐  ┌───────▼─────────┐                       │   │
-│  │  │     argusd      │  │     janusd      │  ← Trust Boundary 2   │   │
-│  │  │ (inotify FIM)   │  │ (fanotify audit)│                       │   │
-│  │  └────────┬────────┘  └────────┬────────┘                       │   │
-│  │           │ Kernel APIs        │                                 │   │
-│  │  ┌────────▼────────────────────▼────────────────────────────┐   │   │
-│  │  │                    Linux Kernel                           │   │   │
-│  │  │              (inotify / fanotify subsystems)              │   │   │
-│  │  └───────────────────────────────────────────────────────────┘   │   │
-│  │                                                                  │   │
-│  │  ┌───────────────────────────────────────────────────────────┐  │   │
-│  │  │                  Monitored Workloads                       │  │   │
-│  │  │  ┌─────────┐ ┌─────────┐ ┌─────────┐                      │  │   │
-│  │  │  │  Pod A  │ │  Pod B  │ │  Pod C  │  ← Trust Boundary 3  │  │   │
-│  │  │  └─────────┘ └─────────┘ └─────────┘                      │  │   │
-│  │  └───────────────────────────────────────────────────────────┘  │   │
-│  └──────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Cluster["Kubernetes Cluster"]
+        subgraph ControlPlane["Control Plane (Trust Boundary 1)"]
+            AO["argus-operator"]
+            JO["janus-operator"]
+        end
+
+        subgraph WorkerNode["Worker Node"]
+            subgraph Daemons["Daemon Layer (Trust Boundary 2)"]
+                AD["argusd<br/>(inotify FIM)"]
+                JD["janusd<br/>(fanotify audit)"]
+            end
+
+            subgraph Kernel["Linux Kernel"]
+                IN["inotify / fanotify subsystems"]
+            end
+
+            subgraph Workloads["Monitored Workloads (Trust Boundary 3)"]
+                PA["Pod A"]
+                PB["Pod B"]
+                PC["Pod C"]
+            end
+        end
+    end
+
+    AO -->|"gRPC (TLS)"| AD
+    JO -->|"gRPC (TLS)"| JD
+    AD -->|"Kernel APIs"| IN
+    JD -->|"Kernel APIs"| IN
+    IN -.->|"monitors"| Workloads
 ```
 
 ---

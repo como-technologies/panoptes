@@ -140,13 +140,13 @@ fn detect_runtime_mode(config: &Config, cap_checker: &LinuxCapabilityChecker) ->
                 return RuntimeMode::Traditional;
             }
             info!("eBPF mode explicitly enabled via --mode flag");
-            return RuntimeMode::Ebpf;
+            RuntimeMode::Ebpf
         }
         "traditional" | "inotify" => {
             info!("Traditional mode selected via --mode flag");
-            return RuntimeMode::Traditional;
+            RuntimeMode::Traditional
         }
-        "auto" | _ => {
+        _ => {
             // Auto mode: try eBPF first if supported, fall back to traditional
             if !is_ebpf_supported() {
                 info!("Auto mode: eBPF not supported - using traditional (inotify)");
@@ -162,7 +162,7 @@ fn detect_runtime_mode(config: &Config, cap_checker: &LinuxCapabilityChecker) ->
                 return RuntimeMode::Traditional;
             }
             info!("Auto mode: eBPF supported and capabilities present - using eBPF");
-            return RuntimeMode::Ebpf;
+            RuntimeMode::Ebpf
         }
     }
 }
@@ -178,32 +178,28 @@ fn detect_runtime_mode(config: &Config, _cap_checker: &LinuxCapabilityChecker) -
     RuntimeMode::Traditional
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    // Parse configuration
-    let config = Config::parse();
-
-    // Initialize logging
-    let level = match config.log_level.to_lowercase().as_str() {
+/// Parse log level string to tracing Level.
+fn parse_log_level(level_str: &str) -> Level {
+    match level_str.to_lowercase().as_str() {
         "trace" => Level::TRACE,
         "debug" => Level::DEBUG,
         "warn" => Level::WARN,
         "error" => Level::ERROR,
         _ => Level::INFO,
-    };
+    }
+}
 
-    // Use glog-compatible format for consistency with C daemon
+/// Initialize tracing with glog-compatible format.
+fn setup_logging(level: Level) {
     tracing_subscriber::registry()
         .with(GlogLayer::new())
         .with(tracing_subscriber::filter::LevelFilter::from_level(level))
         .init();
+}
 
-    // ═══════════════════════════════════════════════════════════════
-    // Environment Detection & Validation
-    // ═══════════════════════════════════════════════════════════════
-    let env_detector = LinuxEnvironmentDetector::new();
+/// Validate the deployment environment for required features.
+fn validate_environment(env_detector: &LinuxEnvironmentDetector) -> Result<()> {
     let environment = env_detector.detect();
-
     info!(environment = %environment, "Detected deployment environment");
 
     // Log any environment warnings
@@ -223,10 +219,11 @@ async fn main() -> Result<()> {
         .validate_for_feature(Feature::ProcAccess)
         .context("/proc access validation failed")?;
 
-    // ═══════════════════════════════════════════════════════════════
-    // Capability Verification (fail fast if missing base caps)
-    // ═══════════════════════════════════════════════════════════════
-    let cap_checker = LinuxCapabilityChecker::new();
+    Ok(())
+}
+
+/// Verify required Linux capabilities are present.
+fn validate_capabilities(cap_checker: &LinuxCapabilityChecker) -> Result<()> {
     let missing_caps = cap_checker.check_required(ARGUSD_REQUIRED_CAPS);
 
     if !missing_caps.is_empty() {
@@ -236,52 +233,79 @@ async fn main() -> Result<()> {
     }
 
     info!("Base capabilities verified");
+    Ok(())
+}
 
-    // ═══════════════════════════════════════════════════════════════
-    // Resource Limit Verification (fail fast if insufficient)
-    // ═══════════════════════════════════════════════════════════════
-    //
-    // Verify system resource limits are sufficient BEFORE starting.
-    // This prevents cryptic failures partway through operation when
-    // the daemon runs out of file descriptors or watch slots.
-    //
-    // Key limits for argusd:
-    // - RLIMIT_NOFILE: File descriptors (for inotify fds + gRPC + logging)
-    // - max_user_watches: Per-user inotify watch limit
-    // - max_queued_events: inotify event queue size (overflow = lost events)
+/// Safety margin for file descriptors (gRPC connections, logging, proc access).
+const FD_SAFETY_MARGIN: u64 = 1024;
 
+/// Verify system resource limits are sufficient.
+///
+/// Checks file descriptor limits and inotify-specific limits.
+/// Fails fast if limits would cause cryptic failures later.
+fn validate_resource_limits(max_watches: usize) -> Result<()> {
     // Log all resource limits for diagnostics
     let limits_info = ResourceLimitsInfo::collect();
     limits_info.log();
 
     // Check file descriptor limit
-    // Safety margin of 1024 for: gRPC connections, logging, proc access, etc.
-    const FD_SAFETY_MARGIN: u64 = 1024;
-    if let Err(e) = check_fd_limit(config.max_watches as u64, FD_SAFETY_MARGIN) {
+    if let Err(e) = check_fd_limit(max_watches as u64, FD_SAFETY_MARGIN) {
         error!("{}", e);
         error!(
             "Increase with: ulimit -n {} (or update container securityContext)",
-            config.max_watches as u64 + FD_SAFETY_MARGIN
+            max_watches as u64 + FD_SAFETY_MARGIN
         );
         anyhow::bail!("Insufficient file descriptor limit - daemon cannot start safely");
     }
-    info!(
-        max_watches = config.max_watches,
-        "File descriptor limit verified"
-    );
+    info!(max_watches = max_watches, "File descriptor limit verified");
 
     // Check inotify-specific limits
+    validate_inotify_limits(max_watches);
+
+    Ok(())
+}
+
+/// Log runtime mode and return mode string for startup info.
+fn log_runtime_mode(mode: RuntimeMode) -> &'static str {
+    match mode {
+        RuntimeMode::Ebpf => {
+            info!("eBPF mode: LSM-based file monitoring with process attribution");
+            "ebpf (LSM hooks)"
+        }
+        RuntimeMode::Traditional => {
+            info!("Traditional mode: inotify-based file monitoring");
+            info!("Note: Process info unavailable (inotify limitation)");
+            "traditional (inotify)"
+        }
+    }
+}
+
+/// Log daemon startup information.
+fn log_startup_info(config: &Config, listen_addr: SocketAddr, mode_str: &str) {
+    info!(
+        version = "2.0.0",
+        node = %config.node_name,
+        cluster = %config.cluster_name,
+        listen = %listen_addr,
+        max_watches = config.max_watches,
+        mode = mode_str,
+        "Starting argusd"
+    );
+}
+
+/// Check inotify-specific kernel limits and warn if insufficient.
+fn validate_inotify_limits(max_watches: usize) {
     let (max_user_watches, max_queued_events) = read_inotify_limits();
 
-    if max_user_watches < config.max_watches as u64 {
+    if max_user_watches < max_watches as u64 {
         warn!(
             kernel_limit = max_user_watches,
-            configured = config.max_watches,
+            configured = max_watches,
             "max_user_watches is less than configured max_watches"
         );
         warn!(
             "Fix with: sysctl -w fs.inotify.max_user_watches={}",
-            config.max_watches
+            max_watches
         );
         // Don't fail - the kernel will return ENOSPC when limit is hit,
         // which we handle gracefully. Just warn.
@@ -296,38 +320,35 @@ async fn main() -> Result<()> {
         );
         warn!("Fix with: sysctl -w fs.inotify.max_queued_events=65536");
     }
+}
 
-    // ═══════════════════════════════════════════════════════════════
-    // Runtime Mode Selection (auto-detect with fallback)
-    // ═══════════════════════════════════════════════════════════════
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Parse configuration
+    let config = Config::parse();
+
+    // Initialize logging
+    let level = parse_log_level(&config.log_level);
+    setup_logging(level);
+
+    // Environment detection & validation
+    let env_detector = LinuxEnvironmentDetector::new();
+    validate_environment(&env_detector)?;
+
+    // Capability verification (fail fast if missing base caps)
+    let cap_checker = LinuxCapabilityChecker::new();
+    validate_capabilities(&cap_checker)?;
+
+    // Resource limit verification (fail fast if insufficient)
+    validate_resource_limits(config.max_watches)?;
+
+    // Runtime mode selection (auto-detect with fallback)
     let runtime_mode = detect_runtime_mode(&config, &cap_checker);
+    let mode_str = log_runtime_mode(runtime_mode);
 
-    let mode_str = match runtime_mode {
-        RuntimeMode::Ebpf => {
-            info!("eBPF mode: LSM-based file monitoring with process attribution");
-            "ebpf (LSM hooks)"
-        }
-        RuntimeMode::Traditional => {
-            info!("Traditional mode: inotify-based file monitoring");
-            info!("Note: Process info unavailable (inotify limitation)");
-            "traditional (inotify)"
-        }
-    };
-
-    // ═══════════════════════════════════════════════════════════════
-    // Daemon Startup
-    // ═══════════════════════════════════════════════════════════════
+    // Log startup info
     let listen_addr = config.effective_addr();
-
-    info!(
-        version = "2.0.0",
-        node = %config.node_name,
-        cluster = %config.cluster_name,
-        listen = %listen_addr,
-        max_watches = config.max_watches,
-        mode = mode_str,
-        "Starting argusd"
-    );
+    log_startup_info(&config, listen_addr, mode_str);
 
     // Create health reporter
     let (mut health_reporter, health_service) = health_reporter();

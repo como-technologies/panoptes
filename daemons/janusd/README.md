@@ -2,7 +2,7 @@
 
 **Production-ready Rust implementation of the Janus file access auditing daemon**
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](../../../LICENSE)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](../../LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.82+-orange.svg)](https://www.rust-lang.org)
 
 ## Overview
@@ -25,44 +25,35 @@ Fully tested with 63 unit tests and 21 integration tests.
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      janusd (Rust) Architecture                          │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                    Tonic gRPC Server                               │ │
-│  │  ┌──────────────────┐  ┌──────────────────┐                       │ │
-│  │  │  JanusService    │  │  HealthService   │                       │ │
-│  │  │  (service.rs)    │  │  (tonic-health)  │                       │ │
-│  │  └────────┬─────────┘  └──────────────────┘                       │ │
-│  └───────────┼───────────────────────────────────────────────────────┘ │
-│              │                                                          │
-│              ▼                                                          │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                      Guard Module                                  │ │
-│  │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────────┐  │ │
-│  │  │ FanotifyGuard   │ │ PolicyEvaluator │ │ DedupeCache         │  │ │
-│  │  │ (nix fanotify)  │ │ (LRU cached)    │ │ (100ms window)      │  │ │
-│  │  └─────────────────┘ └─────────────────┘ └─────────────────────┘  │ │
-│  │  ┌─────────────────┐ ┌─────────────────────────────────────────┐  │ │
-│  │  │ AuditLogger     │ │ ContainerRuntime (containerd/CRI-O)     │  │ │
-│  │  │ (NETLINK_AUDIT) │ └─────────────────────────────────────────┘  │ │
-│  │  └─────────────────┘                                              │ │
-│  └────────────────────────────────────────────────────────────────────┘ │
-│              │                                                          │
-│              ▼                                                          │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                      Linux Kernel                                  │ │
-│  │  fanotify_init() → fanotify_mark() → read() → write(response)     │ │
-│  └────────────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Janusd["janusd (Rust) Architecture"]
+        subgraph GRPC["Tonic gRPC Server"]
+            JS["JanusService<br/>(service.rs)"]
+            HS["HealthService<br/>(tonic-health)"]
+        end
+
+        subgraph Guard["Guard Module"]
+            FG["FanotifyGuard<br/>(nix fanotify)"]
+            PE["PolicyEvaluator<br/>(LRU cached)"]
+            DC["DedupeCache<br/>(100ms window)"]
+            AL["AuditLogger<br/>(NETLINK_AUDIT)"]
+            CR["ContainerRuntime<br/>(containerd/CRI-O)"]
+        end
+
+        subgraph Kernel["Linux Kernel"]
+            SYS["fanotify_init() → fanotify_mark() → read() → write(response)"]
+        end
+    end
+
+    JS --> Guard
+    Guard --> Kernel
 ```
 
 ## Project Structure
 
 ```
-rust/
+daemons/janusd/
 ├── Cargo.toml           # Rust dependencies
 ├── build.rs             # Proto compilation (tonic-build)
 ├── src/
@@ -74,9 +65,9 @@ rust/
 │   ├── audit.rs         # Kernel audit logging (NETLINK_AUDIT)
 │   └── metrics.rs       # Atomic metrics collection
 ├── tests/
-│   └── integration_tests.rs  # 21 integration tests
+│   └── integration_tests.rs
 └── benches/
-    └── policy_evaluation.rs  # 6 benchmark groups
+    └── policy_evaluation.rs
 ```
 
 ## Features
@@ -118,7 +109,7 @@ rust/
 ### Build Commands
 
 ```bash
-cd daemons/janusd/rust/
+cd daemons/janusd
 
 # Debug build
 cargo build
@@ -133,7 +124,7 @@ cargo test
 cargo bench
 
 # Format and lint
-cargo fmt --check && cargo clippy --all-targets
+cargo fmt --check && cargo clippy --all-targets --all-features
 ```
 
 ### Build Profile
@@ -176,14 +167,12 @@ JANUSD_PORT=50052 NODE_NAME=worker-1 LOG_LEVEL=debug ./target/release/janusd
 
 ## Docker Build
 
-The Dockerfile is at `daemons/janusd/Dockerfile.rust`:
-
 ```bash
 # Build from repo root (context needs proto/)
-docker build -t janusd-rust:latest -f daemons/janusd/Dockerfile.rust .
+docker build -t janusd:latest -f daemons/janusd/Dockerfile .
 
 # Run (requires CAP_SYS_ADMIN for fanotify)
-docker run --privileged -p 50052:50052 janusd-rust:latest
+docker run --privileged -p 50052:50052 janusd:latest
 ```
 
 ## Testing
@@ -485,4 +474,4 @@ Both implementations accept the same `--port` argument for compatibility.
 
 Copyright 2026 Como Technologies, LTD
 
-Licensed under the Apache License, Version 2.0. See [LICENSE](../../../LICENSE) for details.
+Licensed under the Apache License, Version 2.0. See [LICENSE](../../LICENSE) for details.

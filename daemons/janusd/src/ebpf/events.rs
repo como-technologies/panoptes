@@ -74,10 +74,12 @@ mod tests {
 
     #[test]
     fn test_ebpf_access_event_from_raw() {
-        let mut raw = FileEvent::default();
-        raw.event_type = FileEventType::Access as u32;
-        raw.pid = 1234;
-        raw.uid = 1000;
+        let mut raw = FileEvent {
+            event_type: FileEventType::Access as u32,
+            pid: 1234,
+            uid: 1000,
+            ..Default::default()
+        };
 
         // Set path
         let path = b"/etc/passwd";

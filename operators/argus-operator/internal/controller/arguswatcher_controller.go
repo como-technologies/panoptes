@@ -276,25 +276,7 @@ func (r *ArgusWatcherReconciler) findMatchingPods(ctx context.Context, watcher *
 		return nil, err
 	}
 
-	// Filter to only running pods with containers
-	var runningPods []corev1.Pod
-	for _, pod := range podList.Items {
-		if pod.Status.Phase == corev1.PodRunning && len(pod.Status.ContainerStatuses) > 0 {
-			// Check that at least one container is running
-			hasRunning := false
-			for _, status := range pod.Status.ContainerStatuses {
-				if status.State.Running != nil {
-					hasRunning = true
-					break
-				}
-			}
-			if hasRunning {
-				runningPods = append(runningPods, pod)
-			}
-		}
-	}
-
-	return runningPods, nil
+	return filterRunningPods(podList.Items), nil
 }
 
 // syncWatches uses the query-first pattern to reconcile watches.
@@ -308,13 +290,8 @@ func (r *ArgusWatcherReconciler) syncWatches(ctx context.Context, watcher *argus
 	var podStatuses []argusv2.WatchedPodStatus
 	var lastErr error
 
-	// Group pods by node
-	podsByNode := make(map[string][]corev1.Pod)
-	for _, pod := range pods {
-		if pod.Spec.NodeName != "" {
-			podsByNode[pod.Spec.NodeName] = append(podsByNode[pod.Spec.NodeName], pod)
-		}
-	}
+	// Group pods by node for batched daemon calls
+	podsByNode := groupPodsByNode(pods)
 
 	// Node cache for IP lookups
 	nodeCache := make(map[string]*corev1.Node)
@@ -439,13 +416,8 @@ func (r *ArgusWatcherReconciler) syncWatches(ctx context.Context, watcher *argus
 
 // watchConfigMatches checks if the daemon's actual watch config matches the desired spec.
 func (r *ArgusWatcherReconciler) watchConfigMatches(watcher *argusv2.ArgusWatcher, actual *daemon.WatchState) bool {
-	// Check paused state
-	if actual.Paused != watcher.Spec.Paused {
-		return false
-	}
-
-	// Check log format
-	if actual.LogFormat != watcher.Spec.LogFormat {
+	// Check paused state and log format
+	if actual.Paused != watcher.Spec.Paused || actual.LogFormat != watcher.Spec.LogFormat {
 		return false
 	}
 
@@ -456,34 +428,33 @@ func (r *ArgusWatcherReconciler) watchConfigMatches(watcher *argusv2.ArgusWatche
 
 	// Check each subject
 	for i, desired := range watcher.Spec.Subjects {
-		if i >= len(actual.Subjects) {
+		if !r.subjectMatches(&desired, &actual.Subjects[i]) {
 			return false
 		}
-		actualSubj := actual.Subjects[i]
+	}
 
-		// Compare paths
-		if len(actualSubj.Paths) != len(desired.Paths) {
-			return false
-		}
-		for j, p := range desired.Paths {
-			if j >= len(actualSubj.Paths) || actualSubj.Paths[j] != p {
-				return false
-			}
-		}
+	return true
+}
 
-		// Compare recursive setting
-		if actualSubj.Recursive != desired.Recursive {
-			return false
-		}
+// subjectMatches checks if a single watch subject matches its desired state.
+func (r *ArgusWatcherReconciler) subjectMatches(desired *argusv2.ArgusWatcherSubject, actual *daemon.WatchSubjectState) bool {
+	// Compare paths
+	if !pathListsEqual(desired.Paths, actual.Paths) {
+		return false
+	}
 
-		// Compare max depth
-		desiredMaxDepth := int32(0)
-		if desired.MaxDepth != nil {
-			desiredMaxDepth = *desired.MaxDepth
-		}
-		if actualSubj.MaxDepth != desiredMaxDepth {
-			return false
-		}
+	// Compare recursive setting
+	if desired.Recursive != actual.Recursive {
+		return false
+	}
+
+	// Compare max depth
+	desiredMaxDepth := int32(0)
+	if desired.MaxDepth != nil {
+		desiredMaxDepth = *desired.MaxDepth
+	}
+	if actual.MaxDepth != desiredMaxDepth {
+		return false
 	}
 
 	return true

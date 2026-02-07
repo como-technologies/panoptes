@@ -8,26 +8,27 @@ This tool is part of the ArgusWatcher hardening pattern. It eliminates the race 
 
 ## Architecture
 
+```mermaid
+sequenceDiagram
+    participant Pod as Pod CREATE
+    participant Webhook as Admission Webhook
+    participant Init as watcher-wait init
+    participant Argusd as argusd
+    participant Main as Main Containers
+
+    Pod->>Webhook: 1. CREATE request
+    Webhook->>Pod: 2. Inject watcher-wait init container
+    Pod->>Init: 3. Schedule, init starts
+    Init->>Argusd: 4. Poll GetWatchState RPC
+    Argusd->>Argusd: 5. Create watch SYNCHRONOUSLY
+    Argusd->>Init: 6. Return watches_ready=true
+    Init->>Main: 7. Exit 0 → PROTECTED
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Pod Startup Flow (Hardened)                   │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  1. Pod CREATE request → Admission Webhook                       │
-│  2. Webhook injects watcher-wait init container                  │
-│  3. Pod scheduled, init container starts                         │
-│  4. watcher-wait polls GetWatchState RPC                         │
-│  5. Argusd creates watch SYNCHRONOUSLY (watches initialized)     │
-│  6. GetWatchState returns watches_ready=true                     │
-│  7. watcher-wait exits 0 → main containers start (PROTECTED)    │
-│                                                                  │
-│  Defense layers:                                                 │
-│  ✓ Synchronous watch init (Phase 1)                             │
-│  ✓ Readiness fields in proto (Phase 2)                          │
-│  ✓ Webhook + init container (Phase 3)                           │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
+
+**Defense layers:**
+- Synchronous watch init (Phase 1)
+- Readiness fields in proto (Phase 2)
+- Webhook + init container (Phase 3)
 
 ## Usage
 

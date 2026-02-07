@@ -1,0 +1,39 @@
+# Panoptes Suite - Unified Installation
+#
+# Install the complete Panoptes stack with:
+#   kubectl apply -k deploy/
+#
+# This installs:
+# - Argus operator + CRDs (File Integrity Monitoring)
+# - Janus operator + CRDs (File Access Auditing)
+# - argusd DaemonSet (per-node FIM daemon)
+# - janusd DaemonSet (per-node audit daemon)
+# - Panoptes Eye dashboard (optional)
+#
+# Note: This creates resources in panoptes-system namespace.
+# The operators are deployed in their own namespaces
+# (argus-operator-system, janus-operator-system) by default.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # Namespace for daemons and dashboard
+  - namespace.yaml
+
+  # Operators (each in their own namespace)
+  - ../operators/argus-operator/config/default
+  - ../operators/janus-operator/config/default
+
+  # Daemons (in panoptes-system)
+  - argusd-daemonset.yaml
+  - janusd-daemonset.yaml
+
+  # Dashboard (comment out if not needed)
+  - panoptes-eye.yaml
+
+# To override operator images, use:
+# images:
+#   - name: controller
+#     newName: your-registry/argus-operator
+#     newTag: v2.0.0

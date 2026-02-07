@@ -95,36 +95,23 @@ For true network monitoring, a dedicated daemon is planned:
 
 ### Hermes Architecture (Placeholder)
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    HermesGuard CRD                      │
-│  - Monitor TCP/UDP connections                          │
-│  - Track DNS queries                                    │
-│  - Alert on unexpected port binds                       │
-│  - Network namespace isolation verification             │
-└─────────────────────────────────────────────────────────┘
-                           │
-                           │ gRPC :50053
-                           ▼
-┌─────────────────────────────────────────────────────────┐
-│                   hermesd (Rust daemon)                 │
-│                                                         │
-│  eBPF Programs:                                         │
-│  ├── tracepoint/tcp/tcp_connect    - TCP connections    │
-│  ├── tracepoint/syscalls/sys_enter_socket - Socket ops  │
-│  ├── tracepoint/syscalls/sys_enter_bind   - Port binds  │
-│  ├── tracepoint/syscalls/sys_enter_connect - Connects   │
-│  └── kprobe/udp_sendmsg            - UDP (inc. DNS)     │
-│                                                         │
-│  Ring buffer event streaming (same as Argus/Janus)      │
-└─────────────────────────────────────────────────────────┘
-                           │
-                           │ eBPF events
-                           ▼
-┌─────────────────────────────────────────────────────────┐
-│              Linux Kernel (5.8+ with BPF LSM)           │
-│                   Network subsystem                     │
-└─────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph CRD["HermesGuard CRD"]
+        Features["• Monitor TCP/UDP connections<br/>• Track DNS queries<br/>• Alert on unexpected port binds<br/>• Network namespace isolation verification"]
+    end
+
+    subgraph Hermesd["hermesd (Rust daemon)"]
+        eBPF["eBPF Programs:<br/>• tcp_connect tracepoint<br/>• sys_enter_socket tracepoint<br/>• sys_enter_bind tracepoint<br/>• sys_enter_connect tracepoint<br/>• udp_sendmsg kprobe"]
+        RingBuf["Ring buffer event streaming"]
+    end
+
+    subgraph Kernel["Linux Kernel (5.8+ with BPF LSM)"]
+        NetSub["Network subsystem"]
+    end
+
+    CRD -->|"gRPC :50053"| Hermesd
+    Hermesd -->|"eBPF events"| Kernel
 ```
 
 ### Hermes Event Types (Planned)

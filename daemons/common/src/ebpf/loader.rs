@@ -279,6 +279,29 @@ impl EbpfLoader {
     // ring buffer pressure by 90%+ in production workloads.
     // ========================================================================
 
+    /// Get a mutable HashMap reference for a named map.
+    fn get_hash_map_mut<const N: usize>(
+        &mut self,
+        map_name: &str,
+    ) -> Result<HashMap<&mut aya::maps::MapData, [u8; N], u8>, EbpfError> {
+        self.ebpf
+            .map_mut(map_name)
+            .ok_or_else(|| EbpfError::Map(format!("{} map not found", map_name)))?
+            .try_into()
+            .map_err(|e: aya::maps::MapError| {
+                EbpfError::Map(format!("{} is not a HashMap: {}", map_name, e))
+            })
+    }
+
+    /// Convert a path string to a fixed-size byte array key.
+    fn path_to_key<const N: usize>(path: &str) -> [u8; N] {
+        let mut key = [0u8; N];
+        let bytes = path.as_bytes();
+        let len = bytes.len().min(N);
+        key[..len].copy_from_slice(&bytes[..len]);
+        key
+    }
+
     /// Enable or disable in-kernel path filtering.
     ///
     /// When disabled (default), all events are emitted to userspace.
@@ -328,19 +351,8 @@ impl EbpfLoader {
     ///
     /// Returns `EbpfError::Map` if the map is not found or has the wrong type.
     pub fn add_watched_prefix(&mut self, prefix: &str, map_name: &str) -> Result<(), EbpfError> {
-        let mut map: HashMap<_, [u8; 128], u8> = self
-            .ebpf
-            .map_mut(map_name)
-            .ok_or_else(|| EbpfError::Map(format!("{} map not found", map_name)))?
-            .try_into()
-            .map_err(|e: aya::maps::MapError| {
-                EbpfError::Map(format!("{} is not a HashMap: {}", map_name, e))
-            })?;
-
-        let mut key = [0u8; 128];
-        let bytes = prefix.as_bytes();
-        let len = bytes.len().min(128);
-        key[..len].copy_from_slice(&bytes[..len]);
+        let mut map = self.get_hash_map_mut::<128>(map_name)?;
+        let key = Self::path_to_key::<128>(prefix);
 
         map.insert(key, 1, 0)
             .map_err(|e| EbpfError::Map(format!("Failed to add prefix '{}': {}", prefix, e)))?;
@@ -360,19 +372,8 @@ impl EbpfLoader {
     ///
     /// Returns `EbpfError::Map` if the map is not found or has the wrong type.
     pub fn remove_watched_prefix(&mut self, prefix: &str, map_name: &str) -> Result<(), EbpfError> {
-        let mut map: HashMap<_, [u8; 128], u8> = self
-            .ebpf
-            .map_mut(map_name)
-            .ok_or_else(|| EbpfError::Map(format!("{} map not found", map_name)))?
-            .try_into()
-            .map_err(|e: aya::maps::MapError| {
-                EbpfError::Map(format!("{} is not a HashMap: {}", map_name, e))
-            })?;
-
-        let mut key = [0u8; 128];
-        let bytes = prefix.as_bytes();
-        let len = bytes.len().min(128);
-        key[..len].copy_from_slice(&bytes[..len]);
+        let mut map = self.get_hash_map_mut::<128>(map_name)?;
+        let key = Self::path_to_key::<128>(prefix);
 
         map.remove(&key)
             .map_err(|e| EbpfError::Map(format!("Failed to remove prefix '{}': {}", prefix, e)))?;
@@ -400,20 +401,8 @@ impl EbpfLoader {
     /// The kernel map is an LruHashMap but we interact with it via HashMap API.
     /// LRU eviction is handled by the kernel when the map is full.
     pub fn add_ignored_path(&mut self, path: &str) -> Result<(), EbpfError> {
-        // Note: Kernel-side LruHashMap is accessed via HashMap API from userspace
-        let mut map: HashMap<_, [u8; 256], u8> = self
-            .ebpf
-            .map_mut("IGNORED_PATHS")
-            .ok_or_else(|| EbpfError::Map("IGNORED_PATHS map not found".into()))?
-            .try_into()
-            .map_err(|e: aya::maps::MapError| {
-                EbpfError::Map(format!("IGNORED_PATHS is not a HashMap: {}", e))
-            })?;
-
-        let mut key = [0u8; 256];
-        let bytes = path.as_bytes();
-        let len = bytes.len().min(256);
-        key[..len].copy_from_slice(&bytes[..len]);
+        let mut map = self.get_hash_map_mut::<256>("IGNORED_PATHS")?;
+        let key = Self::path_to_key::<256>(path);
 
         map.insert(key, 1, 0)
             .map_err(|e| EbpfError::Map(format!("Failed to add ignored path '{}': {}", path, e)))?;
@@ -432,20 +421,8 @@ impl EbpfLoader {
     ///
     /// Returns `EbpfError::Map` if the map is not found or has the wrong type.
     pub fn remove_ignored_path(&mut self, path: &str) -> Result<(), EbpfError> {
-        // Note: Kernel-side LruHashMap is accessed via HashMap API from userspace
-        let mut map: HashMap<_, [u8; 256], u8> = self
-            .ebpf
-            .map_mut("IGNORED_PATHS")
-            .ok_or_else(|| EbpfError::Map("IGNORED_PATHS map not found".into()))?
-            .try_into()
-            .map_err(|e: aya::maps::MapError| {
-                EbpfError::Map(format!("IGNORED_PATHS is not a HashMap: {}", e))
-            })?;
-
-        let mut key = [0u8; 256];
-        let bytes = path.as_bytes();
-        let len = bytes.len().min(256);
-        key[..len].copy_from_slice(&bytes[..len]);
+        let mut map = self.get_hash_map_mut::<256>("IGNORED_PATHS")?;
+        let key = Self::path_to_key::<256>(path);
 
         map.remove(&key).map_err(|e| {
             EbpfError::Map(format!("Failed to remove ignored path '{}': {}", path, e))
@@ -509,19 +486,8 @@ impl EbpfLoader {
     /// Returns `EbpfError::Map` if the DENY_PATHS map is not found or
     /// has the wrong type.
     pub fn add_deny_path(&mut self, path: &str) -> Result<(), EbpfError> {
-        let mut map: HashMap<_, [u8; 256], u8> = self
-            .ebpf
-            .map_mut("DENY_PATHS")
-            .ok_or_else(|| EbpfError::Map("DENY_PATHS map not found".into()))?
-            .try_into()
-            .map_err(|e: aya::maps::MapError| {
-                EbpfError::Map(format!("DENY_PATHS is not a HashMap: {}", e))
-            })?;
-
-        let mut key = [0u8; 256];
-        let bytes = path.as_bytes();
-        let len = bytes.len().min(256);
-        key[..len].copy_from_slice(&bytes[..len]);
+        let mut map = self.get_hash_map_mut::<256>("DENY_PATHS")?;
+        let key = Self::path_to_key::<256>(path);
 
         map.insert(key, 1, 0)
             .map_err(|e| EbpfError::Map(format!("Failed to add deny path '{}': {}", path, e)))?;
@@ -540,19 +506,8 @@ impl EbpfLoader {
     ///
     /// Returns `EbpfError::Map` if the map is not found or has the wrong type.
     pub fn remove_deny_path(&mut self, path: &str) -> Result<(), EbpfError> {
-        let mut map: HashMap<_, [u8; 256], u8> = self
-            .ebpf
-            .map_mut("DENY_PATHS")
-            .ok_or_else(|| EbpfError::Map("DENY_PATHS map not found".into()))?
-            .try_into()
-            .map_err(|e: aya::maps::MapError| {
-                EbpfError::Map(format!("DENY_PATHS is not a HashMap: {}", e))
-            })?;
-
-        let mut key = [0u8; 256];
-        let bytes = path.as_bytes();
-        let len = bytes.len().min(256);
-        key[..len].copy_from_slice(&bytes[..len]);
+        let mut map = self.get_hash_map_mut::<256>("DENY_PATHS")?;
+        let key = Self::path_to_key::<256>(path);
 
         map.remove(&key)
             .map_err(|e| EbpfError::Map(format!("Failed to remove deny path '{}': {}", path, e)))?;
@@ -581,45 +536,49 @@ impl EbpfLoader {
     /// Returns `EbpfError::Attach` if the tracepoints are not found in the
     /// bytecode or fail to attach.
     pub fn attach_process_tracepoints(&mut self) -> Result<(), EbpfError> {
-        // Attach sched_process_exec
-        if let Some(prog) = self.ebpf.program_mut("sched_process_exec") {
-            let prog: &mut TracePoint = prog.try_into().map_err(|e| {
-                EbpfError::Attach(format!("sched_process_exec is not a tracepoint: {}", e))
-            })?;
-
-            prog.load().map_err(|e| {
-                EbpfError::Attach(format!("Failed to load sched_process_exec: {}", e))
-            })?;
-
-            prog.attach("sched", "sched_process_exec").map_err(|e| {
-                EbpfError::Attach(format!("Failed to attach sched_process_exec: {}", e))
-            })?;
-
-            debug!("Attached sched_process_exec tracepoint");
-        } else {
-            debug!("sched_process_exec not found in bytecode (process cache disabled)");
-        }
-
-        // Attach sched_process_exit
-        if let Some(prog) = self.ebpf.program_mut("sched_process_exit") {
-            let prog: &mut TracePoint = prog.try_into().map_err(|e| {
-                EbpfError::Attach(format!("sched_process_exit is not a tracepoint: {}", e))
-            })?;
-
-            prog.load().map_err(|e| {
-                EbpfError::Attach(format!("Failed to load sched_process_exit: {}", e))
-            })?;
-
-            prog.attach("sched", "sched_process_exit").map_err(|e| {
-                EbpfError::Attach(format!("Failed to attach sched_process_exit: {}", e))
-            })?;
-
-            debug!("Attached sched_process_exit tracepoint");
-        } else {
-            debug!("sched_process_exit not found in bytecode (process cache cleanup disabled)");
-        }
+        self.attach_tracepoint_if_exists("sched_process_exec", "sched", "process cache disabled")?;
+        self.attach_tracepoint_if_exists(
+            "sched_process_exit",
+            "sched",
+            "process cache cleanup disabled",
+        )?;
 
         info!("Process tracking tracepoints attached");
+        Ok(())
+    }
+
+    /// Attach a single tracepoint if it exists in the bytecode.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Program name in bytecode
+    /// * `category` - Tracepoint category (e.g., "sched")
+    /// * `disabled_reason` - Log message if program not found
+    fn attach_tracepoint_if_exists(
+        &mut self,
+        name: &str,
+        category: &str,
+        disabled_reason: &str,
+    ) -> Result<(), EbpfError> {
+        if let Some(prog) = self.ebpf.program_mut(name) {
+            let prog: &mut TracePoint = prog
+                .try_into()
+                .map_err(|e| EbpfError::Attach(format!("{} is not a tracepoint: {}", name, e)))?;
+
+            prog.load()
+                .map_err(|e| EbpfError::Attach(format!("Failed to load {}: {}", name, e)))?;
+
+            prog.attach(category, name)
+                .map_err(|e| EbpfError::Attach(format!("Failed to attach {}: {}", name, e)))?;
+
+            debug!(program = name, "Attached tracepoint");
+        } else {
+            debug!(
+                program = name,
+                reason = disabled_reason,
+                "Tracepoint not found in bytecode"
+            );
+        }
         Ok(())
     }
 

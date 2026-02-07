@@ -112,10 +112,8 @@ where
         loop {
             match rx.recv().await {
                 Ok(event) => {
-                    if filter.matches(&event) {
-                        if tx.send(Ok(convert(event))).await.is_err() {
-                            break; // Client disconnected
-                        }
+                    if filter.matches(&event) && tx.send(Ok(convert(event))).await.is_err() {
+                        break; // Client disconnected
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
@@ -193,10 +191,8 @@ where
         loop {
             match rx.recv().await {
                 Ok(event) => {
-                    if filter.matches(&event) {
-                        if tx.send(convert(event)).await.is_err() {
-                            break;
-                        }
+                    if filter.matches(&event) && tx.send(convert(event)).await.is_err() {
+                        break;
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(_)) => continue,

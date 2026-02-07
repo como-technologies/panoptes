@@ -259,23 +259,7 @@ func (r *JanusGuardReconciler) findMatchingPods(ctx context.Context, guard *janu
 		return nil, err
 	}
 
-	var runningPods []corev1.Pod
-	for _, pod := range podList.Items {
-		if pod.Status.Phase == corev1.PodRunning && len(pod.Status.ContainerStatuses) > 0 {
-			hasRunning := false
-			for _, status := range pod.Status.ContainerStatuses {
-				if status.State.Running != nil {
-					hasRunning = true
-					break
-				}
-			}
-			if hasRunning {
-				runningPods = append(runningPods, pod)
-			}
-		}
-	}
-
-	return runningPods, nil
+	return filterRunningPods(podList.Items), nil
 }
 
 // syncGuards uses the query-first pattern to reconcile guards.
@@ -288,13 +272,8 @@ func (r *JanusGuardReconciler) syncGuards(ctx context.Context, guard *janusv2.Ja
 	var podStatuses []janusv2.GuardedPodStatus
 	var lastErr error
 
-	// Group pods by node
-	podsByNode := make(map[string][]corev1.Pod)
-	for _, pod := range pods {
-		if pod.Spec.NodeName != "" {
-			podsByNode[pod.Spec.NodeName] = append(podsByNode[pod.Spec.NodeName], pod)
-		}
-	}
+	// Group pods by node for batched daemon calls
+	podsByNode := groupPodsByNode(pods)
 
 	// Node cache for IP lookups
 	nodeCache := make(map[string]*corev1.Node)
@@ -420,13 +399,8 @@ func (r *JanusGuardReconciler) syncGuards(ctx context.Context, guard *janusv2.Ja
 
 // guardConfigMatches checks if the daemon's actual guard config matches the desired spec.
 func (r *JanusGuardReconciler) guardConfigMatches(guard *janusv2.JanusGuard, actual *daemon.GuardState) bool {
-	// Check paused state
-	if actual.Paused != guard.Spec.Paused {
-		return false
-	}
-
-	// Check enforcing state
-	if actual.Enforcing != guard.Spec.Enforcing {
+	// Check paused and enforcing state
+	if actual.Paused != guard.Spec.Paused || actual.Enforcing != guard.Spec.Enforcing {
 		return false
 	}
 
@@ -442,32 +416,20 @@ func (r *JanusGuardReconciler) guardConfigMatches(guard *janusv2.JanusGuard, act
 
 	// Check each subject
 	for i, desired := range guard.Spec.Subjects {
-		if i >= len(actual.Subjects) {
+		if !r.subjectMatches(&desired, &actual.Subjects[i]) {
 			return false
-		}
-		actualSubj := actual.Subjects[i]
-
-		// Compare allow paths
-		if len(actualSubj.Allow) != len(desired.Allow) {
-			return false
-		}
-		for j, p := range desired.Allow {
-			if j >= len(actualSubj.Allow) || actualSubj.Allow[j] != p {
-				return false
-			}
-		}
-
-		// Compare deny paths
-		if len(actualSubj.Deny) != len(desired.Deny) {
-			return false
-		}
-		for j, p := range desired.Deny {
-			if j >= len(actualSubj.Deny) || actualSubj.Deny[j] != p {
-				return false
-			}
 		}
 	}
 
+	return true
+}
+
+// subjectMatches checks if a single guard subject matches its desired state.
+func (r *JanusGuardReconciler) subjectMatches(desired *janusv2.JanusGuardSubject, actual *daemon.GuardSubjectState) bool {
+	// Compare allow and deny paths
+	if !pathListsEqual(desired.Allow, actual.Allow) || !pathListsEqual(desired.Deny, actual.Deny) {
+		return false
+	}
 	return true
 }
 

@@ -491,8 +491,8 @@ kubectl port-forward -n monitoring svc/prometheus 9090:9090
 
 - [Local Development Guide](QUICK_START.md) - Test locally with kind
 - [Future State & Roadmap](FUTURE_STATE.md) - Planned features
-- [Argus FIM Pack](../packs/argus-fim/README.md) - Standalone FIM
-- [Janus Audit Pack](../packs/janus-audit/README.md) - Standalone audit
+- [Argus FIM Pack](../packs/panoptes-argus/README.md) - Standalone FIM
+- [Janus Audit Pack](../packs/panoptes-janus/README.md) - Standalone audit
 
 ---
 

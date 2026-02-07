@@ -29,11 +29,13 @@ const ACTION_OPTIONS = [
   { value: 'allowed', label: 'Allowed' },
   { value: 'denied', label: 'Denied' },
   { value: 'audit', label: 'Audit' },
+  { value: 'detected', label: 'Detected' },
 ];
 
 // Column definitions for the event table
 const ALL_COLUMNS: ColumnOption[] = [
   { id: 'time', label: 'Time', alwaysOn: true },
+  { id: 'resource', label: 'Watcher/Guard' },
   { id: 'source', label: 'Source' },
   { id: 'event', label: 'Event' },
   { id: 'path', label: 'Path', alwaysOn: true },
@@ -45,8 +47,8 @@ const ALL_COLUMNS: ColumnOption[] = [
   { id: 'pid', label: 'PID' },
 ];
 
-// Default visible columns (no Process/PID by default)
-const DEFAULT_VISIBLE_COLUMNS = ['time', 'source', 'event', 'path', 'pod', 'action'];
+// Default visible columns (include resource name)
+const DEFAULT_VISIBLE_COLUMNS = ['time', 'resource', 'source', 'event', 'path', 'pod', 'action'];
 
 export default function EventsPage() {
   // Get events from global store (populated by EventStreamSubscriber in providers.tsx)
@@ -56,6 +58,7 @@ export default function EventsPage() {
   const [eventTypes, setEventTypes] = useState<string[]>([]);
   const [sources, setSources] = useState<string[]>([]);
   const [actions, setActions] = useState<string[]>([]);
+  const [resources, setResources] = useState<string[]>([]);
   const [showFilters, setShowFilters] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<StreamEvent | null>(null);
   const [visibleColumns, setVisibleColumns] = useState<string[]>(DEFAULT_VISIBLE_COLUMNS);
@@ -68,6 +71,12 @@ export default function EventsPage() {
   const [pausedEvents, setPausedEvents] = useState<StreamEvent[]>([]);
   const events = isPaused ? pausedEvents : allEvents;
 
+  // Build dynamic list of resource names (watchers/guards) from current events
+  const resourceOptions = Array.from(new Set(allEvents.map((e) => e.resourceName)))
+    .filter(Boolean)
+    .sort()
+    .map((name) => ({ value: name, label: name }));
+
   const handlePauseToggle = () => {
     if (!isPaused) {
       // Pausing: capture current events
@@ -78,7 +87,8 @@ export default function EventsPage() {
 
   const filteredEvents = events.filter((event) => {
     if (search && !event.path.toLowerCase().includes(search.toLowerCase()) &&
-        !event.podName.toLowerCase().includes(search.toLowerCase())) {
+        !event.podName.toLowerCase().includes(search.toLowerCase()) &&
+        !event.resourceName?.toLowerCase().includes(search.toLowerCase())) {
       return false;
     }
     if (eventTypes.length > 0 && !eventTypes.includes(event.eventType)) {
@@ -88,6 +98,9 @@ export default function EventsPage() {
       return false;
     }
     if (actions.length > 0 && !actions.includes(event.action)) {
+      return false;
+    }
+    if (resources.length > 0 && !resources.includes(event.resourceName)) {
       return false;
     }
     return true;
@@ -100,6 +113,7 @@ export default function EventsPage() {
     // Build headers based on visible columns
     const columnToHeader: Record<string, string> = {
       time: 'Timestamp',
+      resource: 'Watcher/Guard',
       source: 'Source',
       event: 'Event Type',
       path: 'Path',
@@ -121,6 +135,9 @@ export default function EventsPage() {
           switch (col) {
             case 'time':
               values.push(e.timestamp);
+              break;
+            case 'resource':
+              values.push(e.resourceName || '');
               break;
             case 'source':
               values.push(e.source);
@@ -217,9 +234,9 @@ export default function EventsPage() {
         >
           <Filter className="h-4 w-4 mr-2" />
           Filters
-          {(eventTypes.length > 0 || sources.length > 0 || actions.length > 0) && (
+          {(eventTypes.length > 0 || sources.length > 0 || actions.length > 0 || resources.length > 0) && (
             <Badge variant="active" className="ml-2">
-              {eventTypes.length + sources.length + actions.length}
+              {eventTypes.length + sources.length + actions.length + resources.length}
             </Badge>
           )}
         </Button>
@@ -258,7 +275,16 @@ export default function EventsPage() {
       {showFilters && (
         <Card>
           <CardContent className="p-4">
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Watcher/Guard</label>
+                <MultiSelect
+                  options={resourceOptions}
+                  value={resources}
+                  onChange={setResources}
+                  placeholder="All resources"
+                />
+              </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Event Types</label>
                 <MultiSelect
@@ -325,6 +351,9 @@ export default function EventsPage() {
                     {isColumnVisible('time') && (
                       <th className="px-4 py-2 text-left font-medium">Time</th>
                     )}
+                    {isColumnVisible('resource') && (
+                      <th className="px-4 py-2 text-left font-medium">Watcher/Guard</th>
+                    )}
                     {isColumnVisible('source') && (
                       <th className="px-4 py-2 text-left font-medium">Source</th>
                     )}
@@ -364,6 +393,11 @@ export default function EventsPage() {
                       {isColumnVisible('time') && (
                         <td className="px-4 py-2 whitespace-nowrap text-gray-500 dark:text-gray-400 font-mono text-xs">
                           {new Date(event.timestamp).toLocaleTimeString()}
+                        </td>
+                      )}
+                      {isColumnVisible('resource') && (
+                        <td className="px-4 py-2 text-gray-600 dark:text-gray-300 font-medium">
+                          {event.resourceName || '-'}
                         </td>
                       )}
                       {isColumnVisible('source') && (

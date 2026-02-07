@@ -37,49 +37,32 @@ functionality.
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         Janus Architecture                              │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  ┌────────────────────┐         ┌────────────────────────────────────┐  │
-│  │   JanusGuard CR    │────────▶│         Janus Operator             │  │
-│  │                    │         │  ┌──────────────────────────────┐  │  │
-│  │ spec:              │         │  │     Reconciler Loop          │  │  │
-│  │   selector: {...}  │         │  │  • Watch JanusGuard CRs      │  │  │
-│  │   subjects:        │         │  │  • Find matching pods        │  │  │
-│  │     - allow: [...] │         │  │  • Call janusd via gRPC      │  │  │
-│  │       deny: [...]  │         │  │  • Update status             │  │  │
-│  │   enforcing: true  │         │  └──────────────────────────────┘  │  │
-│  └────────────────────┘         └───────────────┬────────────────────┘  │
-│                                                 │ gRPC                  │
-│                                                 ▼                       │
-│  ┌──────────────────────────────────────────────────────────────────┐   │
-│  │                    janusd DaemonSet                              │   │
-│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐              │   │
-│  │  │ janusd  │  │ janusd  │  │ janusd  │  │ janusd  │   (per node) │   │
-│  │  │ Node 1  │  │ Node 2  │  │ Node 3  │  │ Node N  │              │   │
-│  │  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘              │   │
-│  │       │            │            │            │                   │   │
-│  │       └────────────┴────────────┴────────────┘                   │   │
-│  │                         │                                        │   │
-│  │         fanotify_mark() with FAN_ACCESS_PERM / FAN_OPEN_PERM     │   │
-│  │                         ▼                                        │   │
-│  │  ┌──────────────────────────────────────────────────────────┐    │   │
-│  │  │              Linux Kernel (fanotify subsystem)           │    │   │
-│  │  │  • FAN_ACCESS_PERM - permission request for read         │    │   │
-│  │  │  • FAN_OPEN_PERM - permission request for open           │    │   │
-│  │  │  • Response: FAN_ALLOW or FAN_DENY                       │    │   │
-│  │  └──────────────────────────────────────────────────────────┘    │   │
-│  └──────────────────────────────────────────────────────────────────┘   │
-│                                                                         │
-│  ┌──────────────────────────────────────────────────────────────────┐   │
-│  │                    Kernel Audit Subsystem                        │   │
-│  │  • Audit log entries for access events                           │   │
-│  │  • Integration with auditd                                       │   │
-│  │  • SIEM-ready log format                                         │   │
-│  └──────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Cluster["Kubernetes Cluster"]
+        JG["JanusGuard CR<br/>spec.selector, spec.subjects<br/>spec.enforcing: true"]
+        JG --> JO
+
+        subgraph JO["Janus Operator"]
+            RC["Reconciler Loop<br/>• Watch JanusGuard CRs<br/>• Find matching pods<br/>• Call janusd via gRPC<br/>• Update status"]
+        end
+
+        JO -->|"gRPC"| DS
+
+        subgraph DS["janusd DaemonSet"]
+            J1["janusd<br/>Node 1"]
+            J2["janusd<br/>Node 2"]
+            JN["janusd<br/>Node N"]
+        end
+
+        J1 & J2 & JN -->|"fanotify_mark()<br/>FAN_ACCESS_PERM<br/>FAN_OPEN_PERM"| K
+
+        subgraph K["Linux Kernel"]
+            FN["fanotify subsystem<br/>Response: FAN_ALLOW or FAN_DENY"]
+        end
+
+        K --> AU["Kernel Audit Subsystem<br/>auditd integration"]
+    end
 ```
 
 ## Hardening: Init Container Injection
@@ -90,26 +73,27 @@ protection is in place.
 
 ### Architecture
 
+```mermaid
+sequenceDiagram
+    participant Pod as Pod CREATE
+    participant Webhook as Admission Webhook
+    participant Init as guard-wait init
+    participant Janusd as janusd
+    participant Main as Main Containers
+
+    Pod->>Webhook: 1. CREATE request
+    Webhook->>Pod: 2. Inject guard-wait init container
+    Pod->>Init: 3. Schedule, init starts
+    Init->>Janusd: 4. Poll GetGuardState RPC
+    Janusd->>Janusd: 5. Create guard SYNCHRONOUSLY
+    Janusd->>Init: 6. Return marks_registered=true
+    Init->>Main: 7. Exit 0 → PROTECTED
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Pod Startup Flow (Hardened)                  │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  1. Pod CREATE request → Admission Webhook                      │
-│  2. Webhook injects guard-wait init container                   │
-│  3. Pod scheduled, init container starts                        │
-│  4. guard-wait polls GetGuardState RPC                          │
-│  5. Janusd creates guard SYNCHRONOUSLY (marks registered)       │
-│  6. GetGuardState returns marks_registered=true                 │
-│  7. guard-wait exits 0 → main containers start (PROTECTED)      │
-│                                                                 │
-│  Defense layers:                                                │
-│  ✓ Synchronous guard init (fanotify marks before response)      │
-│  ✓ Readiness fields in proto (marks_registered, ready_at)       │
-│  ✓ Webhook + init container (blocks pod until ready)            │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+
+**Defense layers:**
+- Synchronous guard init (fanotify marks before response)
+- Readiness fields in proto (`marks_registered`, `ready_at`)
+- Webhook + init container (blocks pod until ready)
 
 ### Enabling Webhook Injection
 
@@ -247,7 +231,7 @@ spec:
         - /home/*/.ssh/**
 
       # Events to guard (required)
-      # Options: access, open, all
+      # Options: access, open, execute, close, all
       events:
         - open
         - access
@@ -260,6 +244,10 @@ spec:
 
       # Log to kernel audit subsystem
       audit: true
+
+      # Action when no allow/deny rule matches (default: audit)
+      # Options: allow, deny, audit
+      defaultResponse: audit
 
       # Custom metadata tags
       tags:
@@ -464,14 +452,16 @@ The operator requires these permissions:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `janus_reconcile_total` | Counter | Total reconciliations |
-| `janus_reconcile_duration_seconds` | Histogram | Reconciliation duration |
-| `janus_guarded_pods` | Gauge | Pods with active guards |
-| `janus_active_guards` | Gauge | Total fanotify guards |
-| `janus_access_events_total` | Counter | Access events by response |
-| `janus_denied_access_total` | Counter | Denied access attempts |
-| `janus_grpc_requests_total` | Counter | gRPC requests to daemons |
-| `janus_grpc_request_duration_seconds` | Histogram | gRPC request duration |
+| `janus_controller_reconcile_total` | Counter | Total reconciliations |
+| `janus_controller_reconcile_duration_seconds` | Histogram | Reconciliation duration |
+| `janus_controller_guarded_pods_total` | Gauge | Pods with active guards |
+| `janus_controller_observable_pods_total` | Gauge | Pods matching selector |
+| `janus_controller_denied_access_total` | Counter | Blocked access attempts |
+| `janus_controller_allowed_access_total` | Counter | Allowed access events |
+| `janus_controller_audited_access_total` | Counter | Audited access events |
+| `janus_controller_daemon_requests_total` | Counter | gRPC requests to daemons |
+| `janus_controller_daemon_request_duration_seconds` | Histogram | gRPC request duration |
+| `janus_controller_guard_condition` | Gauge | Guard condition status |
 
 ### Health Endpoints
 
@@ -608,7 +598,7 @@ These events can be collected by auditd and forwarded to SIEM systems.
 1. Verify `enforcing: true` is set
 2. Check if path matches deny patterns (glob matching)
 3. Check if `autoAllowOwner: true` is allowing owner access
-4. Verify daemon logs: `kubectl logs -n janus-system -l app=janusd`
+4. Verify daemon logs: `kubectl logs -n janus-system -l app.kubernetes.io/component=daemon`
 
 ### High latency on file access
 

@@ -16,13 +16,17 @@ code for communication between Kubernetes operators and node-level daemons.
 proto/
 ├── README.md                 # This file
 ├── argus/
-│   └── v1/
-│       ├── README.md         # Argus API documentation
-│       └── argus.proto       # Argus service definitions
+│   ├── v2/                   # Current API version (recommended)
+│   │   ├── README.md
+│   │   └── argus.proto
+│   └── v1/                   # Deprecated, for migration only
+│       └── argus.proto
 └── janus/
-    └── v1/
-        ├── README.md         # Janus API documentation
-        └── janus.proto       # Janus service definitions
+    ├── v2/                   # Current API version (recommended)
+    │   ├── README.md
+    │   └── janus.proto
+    └── v1/                   # Deprecated, for migration only
+        └── janus.proto
 ```
 
 ## Services
@@ -38,23 +42,13 @@ proto/
 ### Go (Operators)
 
 ```bash
-# Generate Go code for operators
+# Generate Go code for operators (v2 API)
 protoc --go_out=. --go-grpc_out=. \
-  proto/argus/v1/argus.proto \
-  proto/janus/v1/janus.proto
+  proto/argus/v2/argus.proto \
+  proto/janus/v2/janus.proto
 ```
 
-### C++ (Daemons)
-
-```bash
-# Generate C++ code for daemons
-protoc --cpp_out=. --grpc_out=. \
-  --plugin=protoc-gen-grpc=$(which grpc_cpp_plugin) \
-  proto/argus/v1/argus.proto \
-  proto/janus/v1/janus.proto
-```
-
-### Rust (Alternative Daemons)
+### Rust (Daemons)
 
 Rust code is generated via `tonic-build` in `build.rs`:
 
@@ -65,7 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_server(true)
         .build_client(false)
         .compile_protos(
-            &["../../proto/argus/v1/argus.proto"],
+            &["../../proto/argus/v2/argus.proto"],
             &["../../proto"],
         )?;
     Ok(())
@@ -76,10 +70,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Proto packages follow semantic versioning:
 
-- `argus.v1` - Stable Argus API
-- `janus.v1` - Stable Janus API
-
-Breaking changes will be introduced in new major versions (v2, v3, etc.).
+- `argus.v2` / `janus.v2` - Current stable API (recommended)
+- `argus.v1` / `janus.v1` - Deprecated, for migration only
 
 ## Common Patterns
 

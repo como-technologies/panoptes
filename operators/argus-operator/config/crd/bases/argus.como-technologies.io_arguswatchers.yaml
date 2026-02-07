@@ -409,10 +409,18 @@ spec:
     name: v2
     schema:
       openAPIV3Schema:
-        description: |-
-          ArgusWatcher is the Schema for the arguswatchers API.
-          It defines file integrity monitoring rules for pods matching a selector.
-          This is the v2 API - the current recommended version for new deployments.
+        description: "ArgusWatcher is the Schema for the arguswatchers API (short
+          name: aw).\nIt defines file integrity monitoring (FIM) rules using Linux
+          inotify for pods matching\na label selector. The argus-operator watches
+          ArgusWatcher resources and instructs\nthe argusd daemon on each node to
+          create kernel-level file watches.\n\nRequires: argusd DaemonSet with CAP_SYS_PTRACE
+          and CAP_DAC_READ_SEARCH capabilities.\nKernel requirements: Linux 5.x+,
+          inotify support (standard on all modern kernels).\n\nQuick example:\n\n\tkubectl
+          apply -f - <<EOF\n\tapiVersion: argus.panoptes.io/v2\n\tkind: ArgusWatcher\n\tmetadata:\n\t
+          \ name: critical-files\n\tspec:\n\t  selector:\n\t    matchLabels:\n\t      app:
+          my-app\n\t  subjects:\n\t    - paths: [\"/etc/passwd\", \"/etc/shadow\"]\n\t
+          \     events: [create, modify, delete]\n\t      tags:\n\t        severity:
+          critical\n\tEOF"
         properties:
           apiVersion:
             description: |-
@@ -447,23 +455,29 @@ spec:
                 default: auto
                 description: |-
                   containerRuntime specifies which container runtime to use for PID detection.
-                  Use "auto" to automatically detect the runtime.
+                  "auto" probes for containerd and CRI-O sockets in standard locations.
+                  Set explicitly if auto-detection fails or if using a non-standard socket path.
                 type: string
               logFormat:
                 description: |-
-                  logFormat is the custom log format template for events.
-                  Supports Go template syntax with access to event fields.
+                  logFormat is a custom Go template for formatting event log output.
+                  Available fields: .Event, .Path, .Timestamp, .Pod, .Node.
+                  Leave empty to use the default structured JSON format.
                 maxLength: 1024
                 type: string
               paused:
                 description: |-
-                  paused indicates whether watching is paused for this resource.
-                  When true, no new watches will be created but existing ones are maintained.
+                  paused temporarily suspends all monitoring for this resource.
+                  When true, no new watches are created and existing watches are removed.
+                  Use this during planned maintenance windows to avoid false alerts.
+                  Set back to false to resume monitoring.
                 type: boolean
               selector:
                 description: |-
-                  selector is the label selector for pods to watch.
-                  Only pods matching this selector will be monitored.
+                  selector is the label selector for pods to monitor.
+                  Only pods matching this selector will have inotify watches created.
+                  Use matchLabels for simple key-value matching, or matchExpressions for
+                  set-based requirements. Example: {"matchLabels": {"app": "payment-api"}}.
                 properties:
                   matchExpressions:
                     description: matchExpressions is a list of label selector requirements.
@@ -510,19 +524,25 @@ spec:
                 x-kubernetes-map-type: atomic
               subjects:
                 description: |-
-                  subjects is the list of watch targets defining what to monitor.
-                  Each subject specifies paths and events to watch.
+                  subjects is the list of watch targets defining what paths and events to monitor.
+                  Each subject creates independent inotify watches with its own paths, events, and tags.
+                  Use multiple subjects to apply different monitoring rules to the same set of pods.
                 items:
-                  description: ArgusWatcherSubject defines a watch target with paths
-                    and events
+                  description: |-
+                    ArgusWatcherSubject defines a watch target with paths and events.
+                    Each subject creates inotify watches on the specified paths for the specified events.
+                    Multiple subjects can be used to watch different paths with different event types and tags.
                   properties:
                     events:
                       description: |-
                         events is the list of inotify events to watch for.
-                        Use "all" to watch for all event types.
+                        Use "all" to watch for all event types (generates high volume).
+                        For compliance, ["create", "modify", "delete", "move"] covers most requirements.
                       items:
-                        description: ArgusEvent represents an inotify event type for
-                          file integrity monitoring
+                        description: |-
+                          ArgusEvent represents a Linux inotify event type for file integrity monitoring.
+                          These map directly to inotify_add_watch(2) event flags.
+                          For compliance use cases, "create", "modify", "delete", and "move" cover most requirements.
                         enum:
                         - access
                         - attrib
@@ -544,13 +564,15 @@ spec:
                       type: array
                     followMove:
                       description: |-
-                        followMove tracks moved files by inode.
-                        When true, files are tracked across moves within the watched paths.
+                        followMove tracks moved files by inode across watched paths.
+                        When true, a file moved from one watched directory to another is correlated
+                        into a single move event rather than separate delete + create events.
                       type: boolean
                     ignore:
                       description: |-
-                        ignore is the list of glob patterns to ignore.
-                        Patterns follow standard glob syntax (e.g., "*.tmp", "**/node_modules/**").
+                        ignore is the list of glob patterns to exclude from monitoring.
+                        Patterns follow standard glob syntax (e.g., "*.tmp", "*.swp", "**/node_modules/**").
+                        Use this to reduce noise from known-safe file operations.
                       items:
                         type: string
                       maxItems: 50
@@ -559,19 +581,23 @@ spec:
                       description: |-
                         maxDepth limits the recursion depth when recursive is enabled.
                         A value of 0 means unlimited depth. Only effective when recursive is true.
+                        Use this to prevent excessive watch descriptor consumption in deep directory trees.
                       format: int32
                       maximum: 100
                       minimum: 0
                       type: integer
                     onlyDir:
                       description: |-
-                        onlyDir restricts watching to directories only.
-                        File events in watched directories will still be reported.
+                        onlyDir restricts watching to directories only (maps to IN_ONLYDIR).
+                        File events within watched directories are still reported.
                       type: boolean
                     paths:
                       description: |-
                         paths is the list of file or directory paths to monitor.
-                        Paths are relative to the container's filesystem root.
+                        Paths are resolved within the container's filesystem via /proc/{pid}/root.
+                        Supports absolute paths only (e.g., "/etc/passwd", "/var/log").
+                        Note: Kubernetes ConfigMap/Secret mounts use symlinks that are atomically swapped.
+                        To catch ConfigMap updates, watch the parent directory rather than individual files.
                       items:
                         type: string
                       maxItems: 100
@@ -580,14 +606,17 @@ spec:
                     recursive:
                       description: |-
                         recursive enables recursive directory watching.
-                        When true, all subdirectories are also monitored.
+                        When true, all subdirectories under each path are also monitored.
+                        Each subdirectory consumes one inotify watch descriptor. Monitor kernel limits
+                        via /proc/sys/fs/inotify/max_user_watches (recommended: 524288).
                       type: boolean
                     tags:
                       additionalProperties:
                         type: string
                       description: |-
                         tags are custom key-value metadata attached to events from this subject.
-                        Useful for categorization, compliance tracking, or alert routing.
+                        Useful for compliance tracking (e.g., "compliance": "pci-dss", "severity": "critical"),
+                        alert routing, or categorization in downstream SIEM systems.
                       maxProperties: 20
                       type: object
                   required:

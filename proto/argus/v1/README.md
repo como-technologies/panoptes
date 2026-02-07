@@ -1,6 +1,10 @@
 # Argus gRPC API v1
 
-**Protocol Buffer definitions for the Argus file integrity monitoring daemon**
+> **DEPRECATED**: This is the legacy API from the original C daemon implementation.
+> Use [v2](../v2/README.md) for new integrations. V1 is retained for backward
+> compatibility only and will be removed in a future release.
+
+**Protocol Buffer definitions for the Argus file integrity monitoring daemon (legacy C implementation)**
 
 ## Overview
 
@@ -192,7 +196,7 @@ message StreamEventsRequest {
 
 ```go
 import (
-    pb "github.com/como-technologies/panoptes/proto/argus/v1"
+    pb "github.com/como-technologies/panoptes/operators/argus-operator/pkg/proto/argus/v1"
     "google.golang.org/grpc"
 )
 

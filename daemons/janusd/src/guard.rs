@@ -248,8 +248,8 @@ impl Guard {
     ///
     /// * `config` - Guard configuration with allow/deny patterns and settings
     /// * `metrics` - Optional metrics collector for tracking guard statistics.
-    ///               When provided, records event counts, queue overflows, and
-    ///               response write failures for security monitoring.
+    ///   When provided, records event counts, queue overflows, and
+    ///   response write failures for security monitoring.
     ///
     /// # Errors
     ///
@@ -372,6 +372,127 @@ impl Guard {
         Ok(())
     }
 
+    /// Handle fanotify queue overflow detection.
+    ///
+    /// The fanotify subsystem has a finite event queue controlled by:
+    ///   /proc/sys/fs/fanotify/max_queued_events (default: 16384)
+    ///
+    /// When events arrive faster than userspace can process them:
+    /// 1. Kernel drops oldest events that haven't been read
+    /// 2. Sets FAN_Q_OVERFLOW flag on the next readable event
+    /// 3. Events continue normally after userspace catches up
+    ///
+    /// # Security Implication
+    ///
+    /// Overflow means some file access events were permanently lost.
+    /// An attacker could potentially exploit this by generating high
+    /// event volume to mask malicious access.
+    ///
+    /// # Returns
+    ///
+    /// `true` if this was an overflow event (caller should skip processing),
+    /// `false` otherwise
+    fn handle_queue_overflow(&self, event: &nix::sys::fanotify::FanotifyEvent) -> bool {
+        if event.mask().contains(MaskFlags::FAN_Q_OVERFLOW) {
+            warn!(
+                "fanotify queue overflow detected - events may have been lost. \
+                 Consider increasing /proc/sys/fs/fanotify/max_queued_events"
+            );
+            if let Some(ref metrics) = self.metrics {
+                metrics.record_queue_overflow();
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Write permission response to fanotify with retry logic.
+    ///
+    /// For permission events, we MUST respond promptly to avoid blocking
+    /// the accessing process. If write_response() fails with EAGAIN, we
+    /// retry with brief delays.
+    ///
+    /// # Critical Behavior
+    ///
+    /// If all retries fail, access is implicitly allowed to prevent hanging
+    /// the monitored process. This is a security trade-off: it's better to
+    /// allow access than to cause a DoS.
+    ///
+    /// # Arguments
+    ///
+    /// * `event` - The fanotify event with the file descriptor
+    /// * `response` - The access decision (allow/deny)
+    fn write_permission_response(
+        &self,
+        event: &nix::sys::fanotify::FanotifyEvent,
+        access_response: AccessResponse,
+    ) {
+        let Some(ref fd) = event.fd() else {
+            return;
+        };
+
+        let response_type = if access_response == AccessResponse::Deny {
+            Response::FAN_DENY
+        } else {
+            Response::FAN_ALLOW
+        };
+
+        const MAX_RETRIES: u32 = 3;
+        const RETRY_DELAY_MICROS: u64 = 100;
+        let mut write_success = false;
+
+        for attempt in 0..MAX_RETRIES {
+            let response = FanotifyResponse::new(fd.as_fd(), response_type);
+            match self.fanotify.write_response(response) {
+                Ok(()) => {
+                    write_success = true;
+                    break;
+                }
+                Err(nix::Error::EAGAIN) => {
+                    // Kernel buffer full, brief sleep and retry
+                    if let Some(ref metrics) = self.metrics {
+                        metrics.record_response_retry();
+                    }
+                    if attempt < MAX_RETRIES - 1 {
+                        std::thread::sleep(std::time::Duration::from_micros(
+                            RETRY_DELAY_MICROS * (attempt as u64 + 1),
+                        ));
+                    }
+                }
+                Err(e) => {
+                    // Non-recoverable error, log and break
+                    error!(error = %e, "Failed to write fanotify response");
+                    break;
+                }
+            }
+        }
+
+        if !write_success {
+            warn!(
+                "Permission response write failed after {} retries - \
+                 access was implicitly allowed to prevent process hang",
+                MAX_RETRIES
+            );
+            if let Some(ref metrics) = self.metrics {
+                metrics.record_response_failure();
+            }
+        }
+    }
+
+    /// Check if event should be forwarded based on deduplication.
+    ///
+    /// Deduplication only affects event streaming, not enforcement.
+    /// The permission response to kernel happens regardless.
+    async fn should_forward_event(&self, access_event: &AccessEvent) -> bool {
+        let mut dedupe = self.dedupe.lock().await;
+        dedupe.check_and_record(
+            Path::new(&access_event.path),
+            access_event.pid,
+            access_event.response,
+        )
+    }
+
     /// Start the guard event loop and send events to the channel.
     ///
     /// This is the main event loop that reads fanotify events and processes them.
@@ -393,125 +514,19 @@ impl Guard {
             match self.fanotify.read_events() {
                 Ok(events) => {
                     for event in events {
-                        // =========================================================
-                        // QUEUE OVERFLOW DETECTION (FAN_Q_OVERFLOW)
-                        // =========================================================
-                        //
-                        // The fanotify subsystem has a finite event queue controlled by:
-                        //   /proc/sys/fs/fanotify/max_queued_events (default: 16384)
-                        //
-                        // When events arrive faster than userspace can process them:
-                        // 1. Kernel drops oldest events that haven't been read
-                        // 2. Sets FAN_Q_OVERFLOW flag on the next readable event
-                        // 3. Events continue normally after userspace catches up
-                        //
-                        // SECURITY IMPLICATION: Overflow means some file access events
-                        // were permanently lost. An attacker could potentially exploit
-                        // this by generating high event volume to mask malicious access.
-                        //
-                        // MITIGATION:
-                        // - Monitor queue_overflows metric and alert on non-zero
-                        // - Increase max_queued_events if frequent overflows
-                        // - Reduce monitoring scope (fewer mounts, more specific paths)
-                        //
-                        // References:
-                        // - fanotify(7) man page, "Queue overflow" section
-                        // - Linux kernel: fs/notify/fanotify/fanotify_user.c
-                        if event.mask().contains(MaskFlags::FAN_Q_OVERFLOW) {
-                            warn!(
-                                "fanotify queue overflow detected - events may have been lost. \
-                                 Consider increasing /proc/sys/fs/fanotify/max_queued_events"
-                            );
-                            if let Some(ref metrics) = self.metrics {
-                                metrics.record_queue_overflow();
-                            }
-                            // FAN_Q_OVERFLOW events don't have a valid fd or path,
-                            // so we continue to the next event
+                        // Check for queue overflow (events may have been lost)
+                        if self.handle_queue_overflow(&event) {
                             continue;
                         }
 
+                        // Process the event and determine access decision
                         let access_event = self.process_event(&event);
 
-                        // =========================================================
-                        // PERMISSION RESPONSE WITH RETRY
-                        // =========================================================
-                        //
-                        // For permission events, we MUST respond promptly to avoid
-                        // blocking the accessing process. If write_response() fails
-                        // with EAGAIN, we retry with brief delays.
-                        //
-                        // CRITICAL: If all retries fail, we default to FAN_ALLOW to
-                        // prevent hanging the monitored process. This is a security
-                        // trade-off: it's better to allow access than to cause a DoS.
-                        //
-                        // The response_write_failures metric tracks these occurrences
-                        // so operators can investigate and address the root cause.
-                        if let Some(ref fd) = event.fd() {
-                            let response_type = if access_event.response == AccessResponse::Deny {
-                                Response::FAN_DENY
-                            } else {
-                                Response::FAN_ALLOW
-                            };
+                        // Write permission response to kernel (must be prompt)
+                        self.write_permission_response(&event, access_event.response);
 
-                            // Retry loop for permission response
-                            const MAX_RETRIES: u32 = 3;
-                            const RETRY_DELAY_MICROS: u64 = 100;
-                            let mut write_success = false;
-
-                            for attempt in 0..MAX_RETRIES {
-                                let response = FanotifyResponse::new(fd.as_fd(), response_type);
-                                match self.fanotify.write_response(response) {
-                                    Ok(()) => {
-                                        write_success = true;
-                                        break;
-                                    }
-                                    Err(nix::Error::EAGAIN) => {
-                                        // Kernel buffer full, brief sleep and retry
-                                        if let Some(ref metrics) = self.metrics {
-                                            metrics.record_response_retry();
-                                        }
-                                        if attempt < MAX_RETRIES - 1 {
-                                            std::thread::sleep(std::time::Duration::from_micros(
-                                                RETRY_DELAY_MICROS * (attempt as u64 + 1),
-                                            ));
-                                        }
-                                    }
-                                    Err(e) => {
-                                        // Non-recoverable error, log and break
-                                        error!(error = %e, "Failed to write fanotify response");
-                                        break;
-                                    }
-                                }
-                            }
-
-                            if !write_success {
-                                // All retries exhausted - this is a serious condition
-                                warn!(
-                                    path = %access_event.path,
-                                    pid = access_event.pid,
-                                    "Permission response write failed after {} retries - \
-                                     access was implicitly allowed to prevent process hang",
-                                    MAX_RETRIES
-                                );
-                                if let Some(ref metrics) = self.metrics {
-                                    metrics.record_response_failure();
-                                }
-                            }
-                        }
-
-                        // Check deduplication BEFORE forwarding to channel
-                        // Note: Permission response to kernel already happened above
-                        // Deduplication only affects event streaming, not enforcement
-                        let should_forward = {
-                            let mut dedupe = self.dedupe.lock().await;
-                            dedupe.check_and_record(
-                                Path::new(&access_event.path),
-                                access_event.pid,
-                                access_event.response,
-                            )
-                        };
-
-                        if should_forward {
+                        // Check deduplication before forwarding to channel
+                        if self.should_forward_event(&access_event).await {
                             if tx.send(access_event).await.is_err() {
                                 warn!("Event channel closed");
                                 running.store(false, Ordering::SeqCst);
@@ -595,39 +610,51 @@ impl Guard {
         mask
     }
 
-    fn process_event(&self, event: &nix::sys::fanotify::FanotifyEvent) -> AccessEvent {
-        // Get raw path from fd
-        let raw_path = if let Some(ref fd) = event.fd() {
+    /// Resolve the file path from a fanotify event's file descriptor.
+    ///
+    /// Reads the symlink at `/proc/self/fd/{fd}` to get the actual path
+    /// of the accessed file. Returns the raw host path.
+    fn resolve_event_path(event: &nix::sys::fanotify::FanotifyEvent) -> String {
+        if let Some(ref fd) = event.fd() {
             let proc_path = format!("/proc/self/fd/{}", fd.as_raw_fd());
             std::fs::read_link(&proc_path)
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default()
         } else {
             String::new()
-        };
+        }
+    }
 
-        // Strip /proc/{pid}/root prefix for policy matching (like C daemon)
-        // This converts host-relative paths to container-relative paths
-        let path = Self::strip_container_prefix(&raw_path);
-
-        // Determine event type
-        let event_type = if event.mask().contains(MaskFlags::FAN_ACCESS_PERM)
-            || event.mask().contains(MaskFlags::FAN_ACCESS)
-        {
+    /// Determine the event type from fanotify mask flags.
+    ///
+    /// Maps the kernel's mask flags to human-readable event type strings.
+    fn determine_event_type(mask: MaskFlags) -> &'static str {
+        if mask.contains(MaskFlags::FAN_ACCESS_PERM) || mask.contains(MaskFlags::FAN_ACCESS) {
             "access"
-        } else if event.mask().contains(MaskFlags::FAN_OPEN_PERM)
-            || event.mask().contains(MaskFlags::FAN_OPEN)
-        {
+        } else if mask.contains(MaskFlags::FAN_OPEN_PERM) || mask.contains(MaskFlags::FAN_OPEN) {
             "open"
-        } else if event.mask().contains(MaskFlags::FAN_CLOSE_WRITE) {
+        } else if mask.contains(MaskFlags::FAN_CLOSE_WRITE) {
             "close_write"
-        } else if event.mask().contains(MaskFlags::FAN_CLOSE_NOWRITE) {
+        } else if mask.contains(MaskFlags::FAN_CLOSE_NOWRITE) {
             "close_nowrite"
-        } else if event.mask().contains(MaskFlags::FAN_MODIFY) {
+        } else if mask.contains(MaskFlags::FAN_MODIFY) {
             "modify"
         } else {
             "unknown"
-        };
+        }
+    }
+
+    /// Process a fanotify event into an AccessEvent.
+    ///
+    /// Resolves the path, determines the event type, evaluates access policy,
+    /// and builds the AccessEvent struct for forwarding.
+    fn process_event(&self, event: &nix::sys::fanotify::FanotifyEvent) -> AccessEvent {
+        // Resolve path from fd and strip container prefix
+        let raw_path = Self::resolve_event_path(event);
+        let path = Self::strip_container_prefix(&raw_path);
+
+        // Determine event type from mask
+        let event_type = Self::determine_event_type(event.mask());
 
         let pid = event.pid();
 
@@ -635,8 +662,6 @@ impl Guard {
         let matched_pattern = self.policy.matches_any_pattern(Path::new(&path));
 
         // Determine access response using PolicyEvaluator
-        // The policy evaluator handles deny/allow patterns, auto_allow_owner,
-        // caching, and default response logic
         let response = if self.config.enforce {
             self.policy.evaluate(Path::new(&path), Some(pid))
         } else {

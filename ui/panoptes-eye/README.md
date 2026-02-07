@@ -17,10 +17,10 @@ Panoptes Eye is the unified web interface for the Panoptes security suite, provi
 
 | Component | Technology |
 |-----------|------------|
-| Framework | Next.js 14 (App Router) |
-| React | 18.2+ |
-| State Management | TanStack Query + Zustand |
-| Styling | Tailwind CSS + shadcn/ui |
+| Framework | Next.js 16 (App Router) |
+| React | 19+ |
+| State Management | TanStack Query 5 + Zustand 5 |
+| Styling | Tailwind CSS 4 |
 | K8s Client | @kubernetes/client-node |
 | Virtualization | @tanstack/react-virtual |
 
@@ -125,37 +125,25 @@ spec:
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Panoptes Eye                              │
-│                     (Next.js 14 App)                             │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │  Dashboard  │  │  Watchers   │  │     Guards Page         │  │
-│  │    Page     │  │    Page     │  │   (JanusGuard CRUD)     │  │
-│  └──────┬──────┘  └──────┬──────┘  └───────────┬─────────────┘  │
-│         │                │                      │                │
-│         └────────────────┼──────────────────────┘                │
-│                          │                                       │
-│              ┌───────────▼───────────┐                           │
-│              │   API Routes Layer    │                           │
-│              │   /api/k8s/*          │                           │
-│              │   /api/events/*       │                           │
-│              └───────────┬───────────┘                           │
-│                          │                                       │
-│              ┌───────────▼───────────┐                           │
-│              │  Kubernetes Client    │                           │
-│              │  (@kubernetes/client) │                           │
-│              └───────────┬───────────┘                           │
-└──────────────────────────┼───────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Kubernetes API Server                         │
-│  ┌─────────────────────┐  ┌─────────────────────┐               │
-│  │   ArgusWatcher CRD  │  │   JanusGuard CRD    │               │
-│  └─────────────────────┘  └─────────────────────┘               │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Eye["Panoptes Eye (Next.js 16)"]
+        subgraph Pages["Pages"]
+            DP["Dashboard Page"]
+            WP["Watchers Page"]
+            GP["Guards Page"]
+        end
+
+        DP & WP & GP --> API["API Routes Layer<br/>/api/k8s/* /api/events/*"]
+        API --> KC["Kubernetes Client<br/>@kubernetes/client-node"]
+    end
+
+    KC --> K8s
+
+    subgraph K8s["Kubernetes API Server"]
+        AW["ArgusWatcher CRD"]
+        JG["JanusGuard CRD"]
+    end
 ```
 
 ## RBAC Requirements

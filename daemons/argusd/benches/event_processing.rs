@@ -6,7 +6,7 @@
 //! Benchmarks for measuring the performance of event processing
 //! in the argusd daemon.
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 /// Simulated file event for benchmarking.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct FileEvent {
     path: PathBuf,
     filename: Option<String>,
@@ -189,6 +190,7 @@ fn bench_move_pair_tracking(c: &mut Criterion) {
             })
         }
 
+        #[allow(dead_code)]
         fn drain_expired(&mut self) -> Vec<(u32, PathBuf)> {
             let now = Instant::now();
             let expired: Vec<u32> = self

@@ -29,7 +29,7 @@ Monitors file system changes in container filesystems using inotify.
 
 **CRD**: `ArgusWatcher`
 ```yaml
-apiVersion: argus.como-technologies.io/v1
+apiVersion: argus.como-technologies.io/v2
 kind: ArgusWatcher
 metadata:
   name: critical-files
@@ -53,7 +53,7 @@ Audits and controls file access in containers using fanotify.
 
 **CRD**: `JanusGuard`
 ```yaml
-apiVersion: janus.como-technologies.io/v1
+apiVersion: janus.como-technologies.io/v2
 kind: JanusGuard
 metadata:
   name: sensitive-access
@@ -61,6 +61,7 @@ spec:
   selector:
     matchLabels:
       app: my-app
+  enforcing: true  # Set to false for dry-run mode
   subjects:
     - deny:
         - /etc/shadow
@@ -68,7 +69,7 @@ spec:
         - access
         - open
       audit: true
-      enforcing: true  # Set to false for dry-run mode
+      defaultResponse: deny
 ```
 
 ### Panoptes Eye (Dashboard)

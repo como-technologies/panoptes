@@ -69,6 +69,6 @@ Each use case guide follows the same structure:
 
 ## Related Documentation
 
-- [Compliance Templates](../../../deploy/compliance/README.md) - Ready-to-deploy YAML templates
+- [Compliance Templates](../../../deploy/compliance/) - Ready-to-deploy YAML templates
 - [What to Monitor](../what-to-monitor.md) - Path recommendations by workload type
 - [Quick Start](../../QUICK_START.md) - Initial deployment guide

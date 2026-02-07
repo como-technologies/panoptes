@@ -10,22 +10,24 @@ In a multi-cluster deployment:
 - Prometheus federation aggregates metrics across clusters
 - Each cluster's panoptes-eye provides local management
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Central Observability                        │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │  Prometheus     │  │   Grafana       │  │  AlertManager   │ │
-│  │  (Federation)   │  │  (Dashboards)   │  │  (Alerts)       │ │
-│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘ │
-└───────────┼───────────────────┼──────────────────────┼─────────┘
-            │                   │                      │
-     ┌──────┴────────┬─────────┴─────────┬────────────┴──────┐
-     │               │                   │                   │
-     ▼               ▼                   ▼                   ▼
-┌─────────┐   ┌─────────┐         ┌─────────┐         ┌─────────┐
-│ Cluster │   │ Cluster │         │ Cluster │         │ Cluster │
-│ prod-1  │   │ prod-2  │         │ staging │         │  dev    │
-└─────────┘   └─────────┘         └─────────┘         └─────────┘
+```mermaid
+flowchart TB
+    subgraph Central["Central Observability"]
+        Prom["Prometheus<br/>(Federation)"]
+        Graf["Grafana<br/>(Dashboards)"]
+        Alert["AlertManager<br/>(Alerts)"]
+    end
+
+    subgraph Clusters["Kubernetes Clusters"]
+        C1["Cluster<br/>prod-1"]
+        C2["Cluster<br/>prod-2"]
+        C3["Cluster<br/>staging"]
+        C4["Cluster<br/>dev"]
+    end
+
+    Prom --> C1 & C2 & C3 & C4
+    Graf --> Prom
+    Alert --> Prom
 ```
 
 ## Configuration
@@ -243,5 +245,5 @@ for event in stream_events():
 ## Related Documentation
 
 - [Quick Start Security](./quick-start-security.md)
-- [Compliance Templates](../compliance-templates/README.md)
+- [Compliance Templates](../../deploy/compliance/)
 - [Spectro Cloud Quick Start](../SPECTRO_QUICK_START.md)

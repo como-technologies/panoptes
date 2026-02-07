@@ -145,6 +145,23 @@ fn session_to_guard_state(session: &Session<GuardSessionState>) -> GuardState {
     }
 }
 
+/// Context for event forwarding task.
+///
+/// Contains all the references and metadata needed to forward access events
+/// from the guard to the event broadcaster and audit log.
+struct EventForwardingContext {
+    guard_name: String,
+    namespace: String,
+    pod_name: String,
+    container_id: String,
+    node_name: String,
+    cluster_name: String,
+    metrics: Arc<GuardMetrics>,
+    audit: Arc<dyn AuditLogger>,
+    proc_resolver: ProcfsProcessResolver,
+    broadcaster: EventBroadcaster<AccessEvent>,
+}
+
 /// Janus daemon gRPC service implementation.
 pub struct JanusdServiceImpl {
     /// Node name.
@@ -261,6 +278,293 @@ impl JanusdServiceImpl {
             _ => FanotifyEvent::Unspecified as i32,
         }
     }
+
+    /// Build guard configuration from protobuf subjects.
+    ///
+    /// Converts the first subject's allow/deny patterns and events into
+    /// a GuardConfig struct suitable for the fanotify guard.
+    ///
+    /// # Arguments
+    /// * `subjects` - List of guard subjects from the protobuf request
+    /// * `enforcing` - Whether the guard should enforce (deny) or just audit
+    ///
+    /// # Returns
+    /// A GuardConfig with patterns, events, and enforcement settings
+    fn build_guard_config(subjects: &[GuardSubject], enforcing: bool) -> GuardConfig {
+        // max_marks_per_guard: Default to 100, which is sufficient for
+        // multi-container pods with room to spare. The kernel limit
+        // (max_user_marks) is typically 8192+, so this per-guard limit
+        // prevents a single guard from consuming too many marks.
+        const DEFAULT_MAX_MARKS_PER_GUARD: usize = 100;
+
+        if let Some(subject) = subjects.first() {
+            GuardConfig {
+                allow_patterns: subject.allow.clone(),
+                deny_patterns: subject.deny.clone(),
+                events: subject
+                    .events
+                    .iter()
+                    .filter_map(|e| {
+                        Self::fanotify_event_to_string(
+                            FanotifyEvent::try_from(*e).unwrap_or(FanotifyEvent::Unspecified),
+                        )
+                    })
+                    .map(String::from)
+                    .collect(),
+                auto_allow_owner: subject.auto_allow_owner,
+                enforce: enforcing,
+                max_marks_per_guard: DEFAULT_MAX_MARKS_PER_GUARD,
+            }
+        } else {
+            GuardConfig {
+                allow_patterns: vec![],
+                deny_patterns: vec![],
+                events: vec!["open_perm".to_string(), "access_perm".to_string()],
+                auto_allow_owner: false,
+                enforce: enforcing,
+                max_marks_per_guard: DEFAULT_MAX_MARKS_PER_GUARD,
+            }
+        }
+    }
+
+    /// Create a proto AccessEvent from a guard event with full context.
+    ///
+    /// Populates the AccessEvent with process information, timestamps, and
+    /// all metadata needed for streaming to UI clients.
+    fn create_proto_access_event(
+        event: &GuardAccessEvent,
+        ctx: &EventForwardingContext,
+        process_info: Option<ProcessInfo>,
+    ) -> AccessEvent {
+        AccessEvent {
+            timestamp: Some(Timestamp {
+                seconds: SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0),
+                nanos: 0,
+            }),
+            guard_name: ctx.guard_name.clone(),
+            namespace: ctx.namespace.clone(),
+            node_name: ctx.node_name.clone(),
+            pod_name: ctx.pod_name.clone(),
+            container_id: ctx.container_id.clone(),
+            event_type: Self::event_type_to_proto(&event.event_type),
+            path: event.path.clone(),
+            response: Self::response_to_proto(event.response),
+            process_info,
+            is_directory: event.is_dir,
+            tags: HashMap::new(),
+            audit_logged: false,
+            cluster_name: ctx.cluster_name.clone(),
+        }
+    }
+
+    /// Log access event for matched patterns.
+    ///
+    /// Logs allow/deny/audit events to daemon stdout with response type,
+    /// event type, path, and pod/node context.
+    fn log_access_event(event: &GuardAccessEvent, pod_name: &str, node_name: &str) {
+        let dir_or_file = if event.is_dir { "directory" } else { "file" };
+        match event.response {
+            GuardAccessResponse::Allow => {
+                info!(
+                    "<ALLOW> {} {} '{}' ({}:{})",
+                    event.event_type.to_uppercase(),
+                    dir_or_file,
+                    event.path,
+                    pod_name,
+                    node_name
+                );
+            }
+            GuardAccessResponse::Deny => {
+                info!(
+                    "<DENY> {} {} '{}' ({}:{})",
+                    event.event_type.to_uppercase(),
+                    dir_or_file,
+                    event.path,
+                    pod_name,
+                    node_name
+                );
+            }
+            GuardAccessResponse::Audit => {
+                info!(
+                    "<AUDIT> {} {} '{}' ({}:{})",
+                    event.event_type.to_uppercase(),
+                    dir_or_file,
+                    event.path,
+                    pod_name,
+                    node_name
+                );
+            }
+        }
+    }
+
+    /// Resolve process information from /proc filesystem.
+    ///
+    /// Attempts to read process attributes from /proc/{pid}/. Returns full
+    /// ProcessInfo if available, or a minimal fallback if the process has exited.
+    fn resolve_process_info(
+        proc_resolver: &ProcfsProcessResolver,
+        pid: i32,
+    ) -> (Option<ProcessInfo>, String, String, u32, u32) {
+        match proc_resolver.get_process_info(pid as u32) {
+            Ok(info) => (
+                Some(ProcessInfo {
+                    pid: info.pid as i32,
+                    tid: 0,
+                    uid: info.uid as i32,
+                    gid: info.gid as i32,
+                    comm: info.comm.clone(),
+                    exe: info.exe.to_string_lossy().to_string(),
+                    ppid: info.ppid as i32,
+                    cmdline: info.cmdline.clone(),
+                    cwd: info.cwd.to_string_lossy().to_string(),
+                }),
+                info.comm,
+                info.exe.to_string_lossy().to_string(),
+                info.uid,
+                info.gid,
+            ),
+            Err(_) => {
+                // Process may have exited - fall back to PID only
+                (
+                    Some(ProcessInfo {
+                        pid,
+                        tid: 0,
+                        uid: 0,
+                        gid: 0,
+                        comm: String::new(),
+                        exe: String::new(),
+                        ppid: 0,
+                        cmdline: vec![],
+                        cwd: String::new(),
+                    }),
+                    String::new(),
+                    String::new(),
+                    0,
+                    0,
+                )
+            }
+        }
+    }
+
+    /// Log access event to kernel audit subsystem.
+    ///
+    /// Converts the guard event to an audit event and logs it for compliance
+    /// purposes (PCI-DSS, HIPAA, SOC2). Includes process attribution.
+    fn log_to_audit(
+        audit: &Arc<dyn AuditLogger>,
+        event: &GuardAccessEvent,
+        ctx: &EventForwardingContext,
+        comm: &str,
+        exe: &str,
+        uid: u32,
+        gid: u32,
+    ) {
+        let (audit_response, audit_event_type) = match event.response {
+            GuardAccessResponse::Allow => (GuardAccessResponse::Allow, AuditEventType::Access),
+            GuardAccessResponse::Deny => (GuardAccessResponse::Deny, AuditEventType::Denied),
+            GuardAccessResponse::Audit => (GuardAccessResponse::Audit, AuditEventType::Open),
+        };
+        let audit_event = AuditAccessEvent {
+            guard_name: ctx.guard_name.clone(),
+            namespace: ctx.namespace.clone(),
+            pod_name: ctx.pod_name.clone(),
+            container_id: ctx.container_id.clone(),
+            path: event.path.clone(),
+            pid: event.pid,
+            uid,
+            gid,
+            response: audit_response,
+            event_type: audit_event_type,
+            comm: comm.to_string(),
+            exe: exe.to_string(),
+        };
+        if let Err(e) = audit.log_access(&audit_event) {
+            debug!(error = %e, "Failed to log access event to kernel audit");
+        }
+    }
+
+    /// Spawn the event forwarding task.
+    ///
+    /// Creates a background task that receives guard access events and:
+    /// 1. Records metrics (always, for observability)
+    /// 2. For pattern-matched events: logs, audits, and broadcasts to UI
+    ///
+    /// # Arguments
+    /// * `ctx` - Event forwarding context with all metadata
+    /// * `event_rx` - Receiver for guard access events
+    fn spawn_event_forwarding_task(
+        ctx: EventForwardingContext,
+        mut event_rx: mpsc::Receiver<GuardAccessEvent>,
+    ) {
+        tokio::spawn(async move {
+            while let Some(event) = event_rx.recv().await {
+                // 1. METRICS - Always record (for observability, regardless of pattern match)
+                match event.response {
+                    GuardAccessResponse::Allow => ctx.metrics.record_allowed(),
+                    GuardAccessResponse::Deny => ctx.metrics.record_denied(),
+                    GuardAccessResponse::Audit => ctx.metrics.record_audited(),
+                }
+                ctx.metrics.record_event_type(&event.event_type);
+
+                // 2. LOGGING + STREAMING - Only pattern-matched events
+                if event.matched_pattern {
+                    // Log to daemon stdout
+                    JanusdServiceImpl::log_access_event(&event, &ctx.pod_name, &ctx.node_name);
+
+                    // Resolve process info from /proc/{pid}/
+                    let (process_info, comm, exe, uid, gid) =
+                        JanusdServiceImpl::resolve_process_info(&ctx.proc_resolver, event.pid);
+
+                    // Log to kernel audit for compliance
+                    JanusdServiceImpl::log_to_audit(
+                        &ctx.audit, &event, &ctx, &comm, &exe, uid, gid,
+                    );
+
+                    // Stream to UI with full context
+                    let proto_event =
+                        JanusdServiceImpl::create_proto_access_event(&event, &ctx, process_info);
+                    let _ = ctx.broadcaster.send(proto_event);
+                }
+            }
+        });
+    }
+
+    /// Register fanotify marks for all container PIDs.
+    ///
+    /// For each container PID, registers a fanotify mark on the container's
+    /// root filesystem at `/proc/{pid}/root`. This is the critical step that
+    /// enables file access monitoring for the container.
+    ///
+    /// # Arguments
+    /// * `guard` - The fanotify guard to add marks to
+    /// * `container_pids` - List of container process IDs
+    ///
+    /// # Returns
+    /// The number of mounts successfully registered
+    fn register_fanotify_marks(guard: &Guard, container_pids: &[i32]) -> u32 {
+        let mut mount_count: u32 = 0;
+        for pid in container_pids {
+            let container_root = format!("/proc/{}/root", pid);
+            let path = std::path::Path::new(&container_root);
+            if path.exists() {
+                match guard.add_mount(path) {
+                    Ok(_) => {
+                        mount_count += 1;
+                        info!(pid = pid, path = %container_root, "Registered fanotify mark for container");
+                    }
+                    Err(e) => {
+                        warn!(pid = pid, error = %e, "Failed to add container mount to guard");
+                    }
+                }
+            } else {
+                warn!(pid = pid, path = %container_root, "Container root path does not exist");
+            }
+        }
+        mount_count
+    }
 }
 
 #[tonic::async_trait]
@@ -316,8 +620,7 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
             .sum();
 
         // Create event channel for this guard
-        let (event_tx, mut event_rx) = mpsc::channel::<GuardAccessEvent>(1000);
-        let broadcaster = self.broadcaster.clone();
+        let (event_tx, event_rx) = mpsc::channel::<GuardAccessEvent>(1000);
 
         // Create typed metrics first so we can call fanotify-specific methods
         let typed_metrics = Arc::new(GuardMetrics::new(&req.guard_name));
@@ -359,175 +662,20 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
         // Register metrics with the aggregator
         self.metrics.register(metrics.clone()).await;
 
-        // Spawn event forwarding task
-        let metrics_clone = typed_metrics.clone();
-        let audit_clone = self.audit.clone();
-        let proc_resolver = self.proc_resolver.clone();
-        let guard_name_clone = req.guard_name.clone();
-        let namespace_clone = req.namespace.clone();
-        let pod_name_clone = req.pod_name.clone();
-        let container_id_clone = req.container_ids.first().cloned().unwrap_or_default();
-        let node_name_clone = req.node_name.clone();
-        let cluster_name_clone = self.cluster_name.clone();
-        tokio::spawn(async move {
-            while let Some(event) = event_rx.recv().await {
-                // 1. METRICS - Always record (for observability, regardless of pattern match)
-                match event.response {
-                    GuardAccessResponse::Allow => {
-                        metrics_clone.record_allowed();
-                    }
-                    GuardAccessResponse::Deny => {
-                        metrics_clone.record_denied();
-                    }
-                    GuardAccessResponse::Audit => {
-                        metrics_clone.record_audited();
-                    }
-                }
-                metrics_clone.record_event_type(&event.event_type);
-
-                // 2. LOGGING + STREAMING - Only pattern-matched events
-                // This ensures daemon logs and UI stream show the same filtered events
-                if event.matched_pattern {
-                    // Log to daemon stdout
-                    match event.response {
-                        GuardAccessResponse::Allow => {
-                            info!(
-                                "<ALLOW> {} {} '{}' ({}:{})",
-                                event.event_type.to_uppercase(),
-                                if event.is_dir { "directory" } else { "file" },
-                                event.path,
-                                pod_name_clone,
-                                node_name_clone
-                            );
-                        }
-                        GuardAccessResponse::Deny => {
-                            info!(
-                                "<DENY> {} {} '{}' ({}:{})",
-                                event.event_type.to_uppercase(),
-                                if event.is_dir { "directory" } else { "file" },
-                                event.path,
-                                pod_name_clone,
-                                node_name_clone
-                            );
-                        }
-                        GuardAccessResponse::Audit => {
-                            info!(
-                                "<AUDIT> {} {} '{}' ({}:{})",
-                                event.event_type.to_uppercase(),
-                                if event.is_dir { "directory" } else { "file" },
-                                event.path,
-                                pod_name_clone,
-                                node_name_clone
-                            );
-                        }
-                    }
-
-                    // Resolve process info from /proc/{pid}/
-                    // Process may have exited, so fall back to PID-only on error
-                    let (process_info, resolved_comm, resolved_exe, resolved_uid, resolved_gid) =
-                        match proc_resolver.get_process_info(event.pid as u32) {
-                            Ok(info) => (
-                                Some(ProcessInfo {
-                                    pid: info.pid as i32,
-                                    tid: 0,
-                                    uid: info.uid as i32,
-                                    gid: info.gid as i32,
-                                    comm: info.comm.clone(),
-                                    exe: info.exe.to_string_lossy().to_string(),
-                                    // V2 extended fields
-                                    ppid: info.ppid as i32,
-                                    cmdline: info.cmdline.clone(),
-                                    cwd: info.cwd.to_string_lossy().to_string(),
-                                }),
-                                info.comm,
-                                info.exe.to_string_lossy().to_string(),
-                                info.uid,
-                                info.gid,
-                            ),
-                            Err(_) => {
-                                // Process may have exited - fall back to PID only
-                                (
-                                    Some(ProcessInfo {
-                                        pid: event.pid,
-                                        tid: 0,
-                                        uid: 0,
-                                        gid: 0,
-                                        comm: String::new(),
-                                        exe: String::new(),
-                                        ppid: 0,
-                                        cmdline: vec![],
-                                        cwd: String::new(),
-                                    }),
-                                    String::new(),
-                                    String::new(),
-                                    0,
-                                    0,
-                                )
-                            }
-                        };
-
-                    // Log ALL events to kernel audit (for compliance: PCI-DSS, HIPAA, SOC2)
-                    // Includes process attribution to answer WHO made the access
-                    let (audit_response, audit_event_type) = match event.response {
-                        GuardAccessResponse::Allow => {
-                            (GuardAccessResponse::Allow, AuditEventType::Access)
-                        }
-                        GuardAccessResponse::Deny => {
-                            (GuardAccessResponse::Deny, AuditEventType::Denied)
-                        }
-                        GuardAccessResponse::Audit => {
-                            (GuardAccessResponse::Audit, AuditEventType::Open)
-                        }
-                    };
-                    let audit_event = AuditAccessEvent {
-                        guard_name: guard_name_clone.clone(),
-                        namespace: namespace_clone.clone(),
-                        pod_name: pod_name_clone.clone(),
-                        container_id: container_id_clone.clone(),
-                        path: event.path.clone(),
-                        pid: event.pid,
-                        uid: resolved_uid,
-                        gid: resolved_gid,
-                        response: audit_response,
-                        event_type: audit_event_type,
-                        comm: resolved_comm.clone(),
-                        exe: resolved_exe.clone(),
-                    };
-                    if let Err(e) = audit_clone.log_access(&audit_event) {
-                        debug!(error = %e, "Failed to log access event to kernel audit");
-                    }
-
-                    // Stream to UI with full context
-                    let proto_event = AccessEvent {
-                        timestamp: Some(Timestamp {
-                            seconds: SystemTime::now()
-                                .duration_since(SystemTime::UNIX_EPOCH)
-                                .map(|d| d.as_secs() as i64)
-                                .unwrap_or(0),
-                            nanos: 0,
-                        }),
-                        guard_name: guard_name_clone.clone(),
-                        namespace: namespace_clone.clone(),
-                        node_name: node_name_clone.clone(),
-                        pod_name: pod_name_clone.clone(),
-                        container_id: container_id_clone.clone(),
-                        event_type: JanusdServiceImpl::event_type_to_proto(&event.event_type),
-                        path: event.path.clone(),
-                        response: JanusdServiceImpl::response_to_proto(event.response),
-                        process_info,
-                        is_directory: event.is_dir,
-                        tags: HashMap::new(),
-                        audit_logged: false,
-                        // Multi-cluster identification
-                        cluster_name: cluster_name_clone.clone(),
-                    };
-
-                    // Broadcast to all connected stream clients
-                    // send() is sync - if no receivers, events are dropped (Ok(0))
-                    let _ = broadcaster.send(proto_event);
-                }
-            }
-        });
+        // Spawn event forwarding task with all context
+        let ctx = EventForwardingContext {
+            guard_name: req.guard_name.clone(),
+            namespace: req.namespace.clone(),
+            pod_name: req.pod_name.clone(),
+            container_id: req.container_ids.first().cloned().unwrap_or_default(),
+            node_name: req.node_name.clone(),
+            cluster_name: self.cluster_name.clone(),
+            metrics: typed_metrics.clone(),
+            audit: self.audit.clone(),
+            proc_resolver: self.proc_resolver.clone(),
+            broadcaster: self.broadcaster.clone(),
+        };
+        Self::spawn_event_forwarding_task(ctx, event_rx);
 
         // Track number of fanotify marks registered (0 if paused)
         let mut marks_registered: i32 = 0;
@@ -544,42 +692,8 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
             // Extract metrics for the guard to track queue overflows, response failures, etc.
             let typed_metrics = session_guard.state.typed_metrics.clone();
 
-            // Build guard config from first subject (simplified for now)
-            //
-            // max_marks_per_guard: Default to 100, which is sufficient for
-            // multi-container pods with room to spare. The kernel limit
-            // (max_user_marks) is typically 8192+, so this per-guard limit
-            // prevents a single guard from consuming too many marks.
-            const DEFAULT_MAX_MARKS_PER_GUARD: usize = 100;
-
-            let config = if let Some(subject) = session_guard.state.subjects.first() {
-                GuardConfig {
-                    allow_patterns: subject.allow.clone(),
-                    deny_patterns: subject.deny.clone(),
-                    events: subject
-                        .events
-                        .iter()
-                        .filter_map(|e| {
-                            JanusdServiceImpl::fanotify_event_to_string(
-                                FanotifyEvent::try_from(*e).unwrap_or(FanotifyEvent::Unspecified),
-                            )
-                        })
-                        .map(String::from)
-                        .collect(),
-                    auto_allow_owner: subject.auto_allow_owner,
-                    enforce: enforcing,
-                    max_marks_per_guard: DEFAULT_MAX_MARKS_PER_GUARD,
-                }
-            } else {
-                GuardConfig {
-                    allow_patterns: vec![],
-                    deny_patterns: vec![],
-                    events: vec!["open_perm".to_string(), "access_perm".to_string()],
-                    auto_allow_owner: false,
-                    enforce: enforcing,
-                    max_marks_per_guard: DEFAULT_MAX_MARKS_PER_GUARD,
-                }
-            };
+            // Build guard config from subjects
+            let config = Self::build_guard_config(&session_guard.state.subjects, enforcing);
             drop(session_guard);
 
             // Create guard SYNCHRONOUSLY - blocks until fanotify_init() completes
@@ -593,24 +707,7 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
             // Register fanotify marks SYNCHRONOUSLY for all container PIDs.
             // This is the critical section - marks must be registered before
             // we return success to the operator.
-            let mut mount_count: u32 = 0;
-            for pid in &container_pids {
-                let container_root = format!("/proc/{}/root", pid);
-                let path = std::path::Path::new(&container_root);
-                if path.exists() {
-                    match guard.add_mount(path) {
-                        Ok(_) => {
-                            mount_count += 1;
-                            info!(pid = pid, path = %container_root, "Registered fanotify mark for container");
-                        }
-                        Err(e) => {
-                            warn!(pid = pid, error = %e, "Failed to add container mount to guard");
-                        }
-                    }
-                } else {
-                    warn!(pid = pid, path = %container_root, "Container root path does not exist");
-                }
-            }
+            let mount_count = Self::register_fanotify_marks(&guard, &container_pids);
 
             // Fail if no mounts could be registered
             if mount_count == 0 && !container_pids.is_empty() {

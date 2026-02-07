@@ -1,6 +1,10 @@
 # Janus gRPC API v1
 
-**Protocol Buffer definitions for the Janus file access auditing daemon**
+> **DEPRECATED**: This is the legacy API from the original C daemon implementation.
+> Use [v2](../v2/README.md) for new integrations. V1 is retained for backward
+> compatibility only and will be removed in a future release.
+
+**Protocol Buffer definitions for the Janus file access auditing daemon (legacy C implementation)**
 
 ## Overview
 
@@ -292,7 +296,7 @@ Examples:
 
 ```go
 import (
-    pb "github.com/como-technologies/panoptes/proto/janus/v1"
+    pb "github.com/como-technologies/panoptes/operators/janus-operator/pkg/proto/janus/v1"
     "google.golang.org/grpc"
 )
 

@@ -10,19 +10,21 @@ condition where file access could occur before protection is active.
 
 ## How It Works
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Pod Startup Flow                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  1. Pod scheduled on node                                        │
-│  2. Init container: guard-wait starts                            │
-│  3. guard-wait queries janusd GetGuardState RPC                  │
-│  4. Checks marks_registered == true                              │
-│  5. If ready: exit 0 → main containers start (PROTECTED)        │
-│  6. If timeout: exit 1 → pod fails (safe failure)               │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+sequenceDiagram
+    participant Node as Kubernetes Node
+    participant Init as guard-wait init
+    participant Janusd as janusd
+    participant Main as Main Containers
+
+    Node->>Init: 1. Pod scheduled, init starts
+    Init->>Janusd: 2. Query GetGuardState RPC
+    Janusd->>Init: 3. Return marks_registered status
+    alt marks_registered == true
+        Init->>Main: 4. Exit 0 → PROTECTED
+    else timeout
+        Init->>Node: 4. Exit 1 → pod fails (safe failure)
+    end
 ```
 
 ## Usage

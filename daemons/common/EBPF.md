@@ -40,41 +40,32 @@ eBPF mode provides significant advantages over traditional kernel APIs:
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     Kubernetes Node                                     │
-│  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │                Daemon (argusd or janusd)                          │  │
-│  │  ┌──────────────────┐    ┌───────────────────────────────────┐    │  │
-│  │  │  gRPC Server     │◄───│ Event Processor                   │    │  │
-│  │  │  (service.rs)    │    │ • Enrich with container metadata  │    │  │
-│  │  └──────────────────┘    │ • Convert to proto events         │    │  │
-│  │                          └─────────────────┬─────────────────┘    │  │
-│  │                                            │                      │  │
-│  │                          ┌─────────────────▼─────────────────┐    │  │
-│  │                          │ panoptes-common ebpf module       │    │  │
-│  │                          │ • EbpfLoader (load, attach)       │    │  │
-│  │                          │ • EbpfEventReceiver (ring buffer) │    │  │
-│  │                          │ • FileEvent (shared types)        │    │  │
-│  │                          └─────────────────┬─────────────────┘    │  │
-│  └────────────────────────────────────────────│──────────────────────┘  │
-│                                               │ bpf() syscall           │
-│  ═══════════════════════════════════════════════════════════════════    │
-│                                               │                         │
-│  ┌────────────────────────────────────────────▼──────────────────────┐  │
-│  │                     Linux Kernel                                  │  │
-│  │  ┌─────────────────────────────────────────────────────────────┐  │  │
-│  │  │              eBPF Programs (LSM hooks)                      │  │  │
-│  │  │                                                             │  │  │
-│  │  │  Argus: inode_create, inode_unlink, inode_rename, file_open │  │  │
-│  │  │  Janus: file_open, file_permission                          │  │  │
-│  │  │                                                             │  │  │
-│  │  │          ┌─────────────────────────────────┐                │  │  │
-│  │  │          │ Ring Buffer (256KB, ~700 events)│                │  │  │
-│  │  │          └─────────────────────────────────┘                │  │  │
-│  │  └─────────────────────────────────────────────────────────────┘  │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Node["Kubernetes Node"]
+        subgraph Daemon["Daemon (argusd or janusd)"]
+            GRPC["gRPC Server<br/>(service.rs)"]
+            EP["Event Processor<br/>• Enrich with container metadata<br/>• Convert to proto events"]
+
+            subgraph Common["panoptes-common ebpf module"]
+                Loader["EbpfLoader (load, attach)"]
+                Receiver["EbpfEventReceiver (ring buffer)"]
+                Types["FileEvent (shared types)"]
+            end
+
+            EP --> GRPC
+            Common --> EP
+        end
+
+        subgraph Kernel["Linux Kernel"]
+            subgraph eBPF["eBPF Programs (LSM hooks)"]
+                Hooks["Argus: inode_create, inode_unlink, inode_rename, file_open<br/>Janus: file_open, file_permission"]
+                RingBuf["Ring Buffer (256KB, ~700 events)"]
+            end
+        end
+
+        Common -->|"bpf() syscall"| Kernel
+    end
 ```
 
 ## Shared Infrastructure
@@ -126,30 +117,27 @@ daemons/janusd/ebpf/                 # janusd-ebpf crate (kernel programs)
 
 We implement a two-stage filtering model that reduces ring buffer pressure by 90%+ in production:
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         In-Kernel Filtering                             │
-│                                                                         │
-│  ┌─────────────┐    ┌──────────────────┐    ┌───────────────────────┐   │
-│  │ File Event  │───►│ Check FILTER_    │───►│ Check IGNORED_PATHS   │   │
-│  │ (LSM hook)  │    │ ENABLED[0]==0?   │    │ (LRU discarder map)   │   │
-│  └─────────────┘    └────────┬─────────┘    └──────────┬────────────┘   │
-│                              │                         │                │
-│                     if 0: emit all           if found: DROP event       │
-│                              │                         │                │
-│                              │               ┌─────────▼─────────┐      │
-│                              │               │ Check PREFIX_MAP  │      │
-│                              │               │ (approver map)    │      │
-│                              │               └─────────┬─────────┘      │
-│                              │                         │                │
-│                              │          if match: EMIT │ no match: DROP │
-│                              │                         │                │
-│                              ▼                         ▼                │
-│                    ┌─────────────────────────────────────────────┐      │
-│                    │              Ring Buffer (256KB)            │      │
-│                    │              ~700 events capacity           │      │
-│                    └─────────────────────────────────────────────┘      │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Filtering["In-Kernel Filtering"]
+        Event["File Event<br/>(LSM hook)"]
+
+        FilterCheck{"Check FILTER_<br/>ENABLED[0]==0?"}
+        IgnoredCheck{"Check IGNORED_PATHS<br/>(LRU discarder map)"}
+        PrefixCheck{"Check PREFIX_MAP<br/>(approver map)"}
+
+        RingBuf["Ring Buffer (256KB)<br/>~700 events capacity"]
+        Drop1["DROP event"]
+        Drop2["DROP event"]
+
+        Event --> FilterCheck
+        FilterCheck -->|"if 0: emit all"| RingBuf
+        FilterCheck -->|"if 1: filter"| IgnoredCheck
+        IgnoredCheck -->|"if found"| Drop1
+        IgnoredCheck -->|"not found"| PrefixCheck
+        PrefixCheck -->|"if match: EMIT"| RingBuf
+        PrefixCheck -->|"no match"| Drop2
+    end
 ```
 
 ### BPF Maps

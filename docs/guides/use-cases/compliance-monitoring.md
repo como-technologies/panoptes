@@ -300,6 +300,6 @@ spec:
 
 ## Related Documentation
 
-- [Compliance Templates](../../../deploy/compliance/README.md) - All framework templates
+- [Compliance Templates](../../../deploy/compliance/) - All framework templates
 - [What to Monitor](../what-to-monitor.md) - Path recommendations
 - [Audit Logging](audit-logging.md) - Detailed access logging

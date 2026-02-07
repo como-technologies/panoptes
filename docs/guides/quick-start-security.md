@@ -26,8 +26,8 @@ kubectl label pods -n production --all panoptes.como-technologies.io/monitored=t
 ## Step 2: Apply Base Security Template (30 seconds)
 
 ```bash
-# Download and apply the base security template
-kubectl apply -f https://raw.githubusercontent.com/your-org/panoptes/main/docs/compliance-templates/base-security.yaml
+# Apply the base security template
+kubectl apply -k deploy/compliance/base-security/
 ```
 
 Or create it directly:
@@ -154,7 +154,7 @@ kubectl label pods -l app=database panoptes.como-technologies.io/monitored=true
 
 ```bash
 # Apply PCI-DSS monitoring
-kubectl apply -f docs/compliance-templates/pci-dss.yaml
+kubectl apply -k deploy/compliance/pci-dss/
 kubectl label pods -l app=payment pci-dss/scope=in-scope
 ```
 
@@ -168,7 +168,7 @@ kubectl patch janusguard quick-start-access --type=merge -p '{"spec":{"enforcing
 
 ### Set Up Alerts
 
-Configure Prometheus alerts for critical events (see [alerting documentation](../QUICK_START.md#alerting)).
+Configure Prometheus alerts for critical events (see [alerting documentation](./monitoring-alerting.md#alerting-rules)).
 
 ## Troubleshooting
 
@@ -211,5 +211,5 @@ kubectl patch arguswatcher quick-start-fim --type=json -p='[
 ## Related Documentation
 
 - [What to Monitor](./what-to-monitor.md) - Detailed monitoring guidance
-- [Compliance Templates](../compliance-templates/README.md) - Framework-specific templates
+- [Compliance Templates](../../deploy/compliance/) - Framework-specific templates
 - [Full Quick Start](../QUICK_START.md) - Complete deployment guide

@@ -302,7 +302,7 @@ impl NetlinkAuditLogger {
         // nlmsg_seq (u32)
         buffer[8..12].copy_from_slice(&seq.to_ne_bytes());
         // nlmsg_pid (u32) - our PID
-        buffer[12..16].copy_from_slice(&(std::process::id() as u32).to_ne_bytes());
+        buffer[12..16].copy_from_slice(&std::process::id().to_ne_bytes());
 
         // Copy message payload
         buffer[NLMSG_HDRLEN..NLMSG_HDRLEN + msg_bytes.len()].copy_from_slice(msg_bytes);

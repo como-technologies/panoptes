@@ -100,6 +100,8 @@ export interface UnifiedEvent {
   id: string;
   timestamp: string;
   source: 'argus' | 'janus';
+  /** The name of the ArgusWatcher or JanusGuard that generated this event */
+  resourceName: string;
   eventType: string;
   path: string;
   podName: string;
@@ -170,6 +172,7 @@ export function fileEventToUnified(event: FileEvent, id: string): UnifiedEvent {
     id,
     timestamp,
     source: 'argus',
+    resourceName: event.watcherName,
     eventType: inotifyEventToString(event.eventType),
     path: event.path,
     podName: event.podName,
@@ -192,6 +195,7 @@ export function accessEventToUnified(event: AccessEvent, id: string): UnifiedEve
     id,
     timestamp,
     source: 'janus',
+    resourceName: event.guardName,
     eventType: fanotifyEventToString(event.eventType),
     path: event.path,
     podName: event.podName,

@@ -24,9 +24,10 @@ sysctl -w fs.inotify.max_user_instances=256
 ```yaml
 capabilities:
   add:
-    - SYS_ADMIN
-    - SYS_PTRACE
-    - DAC_READ_SEARCH
+    - SYS_ADMIN      # Required: fanotify initialization
+    - SYS_PTRACE     # Required: /proc access for container PIDs
+    - DAC_READ_SEARCH  # Optional: container filesystem traversal
+    - AUDIT_WRITE    # Optional: kernel audit log integration
 ```
 
 ## Related Documentation

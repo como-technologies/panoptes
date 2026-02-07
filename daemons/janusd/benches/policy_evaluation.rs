@@ -7,13 +7,13 @@
 //! and deduplication in the janusd daemon.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 /// Access response types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 enum AccessResponse {
     Allow,
     Deny,
@@ -21,6 +21,7 @@ enum AccessResponse {
 }
 
 /// Compiled glob pattern for benchmarking.
+#[allow(dead_code)]
 struct CompiledPattern {
     pattern: glob::Pattern,
     original: String,
@@ -46,6 +47,7 @@ struct PolicyEvaluator {
     auto_allow_owner: bool,
     owner_pid: Option<i32>,
     default_response: AccessResponse,
+    #[allow(clippy::type_complexity)]
     cache: Option<RwLock<lru::LruCache<(PathBuf, Option<i32>), AccessResponse>>>,
 }
 
@@ -77,6 +79,7 @@ impl PolicyEvaluator {
         }
     }
 
+    #[allow(dead_code)]
     fn set_owner_pid(&mut self, pid: i32) {
         self.owner_pid = Some(pid);
     }
@@ -314,7 +317,7 @@ fn bench_deduplication(c: &mut Criterion) {
     let test_events: Vec<(PathBuf, i32, AccessResponse)> = (0..100)
         .map(|i| {
             let path = PathBuf::from(format!("/path/to/file_{}.txt", i % 20));
-            let pid = (i % 10) as i32 + 1000;
+            let pid = (i % 10) + 1000;
             let response = if i % 3 == 0 {
                 AccessResponse::Deny
             } else {
@@ -361,7 +364,7 @@ fn bench_deduplication(c: &mut Criterion) {
 
 /// Benchmark glob pattern compilation and matching.
 fn bench_glob_patterns(c: &mut Criterion) {
-    let pattern_strings = vec![
+    let pattern_strings = [
         "*.txt",
         "*.log",
         "**/*.json",

@@ -471,7 +471,7 @@ spec:
           image: registry.k8s.io/pause:3.9
 ```
 
-For more details, see [docs/operations/kernel-tuning.md](/home/brett/repos/panoptes/docs/operations/kernel-tuning.md).
+For more details, see [docs/operations/kernel-tuning.md](../operations/kernel-tuning.md).
 
 ## Production Deployment Checklist
 

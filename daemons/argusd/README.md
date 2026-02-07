@@ -2,7 +2,7 @@
 
 **Production-ready Rust implementation of the Argus file integrity monitoring daemon**
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](../../../LICENSE)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](../../LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.82+-orange.svg)](https://www.rust-lang.org)
 
 ## Overview
@@ -25,41 +25,34 @@ Fully tested with 54 unit tests and 12 integration tests.
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      argusd (Rust) Architecture                          │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                    Tonic gRPC Server                               │ │
-│  │  ┌──────────────────┐  ┌──────────────────┐                       │ │
-│  │  │  ArgusService    │  │  HealthService   │                       │ │
-│  │  │  (service.rs)    │  │  (tonic-health)  │                       │ │
-│  │  └────────┬─────────┘  └──────────────────┘                       │ │
-│  └───────────┼───────────────────────────────────────────────────────┘ │
-│              │                                                          │
-│              ▼                                                          │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                      Watcher Module                                │ │
-│  │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────────┐  │ │
-│  │  │ InotifyInstance │ │ MovePairTracker │ │ ContainerRuntime    │  │ │
-│  │  │ (nix inotify)   │ │ (cookie-based)  │ │ (containerd/CRI-O)  │  │ │
-│  │  └─────────────────┘ └─────────────────┘ └─────────────────────┘  │ │
-│  └────────────────────────────────────────────────────────────────────┘ │
-│              │                                                          │
-│              ▼                                                          │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                      Linux Kernel                                  │ │
-│  │  inotify_init1() → inotify_add_watch() → read()                   │ │
-│  └────────────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Argusd["argusd (Rust) Architecture"]
+        subgraph GRPC["Tonic gRPC Server"]
+            AS["ArgusService<br/>(service.rs)"]
+            HS["HealthService<br/>(tonic-health)"]
+        end
+
+        subgraph Watcher["Watcher Module"]
+            II["InotifyInstance<br/>(nix inotify)"]
+            MPT["MovePairTracker<br/>(cookie-based)"]
+            CR["ContainerRuntime<br/>(containerd/CRI-O)"]
+        end
+
+        subgraph Kernel["Linux Kernel"]
+            SYS["inotify_init1() → inotify_add_watch() → read()"]
+        end
+    end
+
+    AS --> Watcher
+    Watcher --> Kernel
 ```
 
 ## Project Structure
 
 ```
-rust/
-├── Cargo.toml           # Rust dependencies and workspace
+daemons/argusd/
+├── Cargo.toml           # Rust dependencies
 ├── build.rs             # Proto compilation (tonic-build)
 ├── src/
 │   ├── main.rs          # Entry point and CLI configuration
@@ -73,9 +66,9 @@ rust/
 │   ├── Cargo.toml
 │   └── src/main.rs      # LSM hooks (inode_create, inode_unlink, etc.)
 ├── tests/
-│   └── integration_tests.rs  # 12 integration tests
+│   └── integration_tests.rs
 └── benches/
-    └── event_processing.rs   # 5 benchmark groups
+    └── event_processing.rs
 ```
 
 ## Features
@@ -121,7 +114,7 @@ rust/
 ### Build Commands
 
 ```bash
-cd daemons/argusd/rust/
+cd daemons/argusd
 
 # Debug build
 cargo build
@@ -136,7 +129,7 @@ cargo test
 cargo bench
 
 # Format and lint
-cargo fmt --check && cargo clippy --all-targets
+cargo fmt --check && cargo clippy --all-targets --all-features
 ```
 
 ### Build Profile
@@ -179,14 +172,12 @@ ARGUSD_PORT=50051 NODE_NAME=worker-1 LOG_LEVEL=debug ./target/release/argusd
 
 ## Docker Build
 
-The Dockerfile is at `daemons/argusd/Dockerfile.rust`:
-
 ```bash
 # Build from repo root (context needs proto/)
-docker build -t argusd-rust:latest -f daemons/argusd/Dockerfile.rust .
+docker build -t argusd:latest -f daemons/argusd/Dockerfile .
 
 # Run
-docker run --privileged -p 50051:50051 argusd-rust:latest
+docker run --privileged -p 50051:50051 argusd:latest
 ```
 
 ## Testing
@@ -239,7 +230,7 @@ cargo bench
 
 ## eBPF-Based File Integrity Monitoring
 
-For comprehensive eBPF documentation including architecture, kernel requirements, and troubleshooting, see **[`daemons/common/EBPF.md`](../../common/EBPF.md)**.
+For comprehensive eBPF documentation including architecture, kernel requirements, and troubleshooting, see **[`daemons/common/EBPF.md`](../common/EBPF.md)**.
 
 ### Argus-Specific LSM Hooks
 
@@ -253,7 +244,7 @@ For comprehensive eBPF documentation including architecture, kernel requirements
 ### Building with eBPF
 
 ```bash
-cd daemons/argusd/rust
+cd daemons/argusd
 
 # Build with eBPF feature
 cargo build --release --features ebpf
@@ -265,7 +256,7 @@ cd ebpf && cargo build --target bpfel-unknown-none
 ### Project Structure (eBPF)
 
 ```
-daemons/argusd/rust/
+daemons/argusd/
 ├── ebpf/                          # eBPF kernel programs (argusd-ebpf crate)
 │   ├── Cargo.toml                 # Uses bpfel-unknown-none target
 │   └── src/main.rs                # LSM hook implementations
@@ -302,7 +293,7 @@ Argus requires the following Linux capabilities:
 | Capability | Purpose | Required |
 |------------|---------|----------|
 | `SYS_PTRACE` | Access container filesystems via `/proc/{pid}/root` | Yes |
-| `DAC_READ_SEARCH` | Bypass file read permission checks | Yes |
+| `DAC_READ_SEARCH` | Bypass file read permission checks | Optional |
 | `BPF` | Load eBPF programs (with `ebpf` feature) | For eBPF |
 | `PERFMON` | Attach to LSM hooks (with `ebpf` feature) | For eBPF |
 
@@ -397,4 +388,4 @@ Both implementations accept the same `--port` argument for compatibility.
 
 Copyright 2026 Como Technologies, LTD
 
-Licensed under the Apache License, Version 2.0. See [LICENSE](../../../LICENSE) for details.
+Licensed under the Apache License, Version 2.0. See [LICENSE](../../LICENSE) for details.

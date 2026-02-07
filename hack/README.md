@@ -272,7 +272,9 @@ hack/
 ├── local-deploy.sh            # Local deployment (native Linux)
 ├── local-wsl-deploy.sh        # Local deployment (WSL2)
 ├── spectro-deploy.sh          # Spectro Cloud deployment
-└── panoptes-eye-local.yaml    # Dashboard K8s manifests
+├── panoptes-eye-local.yaml    # Dashboard K8s manifests
+├── argusd-daemonset.yaml      # Argusd DaemonSet for local testing
+└── janusd-daemonset.yaml      # Janusd DaemonSet for local testing
 ```
 
 ---
@@ -282,8 +284,8 @@ hack/
 - [Quick Start - Local Testing](../docs/QUICK_START.md)
 - [Quick Start - Spectro Cloud](../docs/SPECTRO_QUICK_START.md)
 - [Future State & Roadmap](../docs/FUTURE_STATE.md)
-- [Argus FIM Pack](../packs/argus-fim/README.md)
-- [Janus Audit Pack](../packs/janus-audit/README.md)
+- [Argus FIM Pack](../packs/panoptes-argus/README.md)
+- [Janus Audit Pack](../packs/panoptes-janus/README.md)
 
 ---
 

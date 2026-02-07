@@ -350,7 +350,7 @@ subjects:
 
 ## Next Steps
 
-1. **Start with base-security.yaml**: Apply the [base security template](../compliance-templates/base-security.yaml)
+1. **Start with base-security.yaml**: Apply the [base security template](../../deploy/compliance/base-security/template.yaml)
 2. **Add compliance templates**: Apply framework-specific templates as needed
 3. **Review events in dashboard**: Monitor the Panoptes Eye Events page
 4. **Tune ignores**: Add ignore patterns for noisy paths
@@ -358,6 +358,6 @@ subjects:
 
 ## Related Documentation
 
-- [Compliance Templates](../compliance-templates/README.md)
+- [Compliance Templates](../../deploy/compliance/)
 - [Monitoring by Compliance Framework](./monitoring-by-compliance.md)
 - [Quick Start Security Guide](./quick-start-security.md)

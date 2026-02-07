@@ -101,6 +101,7 @@ pub struct Session<T: SessionState> {
 
 impl<T: SessionState> Session<T> {
     /// Create a new session with the given parameters.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         name: String,
@@ -261,6 +262,7 @@ mod tests {
     use super::*;
 
     // Test session state
+    #[allow(dead_code)]
     struct TestState {
         data: String,
     }

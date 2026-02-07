@@ -219,7 +219,7 @@ impl ArgusdServiceImpl {
                 };
 
                 // Convert to Argus event
-                let ebpf_event = EbpfFileEvent::from(raw_event.clone());
+                let ebpf_event = EbpfFileEvent::from(raw_event);
 
                 // Look up cached process info (exe, cmdline, cwd, ppid)
                 let cached_process = {
@@ -363,6 +363,7 @@ impl ArgusdServiceImpl {
     }
 
     /// Resolve container ID to PID using the detected runtime.
+    #[allow(clippy::result_large_err)]
     fn resolve_container_pid(&self, container_id: &str) -> Result<i32, Status> {
         if let Ok(runtime) = runtime_for_container(container_id) {
             return runtime
@@ -383,6 +384,7 @@ impl ArgusdServiceImpl {
     }
 
     /// Build list of path prefixes from watch subjects.
+    #[allow(clippy::result_large_err)]
     fn build_prefixes(
         &self,
         subjects: &[WatchSubject],
@@ -400,8 +402,8 @@ impl ArgusdServiceImpl {
 
         for subject in subjects {
             for path in &subject.paths {
-                let full_path = if path.starts_with('/') {
-                    container_root.join(&path[1..])
+                let full_path = if let Some(stripped) = path.strip_prefix('/') {
+                    container_root.join(stripped)
                 } else {
                     container_root.join(path)
                 };
@@ -689,7 +691,7 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
             let event_type_strings: Vec<String> = req
                 .event_types
                 .iter()
-                .map(|e| inotify_event_to_string(*e as i32))
+                .map(|e| inotify_event_to_string(*e))
                 .filter(|s| !s.is_empty())
                 .collect();
             filter = filter.with_event_types(event_type_strings);
@@ -846,7 +848,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_service_creation() {
-        let service = ArgusdServiceImpl::new("test-node".to_string(), 1000);
+        let service = ArgusdServiceImpl::new("test-node".to_string(), "".to_string(), 1000);
         assert_eq!(service.node_name, "test-node");
         assert_eq!(service.max_watches, 1000);
     }

@@ -7,6 +7,8 @@ interface StreamEvent {
   id: string;
   timestamp: string;
   source: 'argus' | 'janus';
+  /** The name of the ArgusWatcher or JanusGuard that generated this event */
+  resourceName: string;
   eventType: string;
   path: string;
   podName: string;

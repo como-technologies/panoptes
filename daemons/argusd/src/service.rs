@@ -15,6 +15,7 @@
 //! - `UpdateWatch` - Pause or resume an existing watch
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -104,6 +105,20 @@ impl Filterable for FileEvent {
     }
 }
 
+/// Context for event forwarding task.
+///
+/// Contains all the references and metadata needed to forward inotify events
+/// from the watcher to the event broadcaster.
+struct EventForwardingContext {
+    container_id: String,
+    node_name: String,
+    cluster_name: String,
+    /// Container root path (e.g., /proc/{pid}/root) for stripping from event paths.
+    container_root: PathBuf,
+    session: Arc<Mutex<Session<WatchSessionState>>>,
+    broadcaster: EventBroadcaster<FileEvent>,
+}
+
 /// Argusd gRPC service implementation.
 pub struct ArgusdServiceImpl {
     /// Node name.
@@ -157,6 +172,7 @@ impl ArgusdServiceImpl {
     }
 
     /// Resolve container ID to PID using the detected runtime.
+    #[allow(clippy::result_large_err)]
     fn resolve_container_pid(&self, container_id: &str) -> Result<i32, Status> {
         // Try to get runtime for this specific container first
         if let Ok(runtime) = runtime_for_container(container_id) {
@@ -179,6 +195,7 @@ impl ArgusdServiceImpl {
     }
 
     /// Build watch config from proto subjects.
+    #[allow(clippy::result_large_err)]
     fn build_watch_config(
         &self,
         subjects: &[WatchSubject],
@@ -201,8 +218,8 @@ impl ArgusdServiceImpl {
         for subject in subjects {
             for path in &subject.paths {
                 // Resolve path relative to container root
-                let full_path = if path.starts_with('/') {
-                    container_root.join(&path[1..])
+                let full_path = if let Some(stripped) = path.strip_prefix('/') {
+                    container_root.join(stripped)
                 } else {
                     container_root.join(path)
                 };
@@ -238,6 +255,121 @@ impl ArgusdServiceImpl {
             recursive,
             max_depth,
         })
+    }
+
+    /// Spawn the event forwarding task for a watcher.
+    ///
+    /// Creates a background task that receives inotify events and:
+    /// 1. Builds proto FileEvent with full context
+    /// 2. Logs the event to daemon stdout
+    /// 3. Broadcasts to all connected stream clients
+    fn spawn_event_forwarding_task(
+        ctx: EventForwardingContext,
+        mut rx: mpsc::Receiver<NotifyFileEvent>,
+    ) {
+        tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                let session = ctx.session.lock().await;
+                let pod_name = session.pod_name.clone();
+
+                // Strip container root prefix from path to show container-relative path
+                // e.g., /proc/1234/root/etc/hosts -> /etc/hosts
+                let display_path = event
+                    .path
+                    .strip_prefix(&ctx.container_root)
+                    .map(|p| PathBuf::from("/").join(p))
+                    .unwrap_or_else(|_| event.path.clone());
+
+                let proto_event = FileEvent {
+                    timestamp: system_time_to_timestamp(SystemTime::now()),
+                    watcher_name: session.name.clone(),
+                    namespace: session.namespace.clone(),
+                    node_name: ctx.node_name.clone(),
+                    pod_name: pod_name.clone(),
+                    container_id: ctx.container_id.clone(),
+                    event_type: event_type_to_proto(&event.event_type) as i32,
+                    path: display_path.to_string_lossy().to_string(),
+                    filename: event.filename.clone().unwrap_or_default(),
+                    is_directory: event.is_dir,
+                    inode: 0,
+                    tags: HashMap::new(),
+                    process_info: None, // Argus (inotify) doesn't provide process info
+                    cluster_name: ctx.cluster_name.clone(),
+                };
+                drop(session);
+
+                // Log the file event with container-relative path
+                info!(
+                    "<{}> {} '{}' ({}:{})",
+                    event.event_type.as_str().to_uppercase(),
+                    if event.is_dir { "directory" } else { "file" },
+                    display_path.display(),
+                    pod_name,
+                    ctx.node_name
+                );
+
+                // Broadcast to all connected stream clients
+                let _ = ctx.broadcaster.send(proto_event);
+            }
+        });
+    }
+
+    /// Spawn the watcher event loop task.
+    ///
+    /// Creates a background task that runs the inotify event loop,
+    /// forwarding events to the provided channel.
+    fn spawn_watcher_event_loop(
+        watcher_arc: Arc<Mutex<Watcher>>,
+        tx: mpsc::Sender<NotifyFileEvent>,
+    ) {
+        tokio::spawn(async move {
+            let mut watcher = watcher_arc.lock().await;
+            if let Err(e) = watcher.run_event_loop(tx).await {
+                error!(error = %e, "Watcher event loop error");
+            }
+        });
+    }
+
+    /// Register inotify watches synchronously.
+    ///
+    /// Registers watches before returning, ensuring the watcher-wait
+    /// init container can rely on watches_ready=true.
+    ///
+    /// # Returns
+    /// The number of watch descriptors registered, or an error message.
+    async fn register_watches_synchronously(
+        watcher: &mut Watcher,
+        config: &WatchConfig,
+        watch_id: &str,
+        session: &Arc<Mutex<Session<WatchSessionState>>>,
+    ) -> Result<u64, String> {
+        match watcher.add_watches(config) {
+            Ok(wd_count) => {
+                info!(
+                    watch_id = %watch_id,
+                    paths = config.paths.len(),
+                    watch_descriptors = wd_count,
+                    "inotify watches registered SYNCHRONOUSLY"
+                );
+
+                // Mark watches as ready
+                let ready_time = SystemTime::now();
+                {
+                    let mut session_guard = session.lock().await;
+                    session_guard.state.watches_ready = true;
+                    session_guard.state.ready_at = Some(ready_time);
+                    session_guard
+                        .state
+                        .watch_descriptors
+                        .store(wd_count as u64, Ordering::Relaxed);
+                }
+                Ok(wd_count as u64)
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to register inotify watches");
+                Err(e.to_string())
+            }
+        }
     }
 }
 
@@ -383,47 +515,23 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
 
                         match Watcher::with_metrics(self.max_watches, typed_metrics) {
                             Ok(mut watcher) => {
-                                let (tx, mut rx) = mpsc::channel::<NotifyFileEvent>(1000);
+                                let (tx, rx) = mpsc::channel::<NotifyFileEvent>(1000);
 
-                                // SYNCHRONOUS: Register inotify watches BEFORE returning
-                                // This is critical for the hardening pattern - ensures watches
-                                // are active before the watcher-wait init container exits.
-                                match watcher.add_watches(&config) {
-                                    Ok(wd_count) => {
-                                        info!(
-                                            watch_id = %watch_id,
-                                            paths = config.paths.len(),
-                                            watch_descriptors = wd_count,
-                                            "inotify watches registered SYNCHRONOUSLY"
-                                        );
-
-                                        // Mark watches as ready
-                                        let ready_time = SystemTime::now();
-                                        {
-                                            let mut session_guard = session_arc.lock().await;
-                                            session_guard.state.watches_ready = true;
-                                            session_guard.state.ready_at = Some(ready_time);
-                                            session_guard
-                                                .state
-                                                .watch_descriptors
-                                                .store(wd_count as u64, Ordering::Relaxed);
-                                        }
-                                        watches_ready = true;
-                                    }
-                                    Err(e) => {
-                                        warn!(error = %e, "Failed to register inotify watches");
-                                        // watches_ready remains false
-                                    }
+                                // Register inotify watches synchronously
+                                if Self::register_watches_synchronously(
+                                    &mut watcher,
+                                    &config,
+                                    &watch_id,
+                                    &session_arc,
+                                )
+                                .await
+                                .is_ok()
+                                {
+                                    watches_ready = true;
                                 }
 
                                 // Wrap watcher in Arc<Mutex> for shared access (UpdateWatch)
                                 let watcher_arc = Arc::new(Mutex::new(watcher));
-
-                                let broadcaster = self.broadcaster.clone();
-                                let session_clone = session_arc.clone();
-                                let container_id_clone = container_id.clone();
-                                let node_name = req.node_name.clone();
-                                let cluster_name = self.cluster_name.clone();
 
                                 // Store watcher and event_tx in session for UpdateWatch
                                 {
@@ -433,55 +541,30 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
                                     session_guard.state.watch_config = Some(config.clone());
                                 }
 
+                                // Compute container root for path stripping
+                                let container_root = if let Some(ref rt) = self.runtime {
+                                    if let Ok(pid) = self.resolve_container_pid(container_id) {
+                                        rt.resolve_container_root(pid as u32)
+                                    } else {
+                                        PathBuf::new()
+                                    }
+                                } else {
+                                    PathBuf::new()
+                                };
+
                                 // Spawn event forwarding task
-                                tokio::spawn(async move {
-                                    while let Some(event) = rx.recv().await {
-                                        let session = session_clone.lock().await;
-                                        let pod_name = session.pod_name.clone();
-                                        let proto_event = FileEvent {
-                                            timestamp: system_time_to_timestamp(SystemTime::now()),
-                                            watcher_name: session.name.clone(),
-                                            namespace: session.namespace.clone(),
-                                            node_name: node_name.clone(),
-                                            pod_name: pod_name.clone(),
-                                            container_id: container_id_clone.clone(),
-                                            event_type: event_type_to_proto(&event.event_type)
-                                                as i32,
-                                            path: event.path.to_string_lossy().to_string(),
-                                            filename: event.filename.clone().unwrap_or_default(),
-                                            is_directory: event.is_dir,
-                                            inode: 0,
-                                            tags: HashMap::new(),
-                                            // Argus (inotify) doesn't provide process info - only Janus (fanotify) does
-                                            process_info: None,
-                                            // Multi-cluster identification
-                                            cluster_name: cluster_name.clone(),
-                                        };
-                                        drop(session);
+                                let ctx = EventForwardingContext {
+                                    container_id: container_id.clone(),
+                                    node_name: req.node_name.clone(),
+                                    cluster_name: self.cluster_name.clone(),
+                                    container_root,
+                                    session: session_arc.clone(),
+                                    broadcaster: self.broadcaster.clone(),
+                                };
+                                Self::spawn_event_forwarding_task(ctx, rx);
 
-                                        // Log the file event
-                                        info!(
-                                            "<{}> {} '{}' ({}:{})",
-                                            event.event_type.as_str().to_uppercase(),
-                                            if event.is_dir { "directory" } else { "file" },
-                                            event.path.display(),
-                                            pod_name,
-                                            node_name
-                                        );
-
-                                        // Broadcast to all connected stream clients
-                                        let _ = broadcaster.send(proto_event);
-                                    }
-                                });
-
-                                // Spawn watcher event loop task (watches already registered above)
-                                let watcher_task = watcher_arc.clone();
-                                tokio::spawn(async move {
-                                    let mut watcher = watcher_task.lock().await;
-                                    if let Err(e) = watcher.run_event_loop(tx).await {
-                                        error!(error = %e, "Watcher event loop error");
-                                    }
-                                });
+                                // Spawn watcher event loop task
+                                Self::spawn_watcher_event_loop(watcher_arc.clone(), tx);
                             }
                             Err(e) => {
                                 warn!(error = %e, "Failed to create watcher");
@@ -631,7 +714,7 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
             let event_type_strings: Vec<String> = req
                 .event_types
                 .iter()
-                .map(|e| inotify_event_to_string(*e as i32))
+                .map(|e| inotify_event_to_string(*e))
                 .filter(|s| !s.is_empty())
                 .collect();
             filter = filter.with_event_types(event_type_strings);

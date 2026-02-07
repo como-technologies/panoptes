@@ -149,10 +149,8 @@ impl StreamFilter {
         }
 
         // Check event types filter (any match)
-        if !self.event_types.is_empty() {
-            if !self.event_types.contains(&event.filter_event_type()) {
-                return false;
-            }
+        if !self.event_types.is_empty() && !self.event_types.contains(&event.filter_event_type()) {
+            return false;
         }
 
         true
@@ -196,6 +194,7 @@ mod tests {
 
     // Test event type
     #[derive(Clone, Debug)]
+    #[allow(dead_code)]
     struct TestEvent {
         name: String,
         namespace: String,

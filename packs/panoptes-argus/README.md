@@ -25,7 +25,7 @@ Argus is named after **Argus Panoptes**, the 100-eyed giant of Greek mythology w
 After installation, create an ArgusWatcher to monitor files:
 
 ```yaml
-apiVersion: argus.como-technologies.io/v1
+apiVersion: argus.como-technologies.io/v2
 kind: ArgusWatcher
 metadata:
   name: critical-files
@@ -109,17 +109,16 @@ spec:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `argus_events_total` | Counter | Total file events by type |
-| `argus_active_watches` | Gauge | Active inotify watches |
-| `argus_watched_paths_total` | Gauge | Total monitored paths |
-| `argus_event_latency_seconds` | Histogram | Event processing latency |
+| `argus_controller_events_detected_total` | Counter | Total file events by type |
+| `argus_controller_watch_descriptors_total` | Gauge | Active inotify watches |
+| `argus_controller_watched_pods_total` | Gauge | Pods with active watches |
+| `argus_controller_reconcile_duration_seconds` | Histogram | Reconciliation latency |
 
 ## Security Requirements
 
 The argusd daemon requires elevated capabilities:
-- `SYS_ADMIN`: For inotify initialization
-- `SYS_PTRACE`: For /proc access to container PIDs
-- `DAC_READ_SEARCH`: For container filesystem traversal
+- `SYS_PTRACE`: For /proc access to container PIDs (required)
+- `DAC_READ_SEARCH`: For container filesystem traversal (optional)
 
 ## Requirements
 

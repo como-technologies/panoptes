@@ -26,7 +26,7 @@ Janus is named after the **Roman god Janus**, the two-faced deity who could see 
 After installation, create a JanusGuard to audit/enforce file access:
 
 ```yaml
-apiVersion: janus.como-technologies.io/v1
+apiVersion: janus.como-technologies.io/v2
 kind: JanusGuard
 metadata:
   name: sensitive-files
@@ -35,6 +35,7 @@ spec:
   selector:
     matchLabels:
       app: my-app
+  enforcing: true  # Set to false for dry-run mode
   subjects:
     - deny:
         - /etc/shadow
@@ -43,7 +44,7 @@ spec:
         - access
         - open
       audit: true
-      enforcing: true  # Set to false for dry-run mode
+      defaultResponse: deny
       tags:
         severity: critical
         compliance: pci-dss
@@ -97,12 +98,13 @@ spec:
 | `subjects` | []Subject | Access policies |
 | `subjects[].allow` | []string | Paths to allow access |
 | `subjects[].deny` | []string | Paths to deny access |
-| `subjects[].events` | []string | Events: access, open, all |
+| `subjects[].events` | []string | Events: access, open, execute, close, all |
 | `subjects[].audit` | bool | Log access attempts |
-| `subjects[].enforcing` | bool | Block denied access (false = dry-run) |
+| `subjects[].defaultResponse` | string | Action when no rule matches: allow, deny, audit |
 | `subjects[].autoAllowOwner` | bool | Allow file owner access |
 | `subjects[].tags` | map | Custom labels for events |
 | `paused` | bool | Pause guarding without deletion |
+| `enforcing` | bool | Block denied access (false = dry-run) |
 
 ### Status Fields
 
@@ -129,10 +131,11 @@ spec:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `janus_access_events_total` | Counter | Total access events by response |
-| `janus_denied_access_total` | Counter | Denied access attempts |
-| `janus_active_guards` | Gauge | Active fanotify guards |
-| `janus_audit_log_writes_total` | Counter | Kernel audit log writes |
+| `janus_controller_denied_access_total` | Counter | Denied access attempts |
+| `janus_controller_allowed_access_total` | Counter | Allowed access events |
+| `janus_controller_audited_access_total` | Counter | Audited access events |
+| `janus_controller_guarded_pods_total` | Gauge | Pods with active guards |
+| `janus_controller_reconcile_duration_seconds` | Histogram | Reconciliation latency |
 
 ## Security Requirements
 

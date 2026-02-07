@@ -321,7 +321,8 @@ mod tests {
         let (marks, queued) = read_fanotify_limits();
         // May be 0 on systems without fanotify sysctls, but queued should exist
         // on most modern kernels
-        assert!(marks > 0 || queued > 0 || true); // Accept any result
+        // Values may be 0 on systems without fanotify sysctls - just verify it runs
+        let _ = (marks, queued);
     }
 
     #[test]

@@ -421,8 +421,6 @@ mod deduplication_tests {
 
 #[cfg(test)]
 mod audit_logging_tests {
-    use super::*;
-
     /// Audit event types.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum AuditEventType {

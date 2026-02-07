@@ -9,12 +9,9 @@
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 
 use tempfile::TempDir;
-use tokio::sync::mpsc;
-use tokio::time::timeout;
 
 // We need to import from the main crate
 // For integration tests, we test the public API
@@ -92,7 +89,6 @@ mod inotify_tests {
 
         // Modify the file
         let mut file = fs::OpenOptions::new()
-            .write(true)
             .append(true)
             .open(&file_path)
             .expect("Failed to open file");
@@ -284,8 +280,6 @@ mod inotify_tests {
 
 #[cfg(test)]
 mod watch_config_tests {
-    use super::*;
-
     /// Test glob pattern matching for ignore patterns.
     #[test]
     fn test_glob_ignore_patterns() {
@@ -330,8 +324,6 @@ mod watch_config_tests {
 
 #[cfg(test)]
 mod event_processing_tests {
-    use super::*;
-
     /// Event type enumeration matching the daemon's internal representation.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum EventType {
@@ -380,7 +372,7 @@ mod event_processing_tests {
     /// Test event filtering by type.
     #[test]
     fn test_event_filtering() {
-        let allowed_events = vec![EventType::Create, EventType::Delete];
+        let allowed_events = [EventType::Create, EventType::Delete];
 
         let should_include =
             |event_type: EventType| -> bool { allowed_events.contains(&event_type) };

@@ -25,11 +25,9 @@ Panoptes uses multiple layers of cryptographic protection:
 
 All gRPC communication between operators and daemons uses TLS:
 
-```
-┌─────────────────┐          TLS 1.3           ┌─────────────────┐
-│  argus-operator │◄──────────────────────────►│     argusd      │
-│   (client)      │    mTLS optional           │    (server)     │
-└─────────────────┘                            └─────────────────┘
+```mermaid
+flowchart LR
+    AO["argus-operator<br/>(client)"] <-->|"TLS 1.3<br/>mTLS optional"| AD["argusd<br/>(server)"]
 ```
 
 **Configuration:**
@@ -286,29 +284,17 @@ copyleft = "deny"
 
 ### Recommended Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     External Key Management                      │
-│                                                                 │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │  HashiCorp      │  │  AWS KMS /      │  │  Kubernetes     │ │
-│  │  Vault          │  │  GCP KMS        │  │  Secrets        │ │
-│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘ │
-│           │                    │                    │           │
-│           └────────────────────┼────────────────────┘           │
-│                                │                                 │
-│                     ┌──────────▼──────────┐                     │
-│                     │   cert-manager /    │                     │
-│                     │   external-secrets  │                     │
-│                     └──────────┬──────────┘                     │
-│                                │                                 │
-└────────────────────────────────┼────────────────────────────────┘
-                                 │
-                    ┌────────────▼────────────┐
-                    │    Panoptes Daemons     │
-                    │  (keys mounted as       │
-                    │   read-only secrets)    │
-                    └─────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph External["External Key Management"]
+        Vault["HashiCorp<br/>Vault"]
+        KMS["AWS KMS /<br/>GCP KMS"]
+        K8sSecrets["Kubernetes<br/>Secrets"]
+
+        Vault & KMS & K8sSecrets --> CM["cert-manager /<br/>external-secrets"]
+    end
+
+    CM --> Daemons["Panoptes Daemons<br/>(keys mounted as<br/>read-only secrets)"]
 ```
 
 ### Key Rotation

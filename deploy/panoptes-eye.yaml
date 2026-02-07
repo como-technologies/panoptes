@@ -1,0 +1,114 @@
+# Panoptes Eye Dashboard
+# Real-time web interface for monitoring and management
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: panoptes-eye
+  namespace: panoptes-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: panoptes-eye
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces", "nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["argus.como-technologies.io"]
+    resources: ["arguswatchers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["janus.como-technologies.io"]
+    resources: ["janusguards"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: panoptes-eye
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: panoptes-eye
+subjects:
+  - kind: ServiceAccount
+    name: panoptes-eye
+    namespace: panoptes-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: panoptes-eye
+  namespace: panoptes-system
+  labels:
+    app.kubernetes.io/name: panoptes-eye
+    app.kubernetes.io/component: dashboard
+    app.kubernetes.io/part-of: panoptes
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: panoptes-eye
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: panoptes-eye
+        app.kubernetes.io/component: dashboard
+        app.kubernetes.io/part-of: panoptes
+    spec:
+      serviceAccountName: panoptes-eye
+      containers:
+        - name: panoptes-eye
+          image: ghcr.io/como-technologies/panoptes-eye:latest
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: ARGUSD_HOST
+              value: "argusd.panoptes-system.svc.cluster.local:50051"
+            - name: JANUSD_HOST
+              value: "janusd.panoptes-system.svc.cluster.local:50052"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: panoptes-eye
+  namespace: panoptes-system
+  labels:
+    app.kubernetes.io/name: panoptes-eye
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: panoptes-eye

@@ -415,10 +415,21 @@ spec:
     name: v2
     schema:
       openAPIV3Schema:
-        description: |-
-          JanusGuard is the Schema for the janusguards API.
-          It defines file access auditing and control rules for pods matching a selector.
-          This is the v2 API - the current recommended version for new deployments.
+        description: "JanusGuard is the Schema for the janusguards API (short name:
+          jg).\nIt defines file access auditing and enforcement rules using Linux
+          fanotify for pods\nmatching a label selector. The janus-operator watches
+          JanusGuard resources and instructs\nthe janusd daemon on each node to create
+          kernel-level access control marks.\n\nUnlike ArgusWatcher (which detects
+          changes), JanusGuard can actively block file access\nwhen spec.enforcing
+          is true. This makes it suitable for runtime protection scenarios\nlike blocking
+          container runtime socket access or protecting sensitive credentials.\n\nRequires:
+          janusd DaemonSet with CAP_SYS_ADMIN (fanotify), CAP_SYS_PTRACE, CAP_DAC_READ_SEARCH.\nKernel
+          requirements: Linux 5.x+ with fanotify support.\n\nQuick example:\n\n\tkubectl
+          apply -f - <<EOF\n\tapiVersion: janus.panoptes.io/v2\n\tkind: JanusGuard\n\tmetadata:\n\t
+          \ name: block-runtime-sockets\n\tspec:\n\t  enforcing: true\n\t  selector:\n\t
+          \   matchLabels:\n\t      app: my-app\n\t  subjects:\n\t    - deny: [\"/var/run/docker.sock\",
+          \"/run/containerd/containerd.sock\"]\n\t      events: [open, access]\n\t
+          \     tags:\n\t        severity: critical\n\t        compliance: cis-kubernetes\n\tEOF"
         properties:
           apiVersion:
             description: |-
@@ -453,29 +464,38 @@ spec:
                 default: auto
                 description: |-
                   containerRuntime specifies which container runtime to use for PID detection.
-                  Use "auto" to automatically detect the runtime.
+                  "auto" probes for containerd and CRI-O sockets in standard locations.
+                  Set explicitly if auto-detection fails or if using a non-standard socket path.
                 type: string
               enforcing:
                 default: true
                 description: |-
-                  enforcing indicates whether access denials are enforced.
-                  When false, denials are logged but access is allowed (dry-run mode).
+                  enforcing controls whether deny rules actively block file access.
+                  When true (default), denied paths return EACCES to the accessing process.
+                  When false (dry-run mode), denials are logged but access is permitted.
+                  IMPORTANT: Start with enforcing=false in production to validate rules
+                  before enabling enforcement. See docs/guides/enabling-enforcement.md.
                 type: boolean
               logFormat:
                 description: |-
-                  logFormat is the custom log format template for events.
-                  Supports Go template syntax with access to event fields.
+                  logFormat is a custom Go template for formatting event log output.
+                  Available fields: .Event, .Path, .Response, .Timestamp, .Pod, .Node.
+                  Leave empty to use the default structured JSON format.
                 maxLength: 1024
                 type: string
               paused:
                 description: |-
-                  paused indicates whether guarding is paused for this resource.
-                  When true, no access control is enforced but existing guards are maintained.
+                  paused temporarily suspends all access control for this resource.
+                  When true, all fanotify marks are removed and no access control is applied.
+                  Use this during planned maintenance windows or emergency response.
+                  Set back to false to resume guarding.
                 type: boolean
               selector:
                 description: |-
                   selector is the label selector for pods to guard.
-                  Only pods matching this selector will have access control applied.
+                  Only pods matching this selector will have fanotify access control applied.
+                  Use matchLabels for simple key-value matching, or matchExpressions for
+                  set-based requirements. Example: {"matchLabels": {"pci-dss/scope": "in-scope"}}.
                 properties:
                   matchExpressions:
                     description: matchExpressions is a list of label selector requirements.
@@ -523,27 +543,35 @@ spec:
               subjects:
                 description: |-
                   subjects is the list of access control rules to apply.
-                  Each subject defines allow/deny rules for file access.
+                  Each subject defines independent allow/deny rules for file access paths.
+                  Use multiple subjects to apply different policies with different tags.
                 items:
-                  description: JanusGuardSubject defines file access control rules
+                  description: |-
+                    JanusGuardSubject defines file access control rules for a set of paths.
+                    Each subject evaluates deny rules first, then allow rules, then falls back to defaultResponse.
+                    Multiple subjects can target different paths with independent rules and tags.
                   properties:
                     allow:
                       description: |-
                         allow is the list of paths to explicitly allow access to.
                         Paths support glob patterns (e.g., "/app/**", "/etc/*.conf").
+                        Allow rules are evaluated after deny rules; if a path matches both, deny wins.
                       items:
                         type: string
                       maxItems: 100
                       type: array
                     audit:
                       description: |-
-                        audit enables kernel audit log integration.
-                        When true, events are also written to the kernel audit log.
+                        audit enables kernel audit log integration via AUDIT_WRITE.
+                        When true, access events are written to the kernel audit log in addition
+                        to being reported via gRPC. Useful for compliance frameworks requiring
+                        kernel-level audit trails (NIST 800-53 AU-2).
                       type: boolean
                     autoAllowOwner:
                       description: |-
-                        autoAllowOwner automatically allows access for the file owner.
-                        Useful for applications that need to access their own files.
+                        autoAllowOwner automatically allows access when the accessing process UID
+                        matches the file owner UID. Useful for applications that need to read their
+                        own config files or Kubernetes service account tokens.
                       type: boolean
                     defaultResponse:
                       allOf:
@@ -556,13 +584,17 @@ spec:
                         - deny
                         - audit
                       default: audit
-                      description: defaultResponse is the action when no allow/deny
-                        rule matches.
+                      description: |-
+                        defaultResponse is the action taken when a file access matches no allow or deny rule.
+                        "audit" (default) logs without affecting access. "allow" silently permits.
+                        "deny" blocks access (only when spec.enforcing is true).
                       type: string
                     deny:
                       description: |-
-                        deny is the list of paths to explicitly deny access to.
-                        Deny rules take precedence over allow rules.
+                        deny is the list of paths to block access to.
+                        Paths support glob patterns (e.g., "/etc/shadow", "/var/run/docker.sock").
+                        Deny rules take precedence over allow rules. When spec.enforcing is true,
+                        access is blocked with EACCES. When false, access is logged but permitted.
                       items:
                         type: string
                       maxItems: 100
@@ -570,10 +602,13 @@ spec:
                     events:
                       description: |-
                         events is the list of fanotify event types to monitor.
-                        Use "all" to monitor all event types.
+                        Use "all" to monitor all event types. For access control, "open" and "access"
+                        are the most common. "execute" requires kernel 5.0+.
                       items:
-                        description: JanusEvent represents a fanotify event type for
-                          file access auditing
+                        description: |-
+                          JanusEvent represents a Linux fanotify event type for file access auditing.
+                          These map to fanotify_mark(2) event flags. Unlike inotify, fanotify can
+                          block access (when enforcing is true), not just detect it.
                         enum:
                         - access
                         - open
@@ -584,14 +619,16 @@ spec:
                       minItems: 1
                       type: array
                     onlyDir:
-                      description: onlyDir restricts monitoring to directories only.
+                      description: onlyDir restricts fanotify marks to directories
+                        only.
                       type: boolean
                     tags:
                       additionalProperties:
                         type: string
                       description: |-
                         tags are custom key-value metadata attached to events from this subject.
-                        Useful for categorization, compliance tracking, or alert routing.
+                        Useful for compliance tracking (e.g., "compliance": "pci-dss", "severity": "critical"),
+                        alert routing, or categorization in downstream SIEM systems.
                       maxProperties: 20
                       type: object
                   required:

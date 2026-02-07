@@ -246,7 +246,7 @@ impl JanusdServiceImpl {
                 };
 
                 // Convert to Janus event
-                let ebpf_event = EbpfAccessEvent::from(raw_event.clone());
+                let ebpf_event = EbpfAccessEvent::from(raw_event);
 
                 // Look up cached process info (exe, cmdline, cwd, ppid)
                 let cached_process = {
@@ -507,8 +507,8 @@ impl JanusdServiceImpl {
             for subject in subjects {
                 // Allow patterns become watched prefixes
                 for path in &subject.allow {
-                    let full_path = if path.starts_with('/') {
-                        container_root.join(&path[1..])
+                    let full_path = if let Some(stripped) = path.strip_prefix('/') {
+                        container_root.join(stripped)
                     } else {
                         container_root.join(path)
                     };
@@ -517,8 +517,8 @@ impl JanusdServiceImpl {
 
                 // Deny patterns become DENY_PATHS entries
                 for path in &subject.deny {
-                    let full_path = if path.starts_with('/') {
-                        container_root.join(&path[1..])
+                    let full_path = if let Some(stripped) = path.strip_prefix('/') {
+                        container_root.join(stripped)
                     } else {
                         container_root.join(path)
                     };
@@ -839,6 +839,7 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
                 allowed_count: snapshot.events_allowed as i64,
                 audited_count: snapshot.events_audited as i64,
                 event_counts: snapshot.event_counts(),
+                queue_overflows: 0,
             });
 
             total_denied += snapshot.events_denied;

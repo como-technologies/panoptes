@@ -37,11 +37,19 @@ function generateMockEvent(eventId: number): UnifiedEvent {
     'redis-master-0',
   ];
   const actions = ['allowed', 'denied', 'audit', 'detected'] as const;
+  const watchers = ['security-watcher', 'compliance-watcher', 'audit-watcher'];
+  const guards = ['pci-guard', 'hipaa-guard', 'base-security'];
+
+  const source = Math.random() > 0.5 ? 'argus' : 'janus';
+  const resourceName = source === 'argus'
+    ? watchers[Math.floor(Math.random() * watchers.length)]
+    : guards[Math.floor(Math.random() * guards.length)];
 
   return {
     id: `mock-${eventId}`,
     timestamp: new Date().toISOString(),
-    source: Math.random() > 0.5 ? 'argus' : 'janus',
+    source,
+    resourceName,
     eventType: eventTypes[Math.floor(Math.random() * eventTypes.length)],
     path: paths[Math.floor(Math.random() * paths.length)],
     podName: pods[Math.floor(Math.random() * pods.length)],

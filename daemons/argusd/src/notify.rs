@@ -681,10 +681,7 @@ impl Watcher {
     /// watcher-wait init container pattern.
     pub async fn run_event_loop(&mut self, tx: mpsc::Sender<FileEvent>) -> Result<(), NotifyError> {
         let config = self.config.clone().ok_or_else(|| {
-            NotifyError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "no config - call add_watches first",
-            ))
+            NotifyError::Io(std::io::Error::other("no config - call add_watches first"))
         })?;
 
         self.running.store(true, Ordering::SeqCst);
@@ -693,79 +690,8 @@ impl Watcher {
 
         info!(watch_count = self.watches.len(), "Event loop started");
 
-        // Event loop
-        while running.load(Ordering::SeqCst) {
-            // Process any expired move pairs
-            self.emit_expired_moves(&tx).await?;
-
-            match self.inotify.read_events() {
-                Ok(events) => {
-                    let event_count = events.len() as u64;
-
-                    if event_count > 0 {
-                        debug!(event_count = event_count, "Read inotify events");
-                    }
-
-                    for event in events {
-                        debug!(
-                            wd = ?event.wd,
-                            mask = ?event.mask,
-                            cookie = event.cookie,
-                            name = ?event.name,
-                            "Processing inotify event"
-                        );
-
-                        // Handle queue overflow
-                        if event.mask.contains(AddWatchFlags::IN_Q_OVERFLOW) {
-                            warn!("inotify queue overflow detected");
-                            if let Some(ref metrics) = self.metrics {
-                                metrics.record_queue_overflow();
-                            }
-                            self.handle_overflow(&config, &tx).await?;
-                            continue;
-                        }
-
-                        // Handle watch removal (IN_IGNORED)
-                        if event.mask.contains(AddWatchFlags::IN_IGNORED) {
-                            self.handle_watch_removed(event.wd);
-                            continue;
-                        }
-
-                        // Process regular events
-                        if let Some(file_events) = self.process_event(&event) {
-                            for file_event in file_events {
-                                debug!(
-                                    event_type = %file_event.event_type.as_str(),
-                                    path = %file_event.path.display(),
-                                    "Sending file event to channel"
-                                );
-                                if let Some(ref metrics) = self.metrics {
-                                    metrics.record_event_typed(file_event.event_type.as_str());
-                                }
-
-                                if tx.send(file_event).await.is_err() {
-                                    warn!("Event channel closed");
-                                    running.store(false, Ordering::SeqCst);
-                                    break;
-                                }
-                            }
-                        } else {
-                            debug!(wd = ?event.wd, "Event dropped - wd not in watches map");
-                        }
-                    }
-                }
-                Err(nix::Error::EAGAIN) => {
-                    // No events available, sleep briefly
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
-                Err(e) => {
-                    error!(error = %e, "Error reading inotify events");
-                    if let Some(ref metrics) = self.metrics {
-                        metrics.record_error();
-                    }
-                }
-            }
-        }
+        // Run the shared event loop
+        self.event_loop_inner(&config, &tx, &running).await?;
 
         self.state = WatchState::Stopped;
         Ok(())
@@ -816,82 +742,134 @@ impl Watcher {
 
         info!(watch_count = self.watches.len(), "Started watching");
 
-        // Event loop
-        while running.load(Ordering::SeqCst) {
-            // Process any expired move pairs
-            self.emit_expired_moves(&tx).await?;
-
-            match self.inotify.read_events() {
-                Ok(events) => {
-                    let event_count = events.len() as u64;
-
-                    if event_count > 0 {
-                        debug!(event_count = event_count, "Read inotify events");
-                    }
-
-                    for event in events {
-                        debug!(
-                            wd = ?event.wd,
-                            mask = ?event.mask,
-                            cookie = event.cookie,
-                            name = ?event.name,
-                            "Processing inotify event"
-                        );
-
-                        // Handle queue overflow
-                        if event.mask.contains(AddWatchFlags::IN_Q_OVERFLOW) {
-                            warn!("inotify queue overflow detected");
-                            if let Some(ref metrics) = self.metrics {
-                                metrics.record_queue_overflow();
-                            }
-                            self.handle_overflow(&config, &tx).await?;
-                            continue;
-                        }
-
-                        // Handle watch removal (IN_IGNORED)
-                        if event.mask.contains(AddWatchFlags::IN_IGNORED) {
-                            self.handle_watch_removed(event.wd);
-                            continue;
-                        }
-
-                        // Process regular events
-                        if let Some(file_events) = self.process_event(&event) {
-                            for file_event in file_events {
-                                debug!(
-                                    event_type = %file_event.event_type.as_str(),
-                                    path = %file_event.path.display(),
-                                    "Sending file event to channel"
-                                );
-                                if let Some(ref metrics) = self.metrics {
-                                    metrics.record_event_typed(file_event.event_type.as_str());
-                                }
-
-                                if tx.send(file_event).await.is_err() {
-                                    warn!("Event channel closed");
-                                    running.store(false, Ordering::SeqCst);
-                                    break;
-                                }
-                            }
-                        } else {
-                            debug!(wd = ?event.wd, "Event dropped - wd not in watches map");
-                        }
-                    }
-                }
-                Err(nix::Error::EAGAIN) => {
-                    // No events available, sleep briefly
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
-                Err(e) => {
-                    error!(error = %e, "Error reading inotify events");
-                    if let Some(ref metrics) = self.metrics {
-                        metrics.record_error();
-                    }
-                }
-            }
-        }
+        // Run the shared event loop
+        self.event_loop_inner(&config, &tx, &running).await?;
 
         self.state = WatchState::Stopped;
         Ok(())
+    }
+
+    /// Core event loop shared by `watch()` and `run_event_loop()`.
+    ///
+    /// Reads inotify events and dispatches them to the channel until
+    /// the running flag is cleared or the channel closes.
+    async fn event_loop_inner(
+        &mut self,
+        config: &WatchConfig,
+        tx: &mpsc::Sender<FileEvent>,
+        running: &Arc<AtomicBool>,
+    ) -> Result<(), NotifyError> {
+        while running.load(Ordering::SeqCst) {
+            // Process any expired move pairs
+            self.emit_expired_moves(tx).await?;
+
+            // Read and process one batch of events
+            if !self.read_and_dispatch_events(config, tx, running).await? {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    /// Read one batch of inotify events and dispatch to the channel.
+    ///
+    /// Returns `Ok(true)` to continue the loop, `Ok(false)` to stop.
+    async fn read_and_dispatch_events(
+        &mut self,
+        config: &WatchConfig,
+        tx: &mpsc::Sender<FileEvent>,
+        running: &Arc<AtomicBool>,
+    ) -> Result<bool, NotifyError> {
+        match self.inotify.read_events() {
+            Ok(events) => {
+                let event_count = events.len() as u64;
+                if event_count > 0 {
+                    debug!(event_count = event_count, "Read inotify events");
+                }
+
+                for event in events {
+                    if !self
+                        .dispatch_single_event(&event, config, tx, running)
+                        .await?
+                    {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            Err(nix::Error::EAGAIN) => {
+                // No events available, sleep briefly
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                Ok(true)
+            }
+            Err(e) => {
+                error!(error = %e, "Error reading inotify events");
+                if let Some(ref metrics) = self.metrics {
+                    metrics.record_error();
+                }
+                Ok(true)
+            }
+        }
+    }
+
+    /// Dispatch a single inotify event to the channel.
+    ///
+    /// Handles queue overflow, watch removal, and regular file events.
+    /// Returns `Ok(true)` to continue processing, `Ok(false)` if channel closed.
+    async fn dispatch_single_event(
+        &mut self,
+        event: &nix::sys::inotify::InotifyEvent,
+        config: &WatchConfig,
+        tx: &mpsc::Sender<FileEvent>,
+        running: &Arc<AtomicBool>,
+    ) -> Result<bool, NotifyError> {
+        debug!(
+            wd = ?event.wd,
+            mask = ?event.mask,
+            cookie = event.cookie,
+            name = ?event.name,
+            "Processing inotify event"
+        );
+
+        // Handle queue overflow
+        if event.mask.contains(AddWatchFlags::IN_Q_OVERFLOW) {
+            warn!("inotify queue overflow detected");
+            if let Some(ref metrics) = self.metrics {
+                metrics.record_queue_overflow();
+            }
+            self.handle_overflow(config, tx).await?;
+            return Ok(true);
+        }
+
+        // Handle watch removal (IN_IGNORED)
+        if event.mask.contains(AddWatchFlags::IN_IGNORED) {
+            self.handle_watch_removed(event.wd);
+            return Ok(true);
+        }
+
+        // Process regular events
+        if let Some(file_events) = self.process_event(event) {
+            for file_event in file_events {
+                debug!(
+                    event_type = %file_event.event_type.as_str(),
+                    path = %file_event.path.display(),
+                    "Sending file event to channel"
+                );
+                if let Some(ref metrics) = self.metrics {
+                    metrics.record_event_typed(file_event.event_type.as_str());
+                }
+
+                if tx.send(file_event).await.is_err() {
+                    warn!("Event channel closed");
+                    running.store(false, Ordering::SeqCst);
+                    return Ok(false);
+                }
+            }
+        } else {
+            debug!(wd = ?event.wd, "Event dropped - wd not in watches map");
+        }
+
+        Ok(true)
     }
 
     /// Stop watching.
@@ -915,22 +893,17 @@ impl Watcher {
 
         self.state = WatchState::Paused;
 
-        self.config.clone().ok_or_else(|| {
-            NotifyError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "no config stored",
-            ))
-        })
+        self.config
+            .clone()
+            .ok_or_else(|| NotifyError::Io(std::io::Error::other("no config stored")))
     }
 
     /// Resume a paused watcher.
     pub async fn resume(&mut self, tx: mpsc::Sender<FileEvent>) -> Result<(), NotifyError> {
-        let config = self.config.clone().ok_or_else(|| {
-            NotifyError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "no config stored",
-            ))
-        })?;
+        let config = self
+            .config
+            .clone()
+            .ok_or_else(|| NotifyError::Io(std::io::Error::other("no config stored")))?;
 
         // Reinitialize inotify
         self.inotify = Inotify::init(InitFlags::IN_NONBLOCK | InitFlags::IN_CLOEXEC)?;

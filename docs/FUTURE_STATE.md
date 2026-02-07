@@ -766,6 +766,41 @@ The gRPC proto definitions currently use relaxed buf lint rules for pragmatic re
 
 **Trade-off:** Stricter naming improves tooling compatibility and API consistency, but requires updating C++ daemon code that references these types. Consider when doing a major version bump.
 
+### 12. Multi-Guard Policy Consolidation
+
+**Current Limitation:** When multiple JanusGuards watch overlapping paths (e.g., two guards both watching `/etc/shadow`), behavior is undefined:
+
+- Each guard creates its own fanotify file descriptor
+- Kernel permission decisions are consolidated across all groups
+- First guard to respond (ALLOW/DENY) wins the race
+- Other guards never see the event
+- Event attribution only goes to the "winning" guard
+
+**Impact:**
+- Non-deterministic policy enforcement
+- Missing audit trail for guards that lose the race
+- Confusing event attribution in UI
+
+**Potential Solutions:**
+
+1. **Validation Warnings (Low effort)**
+   - Operator detects overlapping guard paths during reconciliation
+   - Emit warning events and status conditions
+   - Doesn't fix the problem but makes it visible
+
+2. **Centralized Policy Engine (Medium effort)**
+   - Single fanotify group per node
+   - All guards contribute rules to a unified policy table
+   - Deterministic evaluation order (most restrictive wins, or explicit priority)
+   - Events attributed to ALL matching guards
+
+3. **Event Fan-out for Audit Mode (Medium effort)**
+   - When a guard responds, janusd broadcasts the event to all guards that would have matched
+   - Only works for audit/logging (can't change permission decision after the fact)
+   - Solves attribution problem, not policy conflict problem
+
+**Recommendation:** Start with validation warnings (option 1), then evaluate need for centralized policy based on user feedback. See [Overlapping Resources Guide](guides/overlapping-resources.md) for current behavior documentation.
+
 ---
 
 ## What We Will NOT Build

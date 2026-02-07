@@ -60,9 +60,11 @@ impl EbpfFileEvent {
     }
 
     /// Convert to proto FileEvent format (V2)
+    #[allow(dead_code)]
     pub fn to_proto(
         &self,
         node_name: &str,
+        cluster_name: &str,
         watcher_name: &str,
         namespace: &str,
         pod_name: &str,
@@ -76,6 +78,7 @@ impl EbpfFileEvent {
             watcher_name: watcher_name.to_string(),
             namespace: namespace.to_string(),
             node_name: node_name.to_string(),
+            cluster_name: cluster_name.to_string(),
             pod_name: pod_name.to_string(),
             container_id: container_id.to_string(),
             event_type: self.to_inotify_event() as i32,
@@ -95,9 +98,11 @@ mod tests {
 
     #[test]
     fn test_ebpf_file_event_from_raw() {
-        let mut raw = FileEvent::default();
-        raw.event_type = FileEventType::Create as u32;
-        raw.pid = 1234;
+        let mut raw = FileEvent {
+            event_type: FileEventType::Create as u32,
+            pid: 1234,
+            ..Default::default()
+        };
 
         // Set path
         let path = b"/etc/passwd";

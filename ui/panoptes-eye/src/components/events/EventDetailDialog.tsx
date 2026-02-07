@@ -100,6 +100,10 @@ export function EventDetailDialog({ event, onClose }: EventDetailDialogProps) {
                 <DetailRow label="Path" value={event.path} mono />
                 <DetailRow label="Event Type" value={event.eventType} />
                 <DetailRow label="Action" value={event.action} />
+                <DetailRow
+                  label={event.source === 'argus' ? 'Watcher' : 'Guard'}
+                  value={event.resourceName}
+                />
                 <DetailRow label="Pod" value={event.podName} />
                 <DetailRow label="Namespace" value={event.namespace} />
                 <DetailRow label="Node" value={event.nodeName} />
@@ -141,6 +145,10 @@ export function EventDetailDialog({ event, onClose }: EventDetailDialogProps) {
               <div className="space-y-1">
                 <DetailRow label="Event ID" value={event.id} mono />
                 <DetailRow label="Source" value={event.source} />
+                <DetailRow
+                  label={event.source === 'argus' ? 'ArgusWatcher' : 'JanusGuard'}
+                  value={event.resourceName}
+                />
                 {event.processInfo && (
                   <>
                     <DetailRow

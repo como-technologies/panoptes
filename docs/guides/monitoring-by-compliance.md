@@ -78,7 +78,7 @@ spec:
 
 ### PCI-DSS Template
 
-Use the pre-built template: [`docs/compliance-templates/pci-dss.yaml`](../compliance-templates/pci-dss.yaml)
+Use the pre-built template: [`deploy/compliance/pci-dss/template.yaml`](../../deploy/compliance/pci-dss/template.yaml)
 
 ---
 
@@ -152,7 +152,7 @@ subjects:
 
 ### HIPAA Template
 
-Use the pre-built template: [`docs/compliance-templates/hipaa.yaml`](../compliance-templates/hipaa.yaml)
+Use the pre-built template: [`deploy/compliance/hipaa/template.yaml`](../../deploy/compliance/hipaa/template.yaml)
 
 ---
 
@@ -228,7 +228,7 @@ subjects:
 
 ### SOC 2 Template
 
-Use the pre-built template: [`docs/compliance-templates/soc2.yaml`](../compliance-templates/soc2.yaml)
+Use the pre-built template: [`deploy/compliance/soc2/template.yaml`](../../deploy/compliance/soc2/template.yaml)
 
 ---
 
@@ -293,7 +293,7 @@ spec:
 
 ### CIS Kubernetes Template
 
-Use the pre-built template: [`docs/compliance-templates/cis-kubernetes.yaml`](../compliance-templates/cis-kubernetes.yaml)
+Use the pre-built template: [`deploy/compliance/cis-kubernetes/template.yaml`](../../deploy/compliance/cis-kubernetes/template.yaml)
 
 ---
 
@@ -376,6 +376,6 @@ The Panoptes Eye dashboard (`/compliance` page) automatically evaluates your cur
 
 ## Related Documentation
 
-- [Compliance Templates](../compliance-templates/README.md)
+- [Compliance Templates](../../deploy/compliance/)
 - [What to Monitor](./what-to-monitor.md)
 - [Quick Start Security](./quick-start-security.md)
