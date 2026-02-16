@@ -15,7 +15,7 @@
 # ============================================================================
 # Stage 1: Chef planner (generates recipe.json for dependency caching)
 # ============================================================================
-FROM rust:1.86-alpine AS planner
+FROM rust:1.93-alpine AS planner
 
 RUN apk add --no-cache musl-dev && cargo install cargo-chef --locked
 
@@ -38,7 +38,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 # ============================================================================
 # Stage 2: Chef cook (builds and caches dependencies)
 # ============================================================================
-FROM rust:1.86-alpine AS cacher
+FROM rust:1.93-alpine AS cacher
 
 ARG TARGETARCH
 
@@ -83,7 +83,7 @@ RUN RUST_TARGET=$(if [ "$TARGETARCH" = "arm64" ]; then echo "aarch64-unknown-lin
 # ============================================================================
 # Stage 3: eBPF bytecode builder (only used when FEATURES contains "ebpf")
 # ============================================================================
-FROM rust:1.86-bookworm AS ebpf-builder
+FROM rust:1.93-bookworm AS ebpf-builder
 
 ARG FEATURES=""
 
@@ -117,7 +117,7 @@ RUN if echo "$FEATURES" | grep -q "ebpf"; then \
 # ============================================================================
 # Stage 4: Userspace binary builder (uses cached dependencies)
 # ============================================================================
-FROM rust:1.86-alpine AS builder
+FROM rust:1.93-alpine AS builder
 
 # Docker provides TARGETARCH (amd64, arm64)
 ARG TARGETARCH

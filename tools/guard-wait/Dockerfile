@@ -9,7 +9,7 @@
 # Size: ~5MB (static musl binary on scratch)
 
 # Build stage
-FROM rust:1.86-alpine AS builder
+FROM rust:1.93-alpine AS builder
 
 # Install musl-dev for static linking and protoc
 RUN apk add --no-cache musl-dev protobuf-dev
