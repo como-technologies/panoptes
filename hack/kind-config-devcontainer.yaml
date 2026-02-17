@@ -1,0 +1,68 @@
+# kind cluster configuration for Panoptes local development (Dev Container)
+# For use inside a VS Code / CLI dev container with Docker-in-Docker.
+#
+# Key differences from pure Linux version:
+# - No /var/run/containerd mount (DinD has no standalone containerd socket;
+#   mounting the nonexistent path shadows the kind node's own socket)
+# - No /proc host mount (devcontainer's /proc is its own, not the real host's)
+#
+# Usage: kind create cluster --name panoptes-dev --config hack/kind-config-devcontainer.yaml
+#   or:  KIND_CONFIG=hack/kind-config-devcontainer.yaml ./hack/local-deploy.sh all
+#
+# Copyright 2026 Como Technologies, LTD
+# Licensed under Apache License 2.0
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+
+name: panoptes-dev
+
+# Multi-node cluster for realistic local testing
+nodes:
+  - role: control-plane
+    # Port mappings for local access (only on control-plane node)
+    extraPortMappings:
+      # Panoptes Eye UI
+      - containerPort: 30080
+        hostPort: 3000
+        protocol: TCP
+      # Prometheus metrics (Argus)
+      - containerPort: 30081
+        hostPort: 8080
+        protocol: TCP
+      # Prometheus metrics (Janus)
+      - containerPort: 30082
+        hostPort: 8081
+        protocol: TCP
+    # Kubeadm configuration for daemon requirements
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            allowed-unsafe-sysctls: "net.*"
+  - role: worker
+  - role: worker
+
+# Networking configuration
+networking:
+  # Use default CNI
+  disableDefaultCNI: false
+  # Pod subnet (default)
+  podSubnet: "10.244.0.0/16"
+  # Service subnet (default)
+  serviceSubnet: "10.96.0.0/12"
+
+# Containerd configuration
+containerdConfigPatches:
+  # Required for cgroup v2 systems (Ubuntu 21.04+, Debian 11+)
+  # Without this, kubelet fails health checks on systemd-based hosts
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+      SystemdCgroup = true
+  # Local registry support
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      [plugins."io.containerd.grpc.v1.cri".registry.mirrors]
+        [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost"]
+          endpoint = ["http://localhost:5000"]

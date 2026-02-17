@@ -21,6 +21,10 @@
   "privileged": true,
   "runArgs": ["--network=host"],
 
+  "containerEnv": {
+    "KIND_CONFIG": "hack/kind-config-devcontainer.yaml"
+  },
+
   "forwardPorts": [3000, 8080, 8081, 50051, 50052],
   "portsAttributes": {
     "3000": { "label": "Panoptes Eye" },

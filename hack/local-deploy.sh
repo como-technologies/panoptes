@@ -17,6 +17,7 @@ IMAGE_VARIANT="${IMAGE_VARIANT:-full}"
 DAEMON_MODE="${DAEMON_MODE:-auto}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+KIND_CONFIG="${KIND_CONFIG:-${SCRIPT_DIR}/kind-config.yaml}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -48,7 +49,7 @@ create_cluster() {
         return 0
     fi
 
-    kind create cluster --name "${CLUSTER_NAME}" --config "${SCRIPT_DIR}/kind-config.yaml"
+    kind create cluster --name "${CLUSTER_NAME}" --config "${KIND_CONFIG}"
 
     # Wait for cluster to be ready
     kubectl wait --for=condition=Ready nodes --all --timeout=120s
@@ -486,6 +487,7 @@ Environment Variables:
     CLUSTER_NAME    Kind cluster name (default: panoptes-dev)
     NAMESPACE       Kubernetes namespace (default: panoptes-system)
     IMAGE_TAG       Container image tag (default: dev)
+    KIND_CONFIG     Path to kind cluster config (default: hack/kind-config.yaml)
     IMAGE_VARIANT   Image variant to build (default: full)
                     full = Both modes + runtime auto-detection (~6-8 MB, FROM scratch)
                     slim = Traditional only, no eBPF (~5-6 MB, FROM scratch)
