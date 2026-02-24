@@ -82,10 +82,10 @@ kubectl exec "$POD" -- bash -c "echo 'backdoor:x:0:0::/root:/bin/bash' >> /etc/p
 kubectl get aw breakout-detection -o wide
 
 # View detection events in operator logs
-kubectl logs -n panoptes-system -l app=argus-operator --tail=30
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argus-operator --tail=30
 
 # View kernel-level events from the daemon
-kubectl logs -n panoptes-system -l app=argusd --tail=30
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd --tail=30
 ```
 
 Expected log events (abbreviated):

@@ -252,12 +252,12 @@ groups:
 
 1. Check which paths are being denied:
    ```bash
-   kubectl logs -n panoptes-system -l app=janusd | grep -i deny
+   kubectl logs -n panoptes-system -l app.kubernetes.io/name=janusd | grep -i deny
    ```
 
 2. Identify the process:
    ```bash
-   kubectl logs -n panoptes-system -l app=janusd | jq 'select(.action=="deny") | {path, process, pid}'
+   kubectl logs -n panoptes-system -l app.kubernetes.io/name=janusd | jq 'select(.action=="deny") | {path, process, pid}'
    ```
 
 3. If legitimate, add to allowlist or disable enforcement temporarily
@@ -271,12 +271,12 @@ groups:
 
 2. Check daemon is running with correct capabilities:
    ```bash
-   kubectl get pods -n panoptes-system -l app=janusd -o yaml | grep -A5 capabilities
+   kubectl get pods -n panoptes-system -l app.kubernetes.io/name=janusd -o yaml | grep -A5 capabilities
    ```
 
 3. Verify fanotify permissions:
    ```bash
-   kubectl exec -n panoptes-system -l app=janusd -- cat /proc/self/status | grep Cap
+   kubectl exec -n panoptes-system -l app.kubernetes.io/name=janusd -- cat /proc/self/status | grep Cap
    ```
 
 ### Performance Impact

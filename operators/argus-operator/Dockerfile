@@ -5,8 +5,8 @@ FROM golang:1.24 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
-# Install buf for proto generation
-RUN curl -sSL "https://github.com/bufbuild/buf/releases/latest/download/buf-Linux-x86_64" -o /usr/local/bin/buf && chmod +x /usr/local/bin/buf
+# Install buf for proto generation (pinned version, multi-arch)
+COPY --from=bufbuild/buf:1.50.0 /usr/local/bin/buf /usr/local/bin/buf
 
 WORKDIR /workspace
 
@@ -44,7 +44,7 @@ COPY operators/argus-operator operators/argus-operator
 WORKDIR /workspace/operators/argus-operator
 # Reconcile dependencies between generated proto and operator
 RUN go mod tidy
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o manager cmd/main.go
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details

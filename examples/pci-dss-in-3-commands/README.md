@@ -96,10 +96,10 @@ kubectl exec "$POD" -- rm -f /var/log/dpkg.log
 kubectl get aw
 
 # View argus operator logs for FIM events
-kubectl logs -n panoptes-system -l app=argus-operator --tail=20
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argus-operator --tail=20
 
 # View argusd daemon logs for kernel-level detections
-kubectl logs -n panoptes-system -l app=argusd --tail=20
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd --tail=20
 ```
 
 Expected output (abbreviated):

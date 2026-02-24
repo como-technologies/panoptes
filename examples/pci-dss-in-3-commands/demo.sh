@@ -2,20 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-NAMESPACE="default"
-PANOPTES_NS="panoptes-system"
-
-# ─── Colors ──────────────────────────────────────────────────────────
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
-
-info()  { echo -e "${CYAN}[INFO]${NC}  $*"; }
-ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-step()  { echo -e "\n${GREEN}=== $* ===${NC}\n"; }
+# shellcheck source=../lib/demo-common.sh
+source "${SCRIPT_DIR}/../lib/demo-common.sh"
 
 # ─── Cleanup ─────────────────────────────────────────────────────────
 cleanup() {
@@ -41,33 +29,13 @@ fi
 # ─── Step 1: Install Panoptes ───────────────────────────────────────
 step "Step 1/5: Installing Panoptes with PCI-DSS compliance enabled"
 
-if helm status panoptes -n "${PANOPTES_NS}" &>/dev/null; then
-    warn "Panoptes is already installed. Skipping Helm install."
-else
-    info "Installing Panoptes via Helm..."
-    helm install panoptes oci://ghcr.io/como-technologies/charts/panoptes \
-        -n "${PANOPTES_NS}" --create-namespace \
-        --set compliance.pciDss.enabled=true \
-        --wait --timeout 120s
-    ok "Panoptes installed."
-fi
-
-info "Waiting for Panoptes pods to be ready..."
-kubectl wait --for=condition=ready pod -l app=argusd -n "${PANOPTES_NS}" --timeout=120s
-kubectl wait --for=condition=ready pod -l app=janusd -n "${PANOPTES_NS}" --timeout=120s
-ok "Panoptes daemons are running."
+panoptes_preflight --helm-set compliance.pciDss.enabled=true
+panoptes_wait_daemons argusd janusd
 
 # ─── Step 2: Deploy payment service ─────────────────────────────────
 step "Step 2/5: Deploying payment-service workload"
 
-kubectl apply -f "${SCRIPT_DIR}/workload.yaml" -n "${NAMESPACE}"
-
-info "Waiting for payment-service to be ready..."
-kubectl wait --for=condition=available deploy/payment-service -n "${NAMESPACE}" --timeout=120s
-ok "payment-service is running."
-
-POD=$(kubectl get pods -l app=payment-service -n "${NAMESPACE}" -o jsonpath='{.items[0].metadata.name}')
-info "Payment service pod: ${POD}"
+demo_deploy "${SCRIPT_DIR}/workload.yaml" "deploy/payment-service" "payment-service"
 
 # ─── Step 3: Verify Panoptes resources ──────────────────────────────
 step "Step 3/5: Verifying PCI-DSS monitoring resources"
@@ -79,8 +47,7 @@ info "JanusGuards:"
 kubectl get jg -n "${NAMESPACE}" 2>/dev/null || kubectl get jg --all-namespaces 2>/dev/null || warn "No JanusGuards found yet (they may be in panoptes-system namespace)"
 
 # Give the daemons a moment to set up watches
-info "Waiting 5 seconds for kernel watches to initialize..."
-sleep 5
+demo_init_watches
 
 # ─── Step 4: Simulate PCI-DSS violations ────────────────────────────
 step "Step 4/5: Simulating PCI-DSS violations"
@@ -116,27 +83,16 @@ ok "Triggered: staging area file creation"
 # ─── Step 5: Show detections ────────────────────────────────────────
 step "Step 5/5: Showing detected events"
 
-info "Waiting 3 seconds for events to propagate..."
-sleep 3
+demo_propagate
 
 info "ArgusWatcher status:"
 kubectl get aw --all-namespaces -o wide 2>/dev/null || true
 
 echo ""
-info "Argus operator logs (last 30 lines):"
-kubectl logs -n "${PANOPTES_NS}" -l app=argus-operator --tail=30 2>/dev/null || warn "Could not retrieve argus-operator logs"
-
-echo ""
-info "argusd daemon logs (last 30 lines):"
-kubectl logs -n "${PANOPTES_NS}" -l app=argusd --tail=30 2>/dev/null || warn "Could not retrieve argusd logs"
-
-echo ""
 info "JanusGuard status:"
 kubectl get jg --all-namespaces -o wide 2>/dev/null || true
 
-echo ""
-info "janusd daemon logs (last 15 lines):"
-kubectl logs -n "${PANOPTES_NS}" -l app=janusd --tail=15 2>/dev/null || warn "Could not retrieve janusd logs"
+panoptes_show_logs --tail 30 argus-operator argusd janusd
 
 # ─── Done ────────────────────────────────────────────────────────────
 step "Demo complete"

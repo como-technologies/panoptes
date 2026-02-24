@@ -85,10 +85,10 @@ kubectl exec "$POD" -- bash -c "echo 'backdoor:x:0:0::/root:/bin/bash' >> /etc/p
 
 ```bash
 # ArgusWatcher events (file modifications)
-kubectl logs -n panoptes-system -l app=argusd --tail=20
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd --tail=20
 
 # JanusGuard events (file access)
-kubectl logs -n panoptes-system -l app=janusd --tail=20
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=janusd --tail=20
 ```
 
 Expected events (abbreviated):

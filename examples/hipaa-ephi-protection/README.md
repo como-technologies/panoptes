@@ -88,10 +88,10 @@ kubectl exec "$POD" -- bash -c "echo 'auth sufficient pam_permit.so' > /etc/pam.
 
 ```bash
 # ArgusWatcher events (file integrity)
-kubectl logs -n panoptes-system -l app=argusd --tail=20
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd --tail=20
 
 # JanusGuard events (access audit)
-kubectl logs -n panoptes-system -l app=janusd --tail=20
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=janusd --tail=20
 ```
 
 Expected log events:

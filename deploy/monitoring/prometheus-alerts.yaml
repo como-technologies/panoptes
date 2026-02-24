@@ -37,7 +37,7 @@ spec:
 
               Immediate actions:
               1. Check for suspicious high-volume file operations
-              2. Review daemon logs: kubectl logs -n panoptes-system -l app=argusd
+              2. Review daemon logs: kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd
               3. Consider increasing max_queued_events: sysctl fs.inotify.max_queued_events
 
               See: docs/operations/kernel-tuning.md
@@ -205,8 +205,8 @@ spec:
               File system changes are NOT being monitored.
 
               Actions:
-              1. Check daemon status: kubectl get pods -n panoptes-system -l app=argusd
-              2. Check daemon logs: kubectl logs -n panoptes-system -l app=argusd
+              1. Check daemon status: kubectl get pods -n panoptes-system -l app.kubernetes.io/name=argusd
+              2. Check daemon logs: kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd
               3. Check node status
 
         - alert: PanoptesJanusdDown
@@ -222,8 +222,8 @@ spec:
               Access policies are NOT being enforced (if enforcement was enabled).
 
               Actions:
-              1. Check daemon status: kubectl get pods -n panoptes-system -l app=janusd
-              2. Check daemon logs: kubectl logs -n panoptes-system -l app=janusd
+              1. Check daemon status: kubectl get pods -n panoptes-system -l app.kubernetes.io/name=janusd
+              2. Check daemon logs: kubectl logs -n panoptes-system -l app.kubernetes.io/name=janusd
               3. Check node status
 
         # WARNING: Daemon restart

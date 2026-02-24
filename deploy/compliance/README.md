@@ -254,7 +254,7 @@ kubectl get janusguard pci-dss-access -o jsonpath='{.spec.enforcing}'
 **Step 2: Monitor for 1-2 weeks**
 ```bash
 # Watch for would-be violations
-kubectl logs -n panoptes-system -l app=janusd -f | grep -i "audit\|deny"
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=janusd -f | grep -i "audit\|deny"
 
 # Check the Panoptes UI for events
 kubectl port-forward -n panoptes-system svc/panoptes-eye 3000:3000

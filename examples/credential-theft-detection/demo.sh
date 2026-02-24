@@ -2,20 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-NAMESPACE="default"
-PANOPTES_NS="panoptes-system"
-
-# ─── Colors ──────────────────────────────────────────────────────────
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-
-info()  { echo -e "${CYAN}[INFO]${NC}  $*"; }
-ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-step()  { echo -e "\n${GREEN}=== $* ===${NC}\n"; }
+# shellcheck source=../lib/demo-common.sh
+source "${SCRIPT_DIR}/../lib/demo-common.sh"
 
 # ─── Cleanup ─────────────────────────────────────────────────────────
 cleanup() {
@@ -34,41 +22,18 @@ if [[ "${1:-}" == "--cleanup" ]]; then
 fi
 
 # ─── Pre-flight check ───────────────────────────────────────────────
-step "Pre-flight: Checking Panoptes installation"
-
-if ! kubectl get namespace "${PANOPTES_NS}" &>/dev/null; then
-    warn "Panoptes namespace '${PANOPTES_NS}' not found."
-    info "Installing Panoptes..."
-    helm install panoptes oci://ghcr.io/como-technologies/charts/panoptes \
-        -n "${PANOPTES_NS}" --create-namespace \
-        --wait --timeout 120s
-    ok "Panoptes installed."
-else
-    ok "Panoptes namespace exists."
-fi
-
-info "Waiting for Panoptes daemons to be ready..."
-kubectl wait --for=condition=ready pod -l app=argusd -n "${PANOPTES_NS}" --timeout=120s
-kubectl wait --for=condition=ready pod -l app=janusd -n "${PANOPTES_NS}" --timeout=120s
-ok "Panoptes daemons are running."
+panoptes_preflight
+panoptes_wait_daemons argusd janusd
 
 # ─── Step 1: Deploy workload with monitoring ─────────────────────────
 step "Step 1/4: Deploying target workload with ArgusWatcher and JanusGuard"
 
-kubectl apply -f "${SCRIPT_DIR}/attacker-simulation.yaml" -n "${NAMESPACE}"
-
-info "Waiting for target-workload to be ready..."
-kubectl wait --for=condition=available deploy/target-workload -n "${NAMESPACE}" --timeout=120s
-ok "target-workload is running."
-
-POD=$(kubectl get pods -l app=target-workload -n "${NAMESPACE}" -o jsonpath='{.items[0].metadata.name}')
-info "Target pod: ${POD}"
+demo_deploy "${SCRIPT_DIR}/attacker-simulation.yaml" "deploy/target-workload" "target-workload"
 
 # ─── Step 2: Verify monitoring ──────────────────────────────────────
 step "Step 2/4: Verifying credential monitoring is active"
 
-info "Waiting 5 seconds for kernel watches to initialize..."
-sleep 5
+demo_init_watches
 
 info "ArgusWatcher (file modification detection):"
 kubectl get aw credential-fim -n "${NAMESPACE}" -o wide 2>/dev/null || warn "ArgusWatcher not yet visible"
@@ -124,23 +89,16 @@ ok "Created: /root/.aws/credentials"
 # ─── Step 4: Show detections ────────────────────────────────────────
 step "Step 4/4: Showing detected credential theft events"
 
-info "Waiting 3 seconds for events to propagate..."
-sleep 3
+demo_propagate
 
 info "ArgusWatcher status (modification detection):"
 kubectl get aw credential-fim -n "${NAMESPACE}" -o wide 2>/dev/null || true
 
 echo ""
-info "argusd logs -- file modification events (last 25 lines):"
-kubectl logs -n "${PANOPTES_NS}" -l app=argusd --tail=25 2>/dev/null || warn "Could not retrieve argusd logs"
-
-echo ""
 info "JanusGuard status (access auditing):"
 kubectl get jg credential-access -n "${NAMESPACE}" -o wide 2>/dev/null || true
 
-echo ""
-info "janusd logs -- access audit events (last 20 lines):"
-kubectl logs -n "${PANOPTES_NS}" -l app=janusd --tail=20 2>/dev/null || warn "Could not retrieve janusd logs"
+panoptes_show_logs --tail 25 argusd janusd
 
 # ─── Done ────────────────────────────────────────────────────────────
 step "Demo complete"

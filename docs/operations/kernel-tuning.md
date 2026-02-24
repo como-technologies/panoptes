@@ -247,7 +247,7 @@ rm -rf $TEST_DIR
 
 ```bash
 # Watch argusd event processing rate
-kubectl logs -n panoptes-system -l app=argusd -f | \
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd -f | \
   pv -l -i 5 -r > /dev/null
 ```
 
@@ -281,7 +281,7 @@ echo 524288 > /proc/sys/fs/inotify/max_user_watches
 Check for `IN_Q_OVERFLOW` in daemon logs:
 
 ```bash
-kubectl logs -n panoptes-system -l app=argusd | grep -i overflow
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd | grep -i overflow
 ```
 
 If overflows are occurring:
@@ -294,10 +294,10 @@ If overflows are occurring:
 
 ```bash
 # Check capabilities
-kubectl exec -n panoptes-system -l app=janusd -- capsh --print
+kubectl exec -n panoptes-system -l app.kubernetes.io/name=janusd -- capsh --print
 
 # Verify fanotify access
-kubectl exec -n panoptes-system -l app=janusd -- cat /proc/self/status | grep Cap
+kubectl exec -n panoptes-system -l app.kubernetes.io/name=janusd -- cat /proc/self/status | grep Cap
 ```
 
 Required capabilities in hex:

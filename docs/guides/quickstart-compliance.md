@@ -263,7 +263,7 @@ curl http://argus-operator:8080/metrics | grep argus_watcher
 
 ```bash
 # Export recent events from daemon logs (if using centralized logging)
-kubectl logs -l app=argusd --tail=100 > evidence-event-sample.log
+kubectl logs -l app.kubernetes.io/name=argusd --tail=100 > evidence-event-sample.log
 ```
 
 **What to highlight:**
@@ -358,7 +358,7 @@ kubectl label pod <pod-name> pci-dss/scope=in-scope
 **Fix:**
 ```bash
 # Check daemon logs
-kubectl logs -l app=argusd
+kubectl logs -l app.kubernetes.io/name=argusd
 
 # Common issues:
 # - inotify watch limit exceeded (increase fs.inotify.max_user_watches)
@@ -378,7 +378,7 @@ kubectl logs -l app=argusd
 kubectl exec <pod-name> -- touch /etc/test-fim-event
 
 # Check daemon received it
-kubectl logs -l app=argusd --tail=50 | grep test-fim-event
+kubectl logs -l app.kubernetes.io/name=argusd --tail=50 | grep test-fim-event
 ```
 
 ## Deep Dive Resources

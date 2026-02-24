@@ -17,7 +17,8 @@
 # ============================================================================
 FROM rust:1.93-alpine AS planner
 
-RUN apk add --no-cache musl-dev && cargo install cargo-chef --locked
+COPY --from=lukemathwalker/cargo-chef:latest-rust-1.93.1-alpine /usr/local/cargo/bin/cargo-chef /usr/local/cargo/bin/cargo-chef
+RUN apk add --no-cache musl-dev
 
 WORKDIR /build
 
@@ -42,8 +43,8 @@ FROM rust:1.93-alpine AS cacher
 
 ARG TARGETARCH
 
+COPY --from=lukemathwalker/cargo-chef:latest-rust-1.93.1-alpine /usr/local/cargo/bin/cargo-chef /usr/local/cargo/bin/cargo-chef
 RUN apk add --no-cache musl-dev protobuf-dev && \
-    cargo install cargo-chef --locked && \
     if [ "$TARGETARCH" = "arm64" ]; then \
       rustup target add aarch64-unknown-linux-musl; \
     else \

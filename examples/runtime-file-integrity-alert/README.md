@@ -76,7 +76,7 @@ kubectl exec "$POD" -- sh -c "echo '<h1>HACKED</h1>' > /usr/share/nginx/html/ind
 kubectl get aw nginx-fim -o wide
 
 # View detection events
-kubectl logs -n panoptes-system -l app=argusd --tail=20
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd --tail=20
 ```
 
 Expected log events:

@@ -606,8 +606,8 @@ kubectl delete pod test-injection -n default
 2. **Check daemon connectivity**:
    ```bash
    # Verify daemon pods are running
-   kubectl get pods -n panoptes-system -l app=argusd
-   kubectl get pods -n panoptes-system -l app=janusd
+   kubectl get pods -n panoptes-system -l app.kubernetes.io/name=argusd
+   kubectl get pods -n panoptes-system -l app.kubernetes.io/name=janusd
 
    # Check daemon service
    kubectl get svc -n panoptes-system | grep -E "(argusd|janusd)"

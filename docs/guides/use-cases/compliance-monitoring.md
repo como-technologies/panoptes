@@ -269,7 +269,7 @@ Common false positives and how to handle:
 
 3. **Check daemon logs:**
    ```bash
-   kubectl logs -n panoptes-system -l app=argusd --tail=50
+   kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd --tail=50
    ```
 
 ### Too Many Events

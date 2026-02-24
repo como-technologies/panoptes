@@ -357,7 +357,7 @@ When a critical event is detected:
 kubectl annotate pod $COMPROMISED_POD kubernetes.io/ingress-bandwidth=1
 
 # Get all events for the pod
-kubectl logs -n panoptes-system -l app=argusd | grep $COMPROMISED_POD
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd | grep $COMPROMISED_POD
 
 # Export for forensics
 curl "http://localhost:3000/api/events?pod=$COMPROMISED_POD" > incident-events.json
@@ -406,7 +406,7 @@ curl "http://localhost:3000/api/events?pod=$COMPROMISED_POD" > incident-events.j
 
 Process attribution depends on the kernel and container runtime. Check:
 ```bash
-kubectl logs -n panoptes-system -l app=argusd | grep "process"
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd | grep "process"
 ```
 
 ---

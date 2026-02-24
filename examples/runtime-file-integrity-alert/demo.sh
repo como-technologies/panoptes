@@ -2,19 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-NAMESPACE="default"
-PANOPTES_NS="panoptes-system"
-
-# ─── Colors ──────────────────────────────────────────────────────────
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-
-info()  { echo -e "${CYAN}[INFO]${NC}  $*"; }
-ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-step()  { echo -e "\n${GREEN}=== $* ===${NC}\n"; }
+# shellcheck source=../lib/demo-common.sh
+source "${SCRIPT_DIR}/../lib/demo-common.sh"
 
 # ─── Cleanup ─────────────────────────────────────────────────────────
 cleanup() {
@@ -33,40 +22,18 @@ if [[ "${1:-}" == "--cleanup" ]]; then
 fi
 
 # ─── Pre-flight check ───────────────────────────────────────────────
-step "Pre-flight: Checking Panoptes installation"
-
-if ! kubectl get namespace "${PANOPTES_NS}" &>/dev/null; then
-    warn "Panoptes namespace '${PANOPTES_NS}' not found."
-    info "Installing Panoptes..."
-    helm install panoptes oci://ghcr.io/como-technologies/charts/panoptes \
-        -n "${PANOPTES_NS}" --create-namespace \
-        --wait --timeout 120s
-    ok "Panoptes installed."
-else
-    ok "Panoptes namespace exists."
-fi
-
-info "Waiting for argusd to be ready..."
-kubectl wait --for=condition=ready pod -l app=argusd -n "${PANOPTES_NS}" --timeout=120s
-ok "argusd is running."
+panoptes_preflight
+panoptes_wait_daemons argusd
 
 # ─── Step 1: Deploy nginx with monitoring ────────────────────────────
 step "Step 1/4: Deploying nginx with ArgusWatcher"
 
-kubectl apply -f "${SCRIPT_DIR}/nginx-monitored.yaml" -n "${NAMESPACE}"
-
-info "Waiting for nginx-monitored to be ready..."
-kubectl wait --for=condition=available deploy/nginx-monitored -n "${NAMESPACE}" --timeout=120s
-ok "nginx-monitored is running."
-
-POD=$(kubectl get pods -l app=nginx-monitored -n "${NAMESPACE}" -o jsonpath='{.items[0].metadata.name}')
-info "Monitored pod: ${POD}"
+demo_deploy "${SCRIPT_DIR}/nginx-monitored.yaml" "deploy/nginx-monitored" "nginx-monitored"
 
 # ─── Step 2: Verify monitoring ──────────────────────────────────────
 step "Step 2/4: Verifying ArgusWatcher is active"
 
-info "Waiting 5 seconds for kernel watches to initialize..."
-sleep 5
+demo_init_watches
 
 kubectl get aw nginx-fim -n "${NAMESPACE}" -o wide 2>/dev/null || warn "ArgusWatcher not yet visible"
 
@@ -104,19 +71,12 @@ ok "Created /usr/share/nginx/html/shell.php"
 # ─── Step 4: Show detections ────────────────────────────────────────
 step "Step 4/4: Showing detected events"
 
-info "Waiting 3 seconds for events to propagate..."
-sleep 3
+demo_propagate
 
 info "ArgusWatcher status:"
 kubectl get aw nginx-fim -n "${NAMESPACE}" -o wide 2>/dev/null || true
 
-echo ""
-info "argusd daemon logs (last 25 lines):"
-kubectl logs -n "${PANOPTES_NS}" -l app=argusd --tail=25 2>/dev/null || warn "Could not retrieve argusd logs"
-
-echo ""
-info "Argus operator logs (last 15 lines):"
-kubectl logs -n "${PANOPTES_NS}" -l app=argus-operator --tail=15 2>/dev/null || warn "Could not retrieve argus-operator logs"
+panoptes_show_logs --tail 25 argusd argus-operator
 
 # ─── Done ────────────────────────────────────────────────────────────
 step "Demo complete"

@@ -67,7 +67,7 @@ kubectl apply -f deploy/compliance/pci-dss/template.yaml
 kubectl exec test-pod -- touch /tmp/test-staging
 
 # Verify event appears in UI or logs
-kubectl logs -n panoptes-system -l app=argusd | grep staging
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd | grep staging
 ```
 
 ---
@@ -129,7 +129,7 @@ kubectl apply -f deploy/compliance/pci-dss/template.yaml
 kubectl exec test-pod -- touch /usr/lib/test.so
 
 # Verify event
-kubectl logs -n panoptes-system -l app=argusd | grep library
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd | grep library
 ```
 
 ---
@@ -171,7 +171,7 @@ kubectl logs -n panoptes-system -l app=argusd | grep library
 **Test:**
 ```bash
 kubectl exec test-pod -- sh -c 'echo "# test" >> /root/.bashrc'
-kubectl logs -n panoptes-system -l app=argusd | grep shell
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd | grep shell
 ```
 
 ---

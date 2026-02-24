@@ -2,20 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-NAMESPACE="default"
-PANOPTES_NS="panoptes-system"
-
-# ─── Colors ──────────────────────────────────────────────────────────
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-
-info()  { echo -e "${CYAN}[INFO]${NC}  $*"; }
-ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-step()  { echo -e "\n${GREEN}=== $* ===${NC}\n"; }
+# shellcheck source=../lib/demo-common.sh
+source "${SCRIPT_DIR}/../lib/demo-common.sh"
 
 # ─── Cleanup ─────────────────────────────────────────────────────────
 cleanup() {
@@ -41,33 +29,13 @@ fi
 # ─── Step 1: Install Panoptes with HIPAA compliance ─────────────────
 step "Step 1/5: Installing Panoptes with HIPAA compliance enabled"
 
-if helm status panoptes -n "${PANOPTES_NS}" &>/dev/null; then
-    warn "Panoptes is already installed. Skipping Helm install."
-else
-    info "Installing Panoptes with HIPAA compliance..."
-    helm install panoptes oci://ghcr.io/como-technologies/charts/panoptes \
-        -n "${PANOPTES_NS}" --create-namespace \
-        --set compliance.hipaa.enabled=true \
-        --wait --timeout 120s
-    ok "Panoptes installed with HIPAA compliance."
-fi
-
-info "Waiting for Panoptes daemons to be ready..."
-kubectl wait --for=condition=ready pod -l app=argusd -n "${PANOPTES_NS}" --timeout=120s
-kubectl wait --for=condition=ready pod -l app=janusd -n "${PANOPTES_NS}" --timeout=120s
-ok "Panoptes daemons are running."
+panoptes_preflight --helm-set compliance.hipaa.enabled=true
+panoptes_wait_daemons argusd janusd
 
 # ─── Step 2: Deploy ePHI workload ───────────────────────────────────
 step "Step 2/5: Deploying ePHI database workload"
 
-kubectl apply -f "${SCRIPT_DIR}/ephi-workload.yaml" -n "${NAMESPACE}"
-
-info "Waiting for ephi-database to be ready..."
-kubectl wait --for=condition=available deploy/ephi-database -n "${NAMESPACE}" --timeout=180s
-ok "ephi-database is running."
-
-POD=$(kubectl get pods -l app=ephi-database -n "${NAMESPACE}" -o jsonpath='{.items[0].metadata.name}')
-info "ePHI database pod: ${POD}"
+demo_deploy "${SCRIPT_DIR}/ephi-workload.yaml" "deploy/ephi-database" "ephi-database" --timeout 180s
 
 # Give postgres time to initialize
 info "Waiting 10 seconds for PostgreSQL to complete initialization..."
@@ -82,8 +50,7 @@ kubectl get aw -l compliance=hipaa --all-namespaces 2>/dev/null || kubectl get a
 info "JanusGuards with HIPAA label:"
 kubectl get jg -l compliance=hipaa --all-namespaces 2>/dev/null || kubectl get jg --all-namespaces 2>/dev/null || warn "No JanusGuards found"
 
-info "Waiting 5 seconds for kernel watches to initialize..."
-sleep 5
+demo_init_watches
 
 # ─── Step 4: Simulate ePHI violations ───────────────────────────────
 step "Step 4/5: Simulating HIPAA violations"
@@ -133,23 +100,16 @@ ok "Triggered: SSL key file creation"
 # ─── Step 5: Show detections ────────────────────────────────────────
 step "Step 5/5: Showing HIPAA audit trail"
 
-info "Waiting 3 seconds for events to propagate..."
-sleep 3
+demo_propagate
 
 info "ArgusWatcher status (file integrity):"
 kubectl get aw --all-namespaces -o wide 2>/dev/null || true
 
 echo ""
-info "argusd daemon logs (file integrity events, last 30 lines):"
-kubectl logs -n "${PANOPTES_NS}" -l app=argusd --tail=30 2>/dev/null || warn "Could not retrieve argusd logs"
-
-echo ""
 info "JanusGuard status (access control):"
 kubectl get jg --all-namespaces -o wide 2>/dev/null || true
 
-echo ""
-info "janusd daemon logs (access audit events, last 15 lines):"
-kubectl logs -n "${PANOPTES_NS}" -l app=janusd --tail=15 2>/dev/null || warn "Could not retrieve janusd logs"
+panoptes_show_logs --tail 30 argusd janusd
 
 # ─── Done ────────────────────────────────────────────────────────────
 step "Demo complete"
@@ -167,7 +127,7 @@ ${GREEN}HIPAA violations detected:${NC}
 ${GREEN}For HIPAA auditors:${NC}
   - Every event is tagged with the HIPAA requirement ID
   - Events include timestamps, pod names, and file paths
-  - Export audit trail: kubectl logs -n ${PANOPTES_NS} -l app=argusd > audit.log
+  - Export audit trail: kubectl logs -n ${PANOPTES_NS} -l app.kubernetes.io/name=argusd > audit.log
   - HIPAA requires 6 years of audit log retention
 
 ${YELLOW}To clean up:${NC}

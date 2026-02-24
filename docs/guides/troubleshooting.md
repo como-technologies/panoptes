@@ -490,12 +490,12 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app: argusd
+      app.kubernetes.io/name: argusd
   ingress:
   - from:
     - podSelector:
         matchLabels:
-          app: argus-operator
+          app.kubernetes.io/name: argus-operator
     ports:
     - protocol: TCP
       port: 50051
@@ -730,7 +730,7 @@ kubectl get all -n panoptes-system
 kubectl get pods -n panoptes-system -o wide
 
 # Daemon status on each node
-kubectl get pods -n panoptes-system -l app=argusd -o wide
+kubectl get pods -n panoptes-system -l app.kubernetes.io/name=argusd -o wide
 
 # Operator status
 kubectl get deploy -n panoptes-system
@@ -756,7 +756,7 @@ kubectl logs -n panoptes-system deploy/argus-operator -f
 kubectl logs -n panoptes-system deploy/janus-operator -f
 
 # Follow daemon logs (all pods)
-kubectl logs -n panoptes-system -l app=argusd -f --all-containers=true
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd -f --all-containers=true
 
 # Specific daemon pod
 kubectl logs -n panoptes-system <pod-name> -f
@@ -873,7 +873,7 @@ If you're still experiencing issues after trying these troubleshooting steps:
    ```bash
    # Dump all relevant information
    kubectl get all,aw,jg -A -o yaml > panoptes-state.yaml
-   kubectl logs -n panoptes-system -l app=argusd --tail=1000 > argusd-logs.txt
+   kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd --tail=1000 > argusd-logs.txt
    kubectl logs -n panoptes-system deploy/argus-operator --tail=1000 > operator-logs.txt
    kubectl describe nodes > nodes.txt
    ```

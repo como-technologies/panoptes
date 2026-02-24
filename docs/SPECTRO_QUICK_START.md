@@ -433,7 +433,7 @@ kubectl describe daemonset -n panoptes-system argusd
 kubectl get arguswatcher critical-files -o jsonpath='{.status}'
 
 # Check daemon logs
-kubectl logs -n panoptes-system -l app=argusd
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd
 
 # Ensure pods have the correct label
 kubectl get pods -l panoptes.como-technologies.io/monitored=true

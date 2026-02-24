@@ -206,7 +206,7 @@ kubectl patch arguswatcher quick-start-fim --type=json -p='[
 | `kubectl get aw` | List ArgusWatchers |
 | `kubectl get jg` | List JanusGuards |
 | `kubectl describe aw <name>` | View ArgusWatcher details |
-| `kubectl logs -n panoptes-system -l app=argusd` | View daemon logs |
+| `kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd` | View daemon logs |
 
 ## Related Documentation
 

@@ -57,6 +57,8 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ matrix.operator }}-controller:${{ steps.version.outputs.VERSION }}
             ${{ env.REGISTRY }}/${{ matrix.operator }}-controller:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   release-daemons:
     name: Release Daemons
@@ -95,6 +97,8 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ matrix.daemon }}:${{ steps.version.outputs.VERSION }}
             ${{ env.REGISTRY }}/${{ matrix.daemon }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   release-dashboard:
     name: Release Dashboard
@@ -130,6 +134,8 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/panoptes-eye:${{ steps.version.outputs.VERSION }}
             ${{ env.REGISTRY }}/panoptes-eye:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   release-helm:
     name: Release Helm Charts

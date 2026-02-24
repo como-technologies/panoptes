@@ -24,12 +24,15 @@ env:
   REGISTRY: ghcr.io/${{ github.repository_owner }}
 
 jobs:
-  build-argusd:
-    name: Build Argusd
+  lint-daemons:
+    name: Lint ${{ matrix.daemon }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        daemon: [argusd, janusd]
     defaults:
       run:
-        working-directory: daemons/argusd
+        working-directory: daemons/${{ matrix.daemon }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,7 +46,7 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: daemons/argusd
+          workspaces: daemons/${{ matrix.daemon }}
 
       - name: Install protoc
         run: |
@@ -56,18 +59,15 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Build
-        run: cargo build --release
-
-      - name: Run tests
-        run: cargo test
-
-  build-janusd:
-    name: Build Janusd
+  test-daemons:
+    name: Test ${{ matrix.daemon }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        daemon: [argusd, janusd]
     defaults:
       run:
-        working-directory: daemons/janusd
+        working-directory: daemons/${{ matrix.daemon }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -76,26 +76,16 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          components: clippy, rustfmt
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: daemons/janusd
+          workspaces: daemons/${{ matrix.daemon }}
 
       - name: Install protoc
         run: |
           sudo apt-get update
           sudo apt-get install -y protobuf-compiler
-
-      - name: Check formatting
-        run: cargo fmt --check
-
-      - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Build
-        run: cargo build --release
 
       - name: Run tests
         run: cargo test
@@ -103,7 +93,7 @@ jobs:
   docker-argusd:
     name: Docker Argusd
     runs-on: ubuntu-latest
-    needs: [build-argusd]
+    needs: [lint-daemons, test-daemons]
     if: github.event_name == 'push'
     steps:
       - name: Checkout
@@ -141,7 +131,7 @@ jobs:
   docker-janusd:
     name: Docker Janusd
     runs-on: ubuntu-latest
-    needs: [build-janusd]
+    needs: [lint-daemons, test-daemons]
     if: github.event_name == 'push'
     steps:
       - name: Checkout

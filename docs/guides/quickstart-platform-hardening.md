@@ -296,7 +296,7 @@ kubectl get aw cis-k8s-control-plane -o jsonpath='{.status.eventsDetected}' && e
 
 View detailed event logs:
 ```bash
-kubectl logs -n panoptes-system -l app=argusd | grep -i manifests
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd | grep -i manifests
 ```
 
 ### Test Runtime Socket Enforcement
@@ -317,7 +317,7 @@ kubectl get jg cis-k8s-secrets -o jsonpath='{.status.totalDeniedEvents}' && echo
 
 View denied events:
 ```bash
-kubectl logs -n panoptes-system -l app=janusd | grep -i "runtime-socket"
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=janusd | grep -i "runtime-socket"
 ```
 
 ### Test System Binary Protection
@@ -636,7 +636,7 @@ POD=$(kubectl get pods -l cis/scope=kubernetes-audit -o name | head -1)
 kubectl exec $POD -- ls -la /etc/kubernetes/manifests
 
 # Check daemon logs
-kubectl logs -n panoptes-system -l app=argusd
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd
 ```
 
 ### Access Not Being Blocked
@@ -657,7 +657,7 @@ kubectl get jg -o jsonpath='{.items[*].spec.enforcing}' && echo
 kubectl get jg cis-k8s-secrets -o yaml
 
 # Check daemon logs for decision reasoning
-kubectl logs -n panoptes-system -l app=janusd | grep -A 5 "decision"
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=janusd | grep -A 5 "decision"
 ```
 
 ### High CPU Usage
@@ -672,7 +672,7 @@ kubectl logs -n panoptes-system -l app=janusd | grep -A 5 "decision"
 **Resolution:**
 ```bash
 # Check event rate
-kubectl logs -n panoptes-system -l app=argusd | grep -i "events/sec"
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd | grep -i "events/sec"
 
 # Add ignore patterns for noisy paths
 # Example: ignore log rotations, cache files, temporary files
@@ -699,7 +699,7 @@ sysctl -w fs.inotify.max_queued_events=131072
 kubectl top pods --sort-by=cpu
 
 # Review event sources
-kubectl logs -n panoptes-system -l app=argusd | grep -i overflow -A 10
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd | grep -i overflow -A 10
 ```
 
 ## Next Steps

@@ -10,9 +10,10 @@
 SHELL := /bin/bash
 PACKS := panoptes panoptes-argus panoptes-janus
 DIST_DIR := dist
+CHARTS_DIR := ../charts
 VERSION := 2.0.0
 
-.PHONY: all package validate push clean help
+.PHONY: all sync package validate push clean help
 
 all: package validate
 
@@ -23,10 +24,25 @@ $(DIST_DIR):
 	mkdir -p $(DIST_DIR)
 
 # ============================================================
+# Sync charts from canonical source
+# ============================================================
+
+sync: ## Sync Helm charts from charts/ into pack directories
+	@echo "==> Syncing charts into packs..."
+	@for pair in "panoptes-argus:panoptes-argus" "panoptes-janus:panoptes-janus"; do \
+		pack=$${pair%%:*}; chart=$${pair##*:}; \
+		echo "--- Syncing $$chart -> $$pack ---"; \
+		rm -rf "$$pack/charts/$$chart"; \
+		mkdir -p "$$pack/charts"; \
+		cp -r "$(CHARTS_DIR)/$$chart" "$$pack/charts/$$chart"; \
+	done
+	@echo "==> Sync complete"
+
+# ============================================================
 # Package
 # ============================================================
 
-package: $(DIST_DIR) ## Package Helm charts as .tgz and create ORAS-ready archives
+package: $(DIST_DIR) sync ## Package Helm charts as .tgz and create ORAS-ready archives
 	@echo "==> Packaging Panoptes packs..."
 	@for pack in $(PACKS); do \
 		echo "--- Packaging $$pack ---"; \

@@ -332,7 +332,7 @@ ignore:
 
 3. **Verify container runtime detection:**
    ```bash
-   kubectl logs -n panoptes-system -l app=argusd | grep "runtime"
+   kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd | grep "runtime"
    ```
 
 ### Too Many Events from Expected Changes

@@ -209,7 +209,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app: argusd
+      app.kubernetes.io/name: argusd
   policyTypes:
     - Egress
   egress:

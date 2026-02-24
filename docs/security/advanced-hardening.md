@@ -303,7 +303,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app: janusd
+      app.kubernetes.io/name: janusd
   policyTypes:
     - Egress
   egress:
@@ -568,7 +568,7 @@ stress-ng --io 16 --timeout 60s &
 for i in $(seq 1 50000); do touch /tmp/chaos$i; rm /tmp/chaos$i; done
 
 # Verify no event loss or daemon crash
-kubectl logs -n panoptes-system -l app=argusd | grep -i overflow
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=argusd | grep -i overflow
 ```
 
 ---

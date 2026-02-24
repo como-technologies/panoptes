@@ -29,11 +29,11 @@ Create chart name and version as used by the chart label.
 {{- end }}
 
 {{/*
-Common labels
+Common labels (no name — daemon and controller diverge)
 */}}
 {{- define "panoptes-argus.labels" -}}
 helm.sh/chart: {{ include "panoptes-argus.chart" . }}
-{{ include "panoptes-argus.selectorLabels" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
@@ -48,10 +48,17 @@ panoptes.io/environment: {{ .Values.global.cluster.environment }}
 {{- end }}
 
 {{/*
-Selector labels
+Selector labels (instance only — used by ServiceMonitor)
 */}}
 {{- define "panoptes-argus.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "panoptes-argus.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+
+{{/*
+Controller selector labels
+*/}}
+{{- define "panoptes-argus.controller.selectorLabels" -}}
+app.kubernetes.io/name: argus-operator
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
@@ -60,15 +67,16 @@ Controller labels
 */}}
 {{- define "panoptes-argus.controller.labels" -}}
 {{ include "panoptes-argus.labels" . }}
+app.kubernetes.io/name: argus-operator
 app.kubernetes.io/component: controller
 {{- end }}
 
 {{/*
-Controller selector labels
+Daemon selector labels
 */}}
-{{- define "panoptes-argus.controller.selectorLabels" -}}
-{{ include "panoptes-argus.selectorLabels" . }}
-app.kubernetes.io/component: controller
+{{- define "panoptes-argus.daemon.selectorLabels" -}}
+app.kubernetes.io/name: argusd
+app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
@@ -76,14 +84,7 @@ Daemon labels
 */}}
 {{- define "panoptes-argus.daemon.labels" -}}
 {{ include "panoptes-argus.labels" . }}
-app.kubernetes.io/component: daemon
-{{- end }}
-
-{{/*
-Daemon selector labels
-*/}}
-{{- define "panoptes-argus.daemon.selectorLabels" -}}
-{{ include "panoptes-argus.selectorLabels" . }}
+app.kubernetes.io/name: argusd
 app.kubernetes.io/component: daemon
 {{- end }}
 

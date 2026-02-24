@@ -424,7 +424,7 @@ curl "http://localhost:3000/api/events?since=30d&tags=regulation:hipaa" \
 
 3. **Verify janusd daemon is running:**
    ```bash
-   kubectl get pods -n panoptes-system -l app=janusd
+   kubectl get pods -n panoptes-system -l app.kubernetes.io/name=janusd
    ```
 
 ### Missing Process Information
@@ -435,7 +435,7 @@ Process attribution requires:
 
 Check daemon logs:
 ```bash
-kubectl logs -n panoptes-system -l app=janusd | grep -i "process"
+kubectl logs -n panoptes-system -l app.kubernetes.io/name=janusd | grep -i "process"
 ```
 
 ### High Event Volume
