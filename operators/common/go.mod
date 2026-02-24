@@ -3,6 +3,7 @@ module github.com/como-technologies/panoptes/operators/common
 go 1.24.6
 
 require (
+	github.com/google/uuid v1.6.0
 	k8s.io/api v0.34.1
 	k8s.io/apimachinery v0.34.1
 	sigs.k8s.io/controller-runtime v0.22.4
@@ -22,7 +23,6 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect

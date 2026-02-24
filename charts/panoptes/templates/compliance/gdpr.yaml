@@ -1,0 +1,214 @@
+{{- if .Values.compliance.gdpr.enabled }}
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: {{ include "panoptes.fullname" . }}-gdpr-fim
+  namespace: {{ .Values.compliance.gdpr.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "panoptes.labels" . | nindent 4 }}
+    compliance: gdpr
+    panoptes.io/template: gdpr-fim
+  annotations:
+    gdpr/articles: "32, 33"
+spec:
+  selector:
+    matchLabels:
+      {{- toYaml .Values.compliance.gdpr.podSelector | nindent 6 }}
+
+  subjects:
+    # Article 32(1)(b): User account integrity
+    - paths:
+        - /etc/passwd
+        - /etc/shadow
+        - /etc/group
+        - /etc/sudoers
+      events:
+        - modify
+        - delete
+        - attrib
+      tags:
+        article: "32(1)(b)"
+        severity: critical
+        category: user-accounts
+
+    # Article 32: Authentication configuration
+    - paths:
+        - /etc/ssh
+        - /etc/pam.d
+        - /etc/security
+      events:
+        - all
+      recursive: true
+      tags:
+        article: "32"
+        severity: critical
+        category: authentication
+
+    # Article 30: Audit log integrity
+    - paths:
+        - /var/log
+      events:
+        - modify
+        - delete
+        - create
+      recursive: true
+      maxDepth: 3
+      ignore:
+        - "*.gz"
+        - "*.old"
+        - "*.[0-9]"
+      tags:
+        article: "30"
+        severity: high
+        category: audit-logs
+
+    # Article 32: Application configuration
+    - paths:
+        - /app/config
+        - /etc/app
+        - /opt/app/config
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 3
+      tags:
+        article: "32"
+        severity: high
+        category: app-config
+
+    # Article 32(1)(a): Encryption configuration
+    - paths:
+        - /etc/ssl
+        - /etc/pki
+        - /app/certs
+      events:
+        - all
+      recursive: true
+      tags:
+        article: "32(1)(a)"
+        severity: critical
+        category: encryption-config
+
+    # Article 32: Database configuration
+    - paths:
+        - /var/lib/postgresql
+        - /var/lib/mysql
+        - /etc/postgresql
+        - /etc/mysql
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 2
+      ignore:
+        - "*.pid"
+        - "*.sock"
+      tags:
+        article: "32"
+        severity: high
+        category: database-config
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json
+---
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: {{ include "panoptes.fullname" . }}-gdpr-access
+  namespace: {{ .Values.compliance.gdpr.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "panoptes.labels" . | nindent 4 }}
+    compliance: gdpr
+    panoptes.io/template: gdpr-access
+  annotations:
+    gdpr/articles: "30, 32, 33"
+spec:
+  selector:
+    matchLabels:
+      {{- toYaml .Values.compliance.gdpr.podSelector | nindent 6 }}
+
+  subjects:
+    # Article 30: Personal data access auditing
+    - allow:
+        - /app/data
+        - /var/lib/app/data
+        - /data
+      events:
+        - access
+        - open
+        - modify
+      audit: true
+      tags:
+        article: "30"
+        severity: high
+        category: personal-data-access
+
+    # Article 32(1)(b): Credential protection
+    - deny:
+        - /etc/shadow
+        - /etc/gshadow
+        - /root/.ssh
+      allow:
+        - /etc/passwd
+        - /etc/group
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        article: "32(1)(b)"
+        severity: critical
+        category: credential-protection
+
+    # Article 32: Kubernetes secrets
+    - deny:
+        - /var/run/secrets
+      events:
+        - access
+        - open
+      autoAllowOwner: true
+      defaultResponse: deny
+      audit: true
+      tags:
+        article: "32"
+        severity: critical
+        category: k8s-secrets
+
+    # Article 30: Data export auditing
+    - allow:
+        - /backup
+        - /export
+        - /var/backup
+      events:
+        - all
+      audit: true
+      tags:
+        article: "30"
+        severity: high
+        category: data-export
+
+    # Article 32(1)(d): Data transfer tool auditing
+    - deny:
+        - /usr/bin/curl
+        - /usr/bin/wget
+        - /usr/bin/scp
+        - /usr/bin/rsync
+      events:
+        - execute
+      defaultResponse: audit
+      audit: true
+      tags:
+        article: "32(1)(d)"
+        severity: medium
+        category: data-transfer-tools
+
+  containerRuntime: auto
+  enforcing: {{ .Values.compliance.gdpr.enforcing | default false }}
+  paused: false
+  logFormat: json
+{{- end }}

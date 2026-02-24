@@ -1,0 +1,179 @@
+{{- if .Values.compliance.pciDss.enabled }}
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: {{ include "panoptes.fullname" . }}-pci-dss-fim
+  namespace: {{ .Values.compliance.pciDss.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "panoptes.labels" . | nindent 4 }}
+    compliance: pci-dss
+    panoptes.io/template: pci-dss-fim
+  annotations:
+    pci-dss/requirements: "10.5.5, 11.5"
+spec:
+  selector:
+    matchLabels:
+      {{- toYaml .Values.compliance.pciDss.podSelector | nindent 6 }}
+
+  subjects:
+    # Requirement 10.5.5 - FIM on log files
+    - paths:
+        - /var/log
+      events:
+        - modify
+        - delete
+        - create
+        - moved_from
+        - moved_to
+      recursive: true
+      maxDepth: 5
+      ignore:
+        - "*.gz"
+        - "*.old"
+        - "*.[0-9]"
+      tags:
+        requirement: "10.5.5"
+        severity: high
+        category: log-integrity
+
+    # Requirement 11.5 - Critical system files
+    - paths:
+        - /etc/passwd
+        - /etc/shadow
+        - /etc/group
+        - /etc/gshadow
+        - /etc/sudoers
+      events:
+        - modify
+        - delete
+        - attrib
+      tags:
+        requirement: "11.5"
+        severity: critical
+        category: user-accounts
+
+    - paths:
+        - /etc/sudoers.d
+        - /etc/pam.d
+        - /etc/security
+      events:
+        - all
+      recursive: true
+      maxDepth: 2
+      tags:
+        requirement: "11.5"
+        severity: critical
+        category: authentication
+
+    - paths:
+        - /etc/ssh
+        - /root/.ssh
+      events:
+        - all
+      recursive: true
+      tags:
+        requirement: "11.5"
+        severity: critical
+        category: ssh-config
+
+    - paths:
+        - /usr/bin
+        - /usr/sbin
+        - /usr/local/bin
+        - /usr/local/sbin
+      events:
+        - modify
+        - create
+        - delete
+      tags:
+        requirement: "11.5"
+        severity: high
+        category: system-binaries
+
+    - paths:
+        - /etc/systemd
+        - /etc/init.d
+        - /etc/cron.d
+        - /etc/crontab
+      events:
+        - all
+      recursive: true
+      maxDepth: 3
+      tags:
+        requirement: "11.5"
+        severity: high
+        category: system-services
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json
+---
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: {{ include "panoptes.fullname" . }}-pci-dss-access
+  namespace: {{ .Values.compliance.pciDss.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "panoptes.labels" . | nindent 4 }}
+    compliance: pci-dss
+    panoptes.io/template: pci-dss-access
+  annotations:
+    pci-dss/requirements: "7.1, 10.2"
+spec:
+  selector:
+    matchLabels:
+      {{- toYaml .Values.compliance.pciDss.podSelector | nindent 6 }}
+
+  subjects:
+    # Requirement 7.1 - Limit access to system components
+    - deny:
+        - /etc/shadow
+        - /etc/gshadow
+        - /etc/sudoers
+        - /root/.ssh/id_*
+        - /root/.ssh/authorized_keys
+      allow:
+        - /etc/passwd
+        - /etc/group
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        requirement: "7.1"
+        severity: critical
+        category: credential-access
+
+    - deny:
+        - /var/run/secrets/kubernetes.io
+      events:
+        - access
+        - open
+      autoAllowOwner: true
+      defaultResponse: deny
+      audit: true
+      tags:
+        requirement: "7.1"
+        severity: critical
+        category: k8s-secrets
+
+    # Requirement 10.2 - Audit trail logging
+    - allow:
+        - /app/data
+        - /var/lib/app
+      events:
+        - access
+        - open
+        - modify
+      audit: true
+      tags:
+        requirement: "10.2"
+        severity: high
+        category: data-access
+
+  containerRuntime: auto
+  enforcing: {{ .Values.compliance.pciDss.enforcing | default false }}
+  paused: false
+  logFormat: json
+{{- end }}

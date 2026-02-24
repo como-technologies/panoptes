@@ -1,0 +1,55 @@
+# Kyverno ClusterPolicy: Auto-label pods for PCI-DSS monitoring
+#
+# Automatically adds the pci-dss/scope=in-scope label to pods in namespaces
+# that match "payment-*" or have the annotation panoptes.io/compliance=pci-dss.
+#
+# This eliminates manual pod labeling -- deploy this policy once and all
+# qualifying workloads are automatically monitored by Panoptes PCI-DSS templates.
+#
+# Prerequisites: Kyverno installed (https://kyverno.io/docs/installation/)
+# Usage: kubectl apply -f auto-label-pci.yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: panoptes-auto-label-pci-dss
+  annotations:
+    policies.kyverno.io/title: Panoptes PCI-DSS Auto-Labeling
+    policies.kyverno.io/description: >-
+      Automatically labels pods for PCI-DSS compliance monitoring by Panoptes.
+      Applies to pods in namespaces matching "payment-*" or namespaces annotated
+      with panoptes.io/compliance=pci-dss.
+spec:
+  rules:
+    # Rule 1: Label pods in payment-* namespaces
+    - name: label-payment-namespace-pods
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - "payment-*"
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            labels:
+              pci-dss/scope: "in-scope"
+
+    # Rule 2: Label pods in namespaces annotated for PCI-DSS
+    - name: label-annotated-namespace-pods
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      preconditions:
+        all:
+          - key: "{{ request.object.metadata.namespace }}"
+            operator: AnyIn
+            value:
+              - "{{ request.object.metadata.namespace }}"
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            labels:
+              pci-dss/scope: "in-scope"

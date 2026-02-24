@@ -1,0 +1,103 @@
+# ArgusWatcher for container breakout indicator detection
+# Monitors paths commonly used during container escape attempts.
+# Each subject is tagged with the corresponding MITRE ATT&CK technique ID.
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: breakout-detection
+  labels:
+    app.kubernetes.io/name: breakout-detection
+    app.kubernetes.io/component: fim
+    app.kubernetes.io/part-of: panoptes
+  annotations:
+    panoptes.como-technologies.io/description: "Container breakout indicator detection with MITRE ATT&CK mapping"
+spec:
+  selector:
+    matchLabels:
+      panoptes.como-technologies.io/monitored: "true"
+
+  subjects:
+    # ── T1074: Data Staged ───────────────────────────────────────────
+    # Attackers stage tools, exploits, and payloads in world-writable
+    # directories before executing them.
+    - paths:
+        - /tmp
+        - /dev/shm
+      events:
+        - create
+        - modify
+        - delete
+      recursive: true
+      maxDepth: 3
+      ignore:
+        - "*.sock"
+        - "*.pid"
+      tags:
+        attack: "T1074"
+        severity: high
+        category: staging
+
+    # ── T1053.003: Scheduled Task / Cron ─────────────────────────────
+    # Cron-based persistence survives container restarts if the cron
+    # directories are on a writable layer or mounted volume.
+    - paths:
+        - /etc/crontab
+        - /etc/cron.d
+      events:
+        - create
+        - modify
+        - delete
+      recursive: true
+      maxDepth: 2
+      tags:
+        attack: "T1053.003"
+        severity: critical
+        category: cron-persistence
+
+    # ── T1098.004: SSH Authorized Keys ───────────────────────────────
+    # Injecting SSH keys provides persistent backdoor access. Even in
+    # containers, this is a strong breakout indicator because the attacker
+    # may be targeting the host SSH service.
+    - paths:
+        - /root/.ssh
+      events:
+        - create
+        - modify
+        - delete
+        - attrib
+      recursive: true
+      tags:
+        attack: "T1098.004"
+        severity: critical
+        category: ssh-keys
+
+    # ── T1574.006: Hijack Execution Flow / LD_PRELOAD ────────────────
+    # Modifying ld.so.preload causes every dynamically linked process to
+    # load the attacker's shared library. This is a rootkit-level technique.
+    - paths:
+        - /etc/ld.so.preload
+      events:
+        - create
+        - modify
+      tags:
+        attack: "T1574.006"
+        severity: critical
+        category: library-injection
+
+    # ── T1136.001: Create Account / Local Account ────────────────────
+    # Adding a user with UID 0 to /etc/passwd provides root-equivalent
+    # access. Modifying /etc/shadow can reset root password.
+    - paths:
+        - /etc/passwd
+        - /etc/shadow
+      events:
+        - modify
+        - attrib
+      tags:
+        attack: "T1136.001"
+        severity: critical
+        category: account-creation
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json

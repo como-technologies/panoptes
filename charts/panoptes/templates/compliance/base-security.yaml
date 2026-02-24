@@ -1,0 +1,208 @@
+{{- if .Values.compliance.baseSecurity.enabled }}
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: {{ include "panoptes.fullname" . }}-base-security-fim
+  namespace: {{ .Values.compliance.baseSecurity.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "panoptes.labels" . | nindent 4 }}
+    compliance: base-security
+    panoptes.io/template: base-security-fim
+spec:
+  selector:
+    matchLabels:
+      {{- toYaml .Values.compliance.baseSecurity.podSelector | nindent 6 }}
+
+  subjects:
+    - paths:
+        - /etc/passwd
+        - /etc/shadow
+        - /etc/group
+        - /etc/gshadow
+        - /etc/sudoers
+      events:
+        - modify
+        - delete
+        - create
+        - attrib
+      tags:
+        severity: critical
+        category: user-accounts
+
+    - paths:
+        - /etc/sudoers.d
+      events:
+        - all
+      recursive: true
+      tags:
+        severity: critical
+        category: sudo-config
+
+    - paths:
+        - /etc/ssh
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      tags:
+        severity: critical
+        category: ssh-config
+
+    - paths:
+        - /root/.ssh
+      events:
+        - all
+      recursive: true
+      tags:
+        severity: critical
+        category: ssh-keys
+
+    - paths:
+        - /var/log
+      events:
+        - delete
+        - modify
+      recursive: true
+      maxDepth: 2
+      ignore:
+        - "*.gz"
+        - "*.old"
+        - "*.[0-9]"
+        - "lastlog"
+        - "wtmp"
+        - "btmp"
+      tags:
+        severity: high
+        category: audit-logs
+
+    - paths:
+        - /etc/pam.d
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      tags:
+        severity: critical
+        category: authentication
+
+    - paths:
+        - /etc/cron.d
+        - /etc/crontab
+        - /var/spool/cron
+      events:
+        - all
+      recursive: true
+      tags:
+        severity: high
+        category: scheduled-tasks
+
+    - paths:
+        - /etc/systemd/system
+        - /etc/init.d
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 2
+      tags:
+        severity: high
+        category: system-services
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json
+---
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: {{ include "panoptes.fullname" . }}-base-security-access
+  namespace: {{ .Values.compliance.baseSecurity.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "panoptes.labels" . | nindent 4 }}
+    compliance: base-security
+    panoptes.io/template: base-security-access
+spec:
+  selector:
+    matchLabels:
+      {{- toYaml .Values.compliance.baseSecurity.podSelector | nindent 6 }}
+
+  subjects:
+    - deny:
+        - /etc/shadow
+        - /etc/gshadow
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        severity: critical
+        category: credential-access
+
+    - deny:
+        - /root/.ssh/id_*
+        - /root/.ssh/authorized_keys
+        - /home/*/.ssh/id_*
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        severity: critical
+        category: ssh-keys
+
+    - deny:
+        - /var/run/secrets/kubernetes.io
+      events:
+        - access
+        - open
+      autoAllowOwner: true
+      defaultResponse: deny
+      audit: true
+      tags:
+        severity: critical
+        category: k8s-secrets
+
+    - deny:
+        - /usr/bin/curl
+        - /usr/bin/wget
+        - /usr/bin/nc
+        - /usr/bin/ncat
+        - /usr/bin/netcat
+        - /usr/bin/nmap
+        - /usr/bin/socat
+      allow: []
+      events:
+        - execute
+      defaultResponse: audit
+      audit: true
+      tags:
+        severity: high
+        category: suspicious-tools
+
+    - deny:
+        - /usr/bin/apt
+        - /usr/bin/apt-get
+        - /usr/bin/yum
+        - /usr/bin/dnf
+        - /usr/bin/apk
+        - /usr/bin/pip
+        - /usr/bin/pip3
+        - /usr/bin/npm
+      events:
+        - execute
+      defaultResponse: audit
+      audit: true
+      tags:
+        severity: medium
+        category: package-managers
+
+  containerRuntime: auto
+  enforcing: {{ .Values.compliance.baseSecurity.enforcing | default false }}
+  paused: false
+  logFormat: json
+{{- end }}

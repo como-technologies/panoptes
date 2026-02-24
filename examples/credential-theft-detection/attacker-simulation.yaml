@@ -1,0 +1,176 @@
+# Credential theft detection demo
+# Deploys a target workload, an ArgusWatcher for modification detection,
+# and a JanusGuard for access auditing -- all targeting the same pod.
+---
+# Target workload (simulates a compromised application)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: target-workload
+  labels:
+    app: target-workload
+    panoptes.como-technologies.io/monitored: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: target-workload
+  template:
+    metadata:
+      labels:
+        app: target-workload
+        panoptes.como-technologies.io/monitored: "true"
+    spec:
+      containers:
+        - name: app
+          image: ubuntu:24.04
+          command: ["sleep", "infinity"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+# ArgusWatcher: detect MODIFICATIONS to credential files
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: credential-fim
+  labels:
+    app.kubernetes.io/name: credential-fim
+    app.kubernetes.io/component: fim
+    app.kubernetes.io/part-of: panoptes
+  annotations:
+    panoptes.como-technologies.io/description: "Detect modifications to credential files"
+spec:
+  selector:
+    matchLabels:
+      panoptes.como-technologies.io/monitored: "true"
+
+  subjects:
+    # System credential files
+    - paths:
+        - /etc/shadow
+        - /etc/passwd
+        - /etc/gshadow
+      events:
+        - modify
+        - delete
+        - attrib
+      tags:
+        severity: critical
+        category: credential-modification
+
+    # SSH key files
+    - paths:
+        - /root/.ssh
+      events:
+        - create
+        - modify
+        - delete
+        - attrib
+      recursive: true
+      tags:
+        severity: critical
+        category: ssh-keys
+
+    # Kubernetes service account token (modification indicates tampering)
+    - paths:
+        - /var/run/secrets/kubernetes.io
+      events:
+        - modify
+        - delete
+      recursive: true
+      tags:
+        severity: critical
+        category: k8s-secrets
+
+    # Cloud provider credential files
+    - paths:
+        - /root/.aws
+        - /root/.azure
+        - /root/.config/gcloud
+        - /root/.kube
+      events:
+        - create
+        - modify
+        - delete
+      recursive: true
+      maxDepth: 2
+      tags:
+        severity: critical
+        category: cloud-credentials
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json
+
+---
+# JanusGuard: audit/block READ ACCESS to credential files
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: credential-access
+  labels:
+    app.kubernetes.io/name: credential-access
+    app.kubernetes.io/component: access-control
+    app.kubernetes.io/part-of: panoptes
+  annotations:
+    panoptes.como-technologies.io/description: "Audit and block credential file access"
+spec:
+  selector:
+    matchLabels:
+      panoptes.como-technologies.io/monitored: "true"
+
+  subjects:
+    # Deny access to password hashes and sudo config
+    - deny:
+        - /etc/shadow
+        - /etc/gshadow
+        - /etc/sudoers
+      allow:
+        - /etc/passwd
+        - /etc/group
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        severity: critical
+        category: credential-access
+
+    # Deny access to SSH private keys
+    - deny:
+        - /root/.ssh/id_*
+        - /root/.ssh/authorized_keys
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        severity: critical
+        category: ssh-key-access
+
+    # Audit Kubernetes service account token access
+    # autoAllowOwner permits the pod's own process to read its mounted token
+    - deny:
+        - /var/run/secrets/kubernetes.io
+      events:
+        - access
+        - open
+      autoAllowOwner: true
+      defaultResponse: deny
+      audit: true
+      tags:
+        severity: critical
+        category: k8s-secrets
+
+  containerRuntime: auto
+  # Start in audit-only mode. Set to true after validating no false positives.
+  enforcing: false
+  paused: false
+  logFormat: json

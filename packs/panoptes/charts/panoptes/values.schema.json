@@ -1,5 +1,5 @@
 {
-  "$schema": "https://json-schema.org/draft/07/schema#",
+  "$schema": "https://json-schema.org/draft-07/schema#",
   "title": "Panoptes Suite Values",
   "description": "Configuration for the Panoptes Security Suite umbrella Helm chart (Argus + Janus + Dashboard)",
   "type": "object",

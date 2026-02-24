@@ -1,0 +1,85 @@
+# Nginx deployment with Panoptes file integrity monitoring
+# This file contains both the workload and the ArgusWatcher for simplicity.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-monitored
+  labels:
+    app: nginx-monitored
+    panoptes.como-technologies.io/monitored: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-monitored
+  template:
+    metadata:
+      labels:
+        app: nginx-monitored
+        panoptes.como-technologies.io/monitored: "true"
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-bookworm
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+# ArgusWatcher monitoring nginx configuration and web content
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: nginx-fim
+  labels:
+    app.kubernetes.io/name: nginx-fim
+    app.kubernetes.io/component: fim
+    app.kubernetes.io/part-of: panoptes
+  annotations:
+    panoptes.como-technologies.io/description: "File integrity monitoring for nginx config and content"
+spec:
+  selector:
+    matchLabels:
+      panoptes.como-technologies.io/monitored: "true"
+
+  subjects:
+    # Nginx configuration files
+    # Any modification here at runtime is suspicious
+    - paths:
+        - /etc/nginx
+      events:
+        - modify
+        - create
+        - delete
+        - attrib
+      recursive: true
+      tags:
+        severity: critical
+        category: config
+
+    # Web content directory
+    # Modifications could indicate defacement or malware injection
+    - paths:
+        - /usr/share/nginx/html
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 3
+      ignore:
+        - "*.log"
+        - "*.tmp"
+      tags:
+        severity: high
+        category: content
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json

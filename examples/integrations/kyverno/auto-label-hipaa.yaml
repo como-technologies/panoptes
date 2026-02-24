@@ -1,0 +1,33 @@
+# Kyverno ClusterPolicy: Auto-label pods for HIPAA monitoring
+#
+# Automatically adds the hipaa/scope=ephi label to pods in namespaces
+# that match "health-*", "clinical-*", or "ehr-*".
+#
+# Prerequisites: Kyverno installed (https://kyverno.io/docs/installation/)
+# Usage: kubectl apply -f auto-label-hipaa.yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: panoptes-auto-label-hipaa
+  annotations:
+    policies.kyverno.io/title: Panoptes HIPAA Auto-Labeling
+    policies.kyverno.io/description: >-
+      Automatically labels pods for HIPAA ePHI monitoring by Panoptes.
+      Applies to pods in healthcare-related namespaces.
+spec:
+  rules:
+    - name: label-healthcare-namespace-pods
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - "health-*"
+                - "clinical-*"
+                - "ehr-*"
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            labels:
+              hipaa/scope: "ephi"

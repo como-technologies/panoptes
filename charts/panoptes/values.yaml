@@ -1,0 +1,268 @@
+# Default values for panoptes.
+# This is a YAML-formatted file.
+
+# Override names
+nameOverride: ""
+fullnameOverride: ""
+
+# Global cluster identification
+global:
+  cluster:
+    name: ""
+    environment: ""
+    region: ""
+
+# Component toggles
+components:
+  argus:
+    enabled: true
+  janus:
+    enabled: true
+  dashboard:
+    enabled: true
+
+# Argus configuration (direct, for umbrella chart templates)
+argus:
+  controller:
+    image:
+      repository: ghcr.io/como-technologies/argus-controller
+      tag: "2.0.0"
+      pullPolicy: IfNotPresent
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+  daemon:
+    image:
+      repository: ghcr.io/como-technologies/argusd
+      tag: "2.0.0"
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+    nodeSelector: {}
+    tolerations:
+      - operator: Exists
+        effect: NoSchedule
+
+# Janus configuration (direct, for umbrella chart templates)
+janus:
+  controller:
+    image:
+      repository: ghcr.io/como-technologies/janus-controller
+      tag: "2.0.0"
+      pullPolicy: IfNotPresent
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+  daemon:
+    image:
+      repository: ghcr.io/como-technologies/janusd
+      tag: "2.0.0"
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+    nodeSelector: {}
+    tolerations:
+      - operator: Exists
+        effect: NoSchedule
+
+# Dashboard configuration
+dashboard:
+  image:
+    repository: ghcr.io/como-technologies/panoptes-eye
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 3000
+  ingress:
+    enabled: false
+    className: nginx
+    host: panoptes.example.com
+    tls:
+      enabled: false
+      secretName: panoptes-tls
+
+# Subchart value pass-through: panoptes-argus
+panoptes-argus:
+  controller:
+    image:
+      repository: ghcr.io/como-technologies/argus-controller
+      tag: "2.0.0"
+      pullPolicy: IfNotPresent
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+  daemon:
+    image:
+      repository: ghcr.io/como-technologies/argusd
+      tag: "2.0.0"
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+    tolerations:
+      - operator: Exists
+        effect: NoSchedule
+
+# Subchart value pass-through: panoptes-janus
+panoptes-janus:
+  controller:
+    image:
+      repository: ghcr.io/como-technologies/janus-controller
+      tag: "2.0.0"
+      pullPolicy: IfNotPresent
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+  daemon:
+    image:
+      repository: ghcr.io/como-technologies/janusd
+      tag: "2.0.0"
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+    tolerations:
+      - operator: Exists
+        effect: NoSchedule
+
+# Observability
+observability:
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+  opentelemetry:
+    enabled: false
+    endpoint: ""
+  grafana:
+    dashboards:
+      enabled: true
+      namespace: monitoring
+
+# Alerting
+alerting:
+  enabled: true
+  rules:
+    criticalFileModified:
+      enabled: true
+    highEventRate:
+      enabled: true
+      threshold: 100
+    unauthorizedAccess:
+      enabled: true
+
+# Compliance Templates
+# Enable pre-configured compliance monitoring for specific frameworks
+compliance:
+  baseSecurity:
+    enabled: false
+    namespace: ""  # Uses release namespace if empty
+    enforcing: false
+    podSelector:
+      panoptes.como-technologies.io/monitored: "true"
+
+  pciDss:
+    enabled: false
+    namespace: ""
+    enforcing: false
+    podSelector:
+      pci-dss/scope: "in-scope"
+
+  hipaa:
+    enabled: false
+    namespace: ""
+    enforcing: false
+    podSelector:
+      hipaa/scope: "ephi"
+
+  soc2:
+    enabled: false
+    namespace: ""
+    enforcing: false
+    podSelector:
+      soc2/scope: "in-scope"
+
+  cisKubernetes:
+    enabled: false
+    namespace: ""
+    enforcing: true  # CIS recommends enforcement for runtime sockets
+    podSelector:
+      cis/scope: "kubernetes-audit"
+
+  nist80053:
+    enabled: false
+    namespace: ""
+    enforcing: false
+    podSelector:
+      nist-800-53/scope: "moderate"
+
+  gdpr:
+    enabled: false
+    namespace: ""
+    enforcing: false
+    podSelector:
+      gdpr/scope: "personal-data"
+
+# Network policies (default-deny with explicit allows for all components)
+networkPolicy:
+  enabled: true
+
+# Pod disruption budgets for controller Deployments
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

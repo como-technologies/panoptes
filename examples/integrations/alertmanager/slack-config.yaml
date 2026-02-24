@@ -1,0 +1,87 @@
+# AlertManager configuration for Panoptes Slack integration
+#
+# Routes Panoptes file integrity and access control alerts to Slack.
+# This is an AlertManager config snippet -- merge it into your existing
+# alertmanager.yaml or kube-prometheus-stack values.
+#
+# Prerequisites:
+#   1. Prometheus + AlertManager deployed
+#   2. Panoptes ServiceMonitor and PrometheusRule resources active
+#   3. Slack incoming webhook URL configured
+#
+# The Panoptes Helm chart ships PrometheusRule resources in deploy/monitoring/prometheus-alerts.yaml
+# that generate alerts like PanoptesCriticalFileModified and PanoptesUnauthorizedAccess.
+
+# AlertManager config snippet (merge into your alertmanager.yaml):
+apiVersion: v1
+kind: Secret
+metadata:
+  name: panoptes-slack-webhook
+  namespace: monitoring
+type: Opaque
+stringData:
+  webhook-url: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+---
+# Example AlertManagerConfig (requires Prometheus Operator)
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: panoptes-slack
+  namespace: panoptes-system
+  labels:
+    alertmanagerConfig: panoptes
+spec:
+  route:
+    groupBy: ['alertname', 'namespace']
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 4h
+    receiver: panoptes-slack
+    routes:
+      # Critical file modifications go to #security-alerts immediately
+      - matchers:
+          - name: alertname
+            value: PanoptesCriticalFileModified
+        receiver: panoptes-slack-critical
+        repeatInterval: 1h
+      # Unauthorized access alerts
+      - matchers:
+          - name: alertname
+            value: PanoptesUnauthorizedAccess
+        receiver: panoptes-slack-critical
+        repeatInterval: 1h
+      # High event rate (potential incident)
+      - matchers:
+          - name: alertname
+            value: PanoptesHighEventRate
+        receiver: panoptes-slack
+        repeatInterval: 2h
+
+  receivers:
+    - name: panoptes-slack
+      slackConfigs:
+        - apiURL:
+            name: panoptes-slack-webhook
+            key: webhook-url
+          channel: '#security-monitoring'
+          title: '{{ .GroupLabels.alertname }}'
+          text: >-
+            *Panoptes Alert:* {{ .GroupLabels.alertname }}
+            *Namespace:* {{ .GroupLabels.namespace }}
+            *Description:* {{ .CommonAnnotations.description }}
+            *Runbook:* {{ .CommonAnnotations.runbook_url }}
+          sendResolved: true
+
+    - name: panoptes-slack-critical
+      slackConfigs:
+        - apiURL:
+            name: panoptes-slack-webhook
+            key: webhook-url
+          channel: '#security-alerts'
+          title: 'CRITICAL: {{ .GroupLabels.alertname }}'
+          text: >-
+            *CRITICAL Panoptes Alert:* {{ .GroupLabels.alertname }}
+            *Namespace:* {{ .GroupLabels.namespace }}
+            *Description:* {{ .CommonAnnotations.description }}
+            *Action Required:* Investigate immediately. A critical file was modified or unauthorized access was detected.
+          sendResolved: true

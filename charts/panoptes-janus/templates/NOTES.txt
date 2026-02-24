@@ -1,0 +1,60 @@
+
+================================================================================
+  Panoptes Janus - File Access Auditing
+================================================================================
+
+  Janus has been deployed to audit and enforce file access using fanotify.
+
+  COMPONENTS:
+  - Controller: {{ include "panoptes-janus.fullname" . }}-controller
+  - Daemon: {{ include "panoptes-janus.fullname" . }}-daemon (DaemonSet)
+
+  ENFORCEMENT MODE: {{ if .Values.enforcement.enabled }}ENABLED (blocking){{ else }}DISABLED (audit-only){{ end }}
+
+  QUICK START:
+
+  1. Create a JanusGuard to audit file access:
+
+     kubectl apply -f - <<EOF
+     apiVersion: janus.como-technologies.io/v2
+     kind: JanusGuard
+     metadata:
+       name: sensitive-files
+       namespace: {{ .Release.Namespace }}
+     spec:
+       selector:
+         matchLabels:
+           app: my-app
+       enforcing: {{ .Values.enforcement.enabled }}
+       subjects:
+         - deny:
+             - /etc/shadow
+             - /etc/gshadow
+           events:
+             - access
+             - open
+           audit: true
+           tags:
+             category: credential-files
+             severity: critical
+     EOF
+
+  2. Check the JanusGuard status:
+
+     kubectl get janusguards -A
+
+  3. View audit events from the daemon:
+
+     kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/component=daemon -f
+
+  {{- if .Values.audit.kernelAudit }}
+
+  4. Check kernel audit log (on nodes):
+
+     cat /var/log/audit/audit.log | grep janus
+  {{- end }}
+
+  DOCUMENTATION:
+  https://github.com/como-technologies/panoptes
+
+================================================================================

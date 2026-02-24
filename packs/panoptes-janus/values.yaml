@@ -6,7 +6,7 @@ pack:
 
 controller:
   image:
-    repository: gcr.io/spectro-images/janus-controller
+    repository: ghcr.io/como-technologies/janus-controller
     tag: "2.0.0"
     pullPolicy: IfNotPresent
   replicas: 1
@@ -23,7 +23,7 @@ controller:
 
 daemon:
   image:
-    repository: gcr.io/spectro-images/janusd
+    repository: ghcr.io/como-technologies/janusd
     tag: "2.0.0"
     pullPolicy: IfNotPresent
   resources:

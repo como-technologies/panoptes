@@ -1,0 +1,33 @@
+# Vulnerable application deployment for container breakout detection demo
+# This simulates a workload with a remote code execution vulnerability.
+# The label panoptes.como-technologies.io/monitored=true causes the
+# ArgusWatcher in arguswatcher.yaml to target this pod.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vulnerable-app
+  labels:
+    app: vulnerable-app
+    panoptes.como-technologies.io/monitored: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vulnerable-app
+  template:
+    metadata:
+      labels:
+        app: vulnerable-app
+        panoptes.como-technologies.io/monitored: "true"
+    spec:
+      containers:
+        - name: vulnerable-app
+          image: ubuntu:24.04
+          command: ["sleep", "infinity"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

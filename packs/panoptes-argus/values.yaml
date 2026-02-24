@@ -6,7 +6,7 @@ pack:
 
 controller:
   image:
-    repository: gcr.io/spectro-images/argus-controller
+    repository: ghcr.io/como-technologies/argus-controller
     tag: "2.0.0"
     pullPolicy: IfNotPresent
   replicas: 1
@@ -23,7 +23,7 @@ controller:
 
 daemon:
   image:
-    repository: gcr.io/spectro-images/argusd
+    repository: ghcr.io/como-technologies/argusd
     tag: "2.0.0"
     pullPolicy: IfNotPresent
   resources:

@@ -1,0 +1,34 @@
+# Payment service workload for PCI-DSS compliance demo
+# This Deployment simulates a payment processing service in PCI-DSS scope.
+# The label pci-dss/scope=in-scope causes the PCI-DSS ArgusWatcher and
+# JanusGuard to automatically monitor this pod.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service
+  labels:
+    app: payment-service
+    pci-dss/scope: "in-scope"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payment-service
+  template:
+    metadata:
+      labels:
+        app: payment-service
+        pci-dss/scope: "in-scope"
+    spec:
+      containers:
+        - name: payment-service
+          image: nginx:1.27-bookworm
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

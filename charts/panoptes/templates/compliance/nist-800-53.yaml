@@ -1,0 +1,224 @@
+{{- if .Values.compliance.nist80053.enabled }}
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: {{ include "panoptes.fullname" . }}-nist-fim
+  namespace: {{ .Values.compliance.nist80053.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "panoptes.labels" . | nindent 4 }}
+    compliance: nist-800-53
+    panoptes.io/template: nist-fim
+  annotations:
+    nist/controls: "SI-7, SI-7(1), SI-7(2), AU-2"
+spec:
+  selector:
+    matchLabels:
+      {{- toYaml .Values.compliance.nist80053.podSelector | nindent 6 }}
+
+  subjects:
+    # SI-7: System binaries integrity
+    - paths:
+        - /usr/bin
+        - /usr/sbin
+        - /bin
+        - /sbin
+      events:
+        - modify
+        - create
+        - delete
+        - attrib
+      recursive: true
+      ignore:
+        - "*.pyc"
+        - "__pycache__"
+      tags:
+        control: "SI-7"
+        severity: critical
+        category: system-binaries
+
+    # SI-7(1): User account files
+    - paths:
+        - /etc/passwd
+        - /etc/shadow
+        - /etc/group
+        - /etc/gshadow
+        - /etc/sudoers
+      events:
+        - modify
+        - delete
+        - attrib
+      tags:
+        control: "SI-7(1)"
+        severity: critical
+        category: user-accounts
+
+    # SI-7: Authentication configuration
+    - paths:
+        - /etc/ssh
+        - /etc/pam.d
+        - /etc/security
+        - /etc/nsswitch.conf
+      events:
+        - all
+      recursive: true
+      tags:
+        control: "SI-7"
+        severity: critical
+        category: authentication-config
+
+    # AU-2: Audit log integrity
+    - paths:
+        - /var/log
+      events:
+        - modify
+        - delete
+        - create
+      recursive: true
+      maxDepth: 3
+      ignore:
+        - "*.gz"
+        - "*.old"
+        - "*.[0-9]"
+      tags:
+        control: "AU-2"
+        severity: high
+        category: audit-logs
+
+    # SI-7: System libraries
+    - paths:
+        - /usr/lib
+        - /lib
+        - /lib64
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 3
+      ignore:
+        - "*.pyc"
+        - "*.cache"
+      tags:
+        control: "SI-7"
+        severity: high
+        category: system-libraries
+
+    # SI-7: Kernel and boot
+    - paths:
+        - /lib/modules
+        - /etc/modprobe.d
+        - /boot
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 2
+      tags:
+        control: "SI-7"
+        severity: critical
+        category: kernel-boot
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json
+---
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: {{ include "panoptes.fullname" . }}-nist-access
+  namespace: {{ .Values.compliance.nist80053.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "panoptes.labels" . | nindent 4 }}
+    compliance: nist-800-53
+    panoptes.io/template: nist-access
+  annotations:
+    nist/controls: "AU-2, AU-3, AU-6, AC-6"
+spec:
+  selector:
+    matchLabels:
+      {{- toYaml .Values.compliance.nist80053.podSelector | nindent 6 }}
+
+  subjects:
+    # AC-6: Credential file access control
+    - deny:
+        - /etc/shadow
+        - /etc/gshadow
+        - /etc/sudoers.d
+      allow:
+        - /etc/passwd
+        - /etc/group
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        control: "AC-6"
+        severity: critical
+        category: credential-access
+
+    # AU-2: Audit log access
+    - allow:
+        - /var/log
+        - /var/audit
+      events:
+        - access
+        - open
+        - modify
+      audit: true
+      tags:
+        control: "AU-2"
+        severity: high
+        category: audit-log-access
+
+    # AC-6: SSH key protection
+    - deny:
+        - /root/.ssh/id_*
+        - /root/.ssh/authorized_keys
+        - /home/*/.ssh/id_*
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        control: "AC-6"
+        severity: critical
+        category: ssh-keys
+
+    # AU-2: Kubernetes secrets
+    - deny:
+        - /var/run/secrets/kubernetes.io
+      events:
+        - access
+        - open
+      autoAllowOwner: true
+      defaultResponse: audit
+      audit: true
+      tags:
+        control: "AU-2"
+        severity: high
+        category: k8s-secrets
+
+    # AC-6: Network tool restrictions
+    - deny:
+        - /usr/bin/curl
+        - /usr/bin/wget
+        - /usr/bin/nc
+        - /usr/bin/nmap
+        - /usr/bin/tcpdump
+      events:
+        - execute
+      defaultResponse: audit
+      audit: true
+      tags:
+        control: "AC-6"
+        severity: high
+        category: network-tools
+
+  containerRuntime: auto
+  enforcing: {{ .Values.compliance.nist80053.enforcing | default false }}
+  paused: false
+  logFormat: json
+{{- end }}

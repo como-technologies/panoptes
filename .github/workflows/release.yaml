@@ -96,10 +96,45 @@ jobs:
             ${{ env.REGISTRY }}/${{ matrix.daemon }}:${{ steps.version.outputs.VERSION }}
             ${{ env.REGISTRY }}/${{ matrix.daemon }}:latest
 
+  release-dashboard:
+    name: Release Dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Build and push dashboard
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ui/panoptes-eye/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/panoptes-eye:${{ steps.version.outputs.VERSION }}
+            ${{ env.REGISTRY }}/panoptes-eye:latest
+
   release-helm:
     name: Release Helm Charts
     runs-on: ubuntu-latest
-    needs: [release-operators, release-daemons]
+    needs: [release-operators, release-daemons, release-dashboard]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -109,19 +144,28 @@ jobs:
         with:
           version: v3.14.0
 
+      - name: Login to GHCR for Helm OCI
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+
       - name: Extract version
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Package Helm charts
+      - name: Package and push Helm charts
         run: |
           mkdir -p dist
           for chart in charts/*/; do
             chart_name=$(basename "$chart")
+            # Update chart version to match release
+            sed -i "s/^version:.*/version: ${{ steps.version.outputs.VERSION }}/" "$chart/Chart.yaml"
+            sed -i "s/^appVersion:.*/appVersion: \"${{ steps.version.outputs.VERSION }}\"/" "$chart/Chart.yaml"
+            # Package
             helm package "$chart" --destination dist --version ${{ steps.version.outputs.VERSION }}
+            # Push to GHCR OCI registry
+            helm push "dist/${chart_name}-${{ steps.version.outputs.VERSION }}.tgz" oci://${{ env.REGISTRY }}/charts
           done
 
-      - name: Upload Helm charts
+      - name: Upload Helm charts as artifacts
         uses: actions/upload-artifact@v4
         with:
           name: helm-charts
@@ -130,7 +174,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [release-operators, release-daemons, release-helm]
+    needs: [release-operators, release-daemons, release-dashboard, release-helm]
     steps:
       - name: Checkout
         uses: actions/checkout@v4

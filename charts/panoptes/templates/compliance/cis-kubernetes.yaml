@@ -1,0 +1,223 @@
+{{- if .Values.compliance.cisKubernetes.enabled }}
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: {{ include "panoptes.fullname" . }}-cis-k8s-control-plane
+  namespace: {{ .Values.compliance.cisKubernetes.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "panoptes.labels" . | nindent 4 }}
+    compliance: cis-kubernetes
+    panoptes.io/template: cis-k8s-control-plane
+  annotations:
+    cis/benchmark: "v1.8"
+    cis/sections: "1.1, 1.2"
+spec:
+  selector:
+    matchLabels:
+      {{- toYaml .Values.compliance.cisKubernetes.podSelector | nindent 6 }}
+
+  subjects:
+    # 1.1.1-1.1.21 - Control plane configuration files
+    - paths:
+        - /etc/kubernetes/manifests
+        - /etc/kubernetes/pki
+      events:
+        - modify
+        - create
+        - delete
+        - attrib
+      recursive: true
+      tags:
+        benchmark: "CIS 1.1"
+        severity: critical
+        category: control-plane-manifests
+
+    - paths:
+        - /etc/kubernetes/admin.conf
+        - /etc/kubernetes/controller-manager.conf
+        - /etc/kubernetes/scheduler.conf
+      events:
+        - modify
+        - delete
+        - attrib
+      tags:
+        benchmark: "CIS 1.1"
+        severity: critical
+        category: kubeconfig
+
+    - paths:
+        - /var/lib/etcd
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      maxDepth: 2
+      ignore:
+        - "*.snap"
+        - "*.wal"
+      tags:
+        benchmark: "CIS 1.1"
+        severity: critical
+        category: etcd-data
+
+    - paths:
+        - /etc/containerd
+        - /etc/crio
+        - /etc/docker
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      tags:
+        benchmark: "CIS 1.2"
+        severity: high
+        category: container-runtime
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json
+---
+apiVersion: argus.como-technologies.io/v2
+kind: ArgusWatcher
+metadata:
+  name: {{ include "panoptes.fullname" . }}-cis-k8s-worker-node
+  namespace: {{ .Values.compliance.cisKubernetes.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "panoptes.labels" . | nindent 4 }}
+    compliance: cis-kubernetes
+    panoptes.io/template: cis-k8s-worker-node
+  annotations:
+    cis/benchmark: "v1.8"
+    cis/sections: "4.1, 4.2"
+spec:
+  selector:
+    matchLabels:
+      {{- toYaml .Values.compliance.cisKubernetes.podSelector | nindent 6 }}
+
+  subjects:
+    # 4.1.1-4.1.10 - Worker node configuration files
+    - paths:
+        - /etc/kubernetes/kubelet.conf
+        - /var/lib/kubelet/config.yaml
+        - /var/lib/kubelet/kubeconfig
+      events:
+        - modify
+        - delete
+        - attrib
+      tags:
+        benchmark: "CIS 4.1"
+        severity: critical
+        category: kubelet-config
+
+    - paths:
+        - /etc/systemd/system/kubelet.service
+        - /etc/systemd/system/kubelet.service.d
+        - /usr/lib/systemd/system/kubelet.service
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      tags:
+        benchmark: "CIS 4.2"
+        severity: critical
+        category: kubelet-service
+
+    - paths:
+        - /etc/cni/net.d
+        - /opt/cni/bin
+      events:
+        - modify
+        - create
+        - delete
+      recursive: true
+      tags:
+        benchmark: "CIS 4.1"
+        severity: high
+        category: cni-config
+
+    - paths:
+        - /var/lib/kubelet/pki
+      events:
+        - modify
+        - create
+        - delete
+        - attrib
+      recursive: true
+      tags:
+        benchmark: "CIS 4.1"
+        severity: critical
+        category: kubelet-pki
+
+  containerRuntime: auto
+  paused: false
+  logFormat: json
+---
+apiVersion: janus.como-technologies.io/v2
+kind: JanusGuard
+metadata:
+  name: {{ include "panoptes.fullname" . }}-cis-k8s-secrets
+  namespace: {{ .Values.compliance.cisKubernetes.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "panoptes.labels" . | nindent 4 }}
+    compliance: cis-kubernetes
+    panoptes.io/template: cis-k8s-secrets
+  annotations:
+    cis/benchmark: "v1.8"
+    cis/sections: "5.1, 5.4"
+spec:
+  selector:
+    matchLabels:
+      {{- toYaml .Values.compliance.cisKubernetes.podSelector | nindent 6 }}
+
+  subjects:
+    # 5.1.6 - Service Account Token mounting
+    - deny:
+        - /var/run/secrets/kubernetes.io/serviceaccount
+      events:
+        - access
+        - open
+      autoAllowOwner: true
+      defaultResponse: audit
+      audit: true
+      tags:
+        benchmark: "CIS 5.1.6"
+        severity: high
+        category: serviceaccount-tokens
+
+    # 5.4.1 - Sensitive host paths
+    - deny:
+        - /etc/kubernetes
+        - /var/lib/kubelet
+        - /var/lib/etcd
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        benchmark: "CIS 5.4"
+        severity: critical
+        category: host-path-access
+
+    - deny:
+        - /var/run/docker.sock
+        - /var/run/containerd/containerd.sock
+        - /var/run/crio/crio.sock
+      events:
+        - access
+        - open
+      defaultResponse: deny
+      audit: true
+      tags:
+        benchmark: "CIS 5.4"
+        severity: critical
+        category: runtime-socket
+
+  containerRuntime: auto
+  enforcing: {{ .Values.compliance.cisKubernetes.enforcing | default true }}
+  paused: false
+  logFormat: json
+{{- end }}

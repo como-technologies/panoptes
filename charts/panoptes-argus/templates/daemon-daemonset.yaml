@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "panoptes-argus.fullname" . }}-daemon
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "panoptes-argus.daemon.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "panoptes-argus.daemon.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "panoptes-argus.daemon.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "panoptes-argus.serviceAccountName" . }}
+      hostPID: true
+      {{- with .Values.daemon.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      containers:
+        - name: argusd
+          image: "{{ .Values.daemon.image.repository }}:{{ .Values.daemon.image.tag }}"
+          imagePullPolicy: {{ .Values.daemon.image.pullPolicy }}
+          args:
+            - --grpc-port={{ .Values.service.port }}
+            - --metrics-port={{ .Values.observability.prometheus.port }}
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+            - name: metrics
+              containerPort: {{ .Values.observability.prometheus.port }}
+              protocol: TCP
+          securityContext:
+            {{- toYaml .Values.daemon.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.daemon.resources | nindent 12 }}
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            {{- if .Values.global.cluster.name }}
+            - name: PANOPTES_CLUSTER_NAME
+              value: {{ .Values.global.cluster.name | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: host-root
+              mountPath: /host
+              readOnly: true
+            - name: proc
+              mountPath: /host/proc
+              readOnly: true
+      volumes:
+        - name: host-root
+          hostPath:
+            path: /
+        - name: proc
+          hostPath:
+            path: /proc
+      {{- with .Values.daemon.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.daemon.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

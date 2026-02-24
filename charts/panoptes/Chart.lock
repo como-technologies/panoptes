@@ -1,0 +1,9 @@
+dependencies:
+- name: panoptes-argus
+  repository: file://../panoptes-argus
+  version: 2.0.0
+- name: panoptes-janus
+  repository: file://../panoptes-janus
+  version: 2.0.0
+digest: sha256:7c979efe9dee53531574012723f97f74ebeefcb9099b43c64e981fe7981a52d6
+generated: "2026-02-23T20:31:42.098091547-05:00"

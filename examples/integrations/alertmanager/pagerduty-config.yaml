@@ -1,0 +1,73 @@
+# AlertManager configuration for Panoptes PagerDuty integration
+#
+# Pages on-call engineers for critical Panoptes alerts.
+#
+# Prerequisites:
+#   1. Prometheus + AlertManager deployed
+#   2. PagerDuty integration key
+#   3. Panoptes PrometheusRule resources active
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: panoptes-pagerduty-key
+  namespace: monitoring
+type: Opaque
+stringData:
+  routing-key: "YOUR_PAGERDUTY_INTEGRATION_KEY"
+---
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: panoptes-pagerduty
+  namespace: panoptes-system
+  labels:
+    alertmanagerConfig: panoptes
+spec:
+  route:
+    groupBy: ['alertname', 'namespace']
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 4h
+    receiver: panoptes-pagerduty-warning
+    routes:
+      # Critical alerts page immediately
+      - matchers:
+          - name: severity
+            value: critical
+        receiver: panoptes-pagerduty-critical
+        repeatInterval: 1h
+      # Warning alerts create incidents
+      - matchers:
+          - name: severity
+            value: warning
+        receiver: panoptes-pagerduty-warning
+        repeatInterval: 4h
+
+  receivers:
+    - name: panoptes-pagerduty-critical
+      pagerdutyConfigs:
+        - routingKey:
+            name: panoptes-pagerduty-key
+            key: routing-key
+          severity: critical
+          description: >-
+            {{ .GroupLabels.alertname }} in {{ .GroupLabels.namespace }}:
+            {{ .CommonAnnotations.description }}
+          details:
+            - key: alertname
+              value: '{{ .GroupLabels.alertname }}'
+            - key: namespace
+              value: '{{ .GroupLabels.namespace }}'
+            - key: runbook
+              value: '{{ .CommonAnnotations.runbook_url }}'
+
+    - name: panoptes-pagerduty-warning
+      pagerdutyConfigs:
+        - routingKey:
+            name: panoptes-pagerduty-key
+            key: routing-key
+          severity: warning
+          description: >-
+            {{ .GroupLabels.alertname }} in {{ .GroupLabels.namespace }}:
+            {{ .CommonAnnotations.description }}

@@ -1,0 +1,27 @@
+apiVersion: v2
+name: panoptes
+description: Panoptes Security Suite - Kubernetes file integrity and access monitoring with compliance-as-code
+type: application
+version: 2.0.0
+appVersion: "2.0.0"
+keywords:
+  - security
+  - file-integrity
+  - monitoring
+  - compliance
+  - kubernetes
+home: https://github.com/como-technologies/panoptes
+maintainers:
+  - name: Como Technologies
+    email: security@comotech.io
+annotations:
+  category: Security
+dependencies:
+  - name: panoptes-argus
+    version: 2.0.0
+    repository: "file://../panoptes-argus"
+    condition: components.argus.enabled
+  - name: panoptes-janus
+    version: 2.0.0
+    repository: "file://../panoptes-janus"
+    condition: components.janus.enabled

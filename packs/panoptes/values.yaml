@@ -25,7 +25,7 @@ components:
 argus:
   controller:
     image:
-      repository: gcr.io/spectro-images/argus-controller
+      repository: ghcr.io/como-technologies/argus-controller
       tag: "2.0.0"
     replicas: 1
     resources:
@@ -41,7 +41,7 @@ argus:
 
   daemon:
     image:
-      repository: gcr.io/spectro-images/argusd
+      repository: ghcr.io/como-technologies/argusd
       tag: "2.0.0"
     resources:
       requests:
@@ -60,7 +60,7 @@ argus:
 janus:
   controller:
     image:
-      repository: gcr.io/spectro-images/janus-controller
+      repository: ghcr.io/como-technologies/janus-controller
       tag: "2.0.0"
     replicas: 1
     resources:
@@ -76,7 +76,7 @@ janus:
 
   daemon:
     image:
-      repository: gcr.io/spectro-images/janusd
+      repository: ghcr.io/como-technologies/janusd
       tag: "2.0.0"
     resources:
       requests:
@@ -93,7 +93,7 @@ janus:
 # Panoptes Eye Dashboard
 dashboard:
   image:
-    repository: gcr.io/spectro-images/panoptes-eye
+    repository: ghcr.io/como-technologies/panoptes-eye
     tag: "1.0.0"
   replicas: 1
   resources:

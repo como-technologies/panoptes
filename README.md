@@ -4,6 +4,8 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-1.28%2B-blue.svg)](https://kubernetes.io)
+[![Helm](https://img.shields.io/badge/Helm-OCI%20Registry-blue.svg)](https://github.com/como-technologies/panoptes/pkgs/container/charts%2Fpanoptes)
+[![GHCR](https://img.shields.io/badge/Images-GHCR-blue.svg)](https://github.com/orgs/como-technologies/packages)
 
 Containers shouldn't be touching sensitive files. Production workloads shouldn't be reading credentials off disk.
 When they do, you need to know immediately -- not hours later in a log aggregator.
@@ -53,21 +55,45 @@ We explicitly avoid: AI/ML black boxes, auto-remediation, complex policy engines
 
 ---
 
-## Quick Start (2 minutes)
+## Quick Start (5 minutes)
 
-The fastest way to try Panoptes:
+### Install with Helm
 
 ```bash
-# Create a Kind cluster and deploy everything
-./hack/local-deploy.sh all
+# Install Panoptes with PCI-DSS compliance monitoring
+helm install panoptes oci://ghcr.io/como-technologies/charts/panoptes \
+  --namespace panoptes-system --create-namespace \
+  --set compliance.pciDss.enabled=true
 
-# Access the dashboard
-kubectl port-forward -n panoptes-system svc/panoptes-eye 3000:3000
+# Verify
+kubectl get pods -n panoptes-system
+kubectl get arguswatchers,janusguards -n panoptes-system
+```
+
+### See it work
+
+```bash
+# Deploy a test pod and trigger a compliance violation
+kubectl run payment-service --image=nginx:alpine \
+  --labels="pci-dss/scope=in-scope" -n panoptes-system
+kubectl wait --for=condition=Ready pod/payment-service -n panoptes-system --timeout=60s
+kubectl exec payment-service -n panoptes-system -- sh -c "echo 'test' >> /etc/passwd"
+
+# Check the detection
+kubectl logs -n panoptes-system -l app.kubernetes.io/component=controller --tail=10
+```
+
+### Open the dashboard
+
+```bash
+kubectl port-forward -n panoptes-system svc/panoptes-eye 3000:80
 # Open http://localhost:3000
 ```
 
-**Other deployment options:**
-- [Production (Kustomize)](docs/QUICK_START.md) -- `kubectl apply -k deploy/`
+**More deployment options:**
+- [**Full Helm quickstart**](docs/HELM_QUICKSTART.md) -- All frameworks, standalone charts, configuration
+- [**Demo scenarios**](examples/README.md) -- Copy-paste security demos (container breakout, credential theft, etc.)
+- [Development (Kind)](docs/QUICK_START.md) -- Build from source with `./hack/local-deploy.sh all`
 - [Spectro Cloud Palette](docs/SPECTRO_QUICK_START.md) -- Pack-based deployment
 - [Platform guides](docs/guides/platforms/) -- EKS, GKE, AKS-specific instructions
 
@@ -201,11 +227,17 @@ flowchart TB
 
 ```
 panoptes/
+├── charts/              # Helm charts (OCI registry: ghcr.io/como-technologies/charts/)
+│   ├── panoptes/        # Unified chart (operators + daemons + dashboard + compliance)
+│   ├── panoptes-argus/  # Standalone Argus chart
+│   └── panoptes-janus/  # Standalone Janus chart
 ├── deploy/              # Production manifests (kubectl apply -k deploy/)
 ├── docs/                # Comprehensive documentation
+│   ├── adr/             # Architecture Decision Records
 │   ├── guides/          # Use-case guides, platform guides
 │   ├── security/        # Threat model, hardening
 │   └── api/             # CRD API reference
+├── examples/            # Copy-paste runnable security demo scenarios
 ├── operators/           # Kubernetes operators (Go)
 │   ├── argus-operator/  # File integrity monitoring
 │   └── janus-operator/  # File access auditing
@@ -240,7 +272,11 @@ panoptes/
 
 - **Issues**: [GitHub Issues](https://github.com/como-technologies/panoptes/issues)
 - **Contributing**: See [CONTRIBUTING.md](CONTRIBUTING.md)
+- **Roadmap**: See [ROADMAP.md](ROADMAP.md)
+- **Governance**: See [GOVERNANCE.md](GOVERNANCE.md)
+- **Architecture Decisions**: See [docs/adr/](docs/adr/)
 - **Security**: Report vulnerabilities via [security policy](docs/security/vulnerability-response.md)
+- **Adopters**: Using Panoptes? Add yourself to [ADOPTERS.md](ADOPTERS.md)
 
 ---
 

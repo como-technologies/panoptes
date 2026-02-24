@@ -1,0 +1,39 @@
+# ePHI database workload for HIPAA compliance demo
+# This Deployment simulates a database that stores electronic Protected
+# Health Information (ePHI). The label hipaa/scope=ephi causes the HIPAA
+# ArgusWatcher and JanusGuard to automatically monitor this pod.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ephi-database
+  labels:
+    app: ephi-database
+    hipaa/scope: "ephi"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ephi-database
+  template:
+    metadata:
+      labels:
+        app: ephi-database
+        hipaa/scope: "ephi"
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-bookworm
+          env:
+            - name: POSTGRES_PASSWORD
+              value: "demo-only-not-for-production"
+            - name: POSTGRES_DB
+              value: "patient_records"
+          ports:
+            - containerPort: 5432
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

@@ -1,0 +1,20 @@
+{{- if and .Values.observability.prometheus.enabled .Values.observability.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "panoptes-janus.fullname" . }}
+  namespace: {{ .Values.observability.serviceMonitor.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "panoptes-janus.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "panoptes-janus.selectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      interval: {{ .Values.observability.serviceMonitor.interval }}
+      path: /metrics
+{{- end }}
