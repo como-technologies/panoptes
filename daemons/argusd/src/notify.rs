@@ -65,6 +65,7 @@
 //! - Linux kernel source: `fs/notify/inotify/`
 
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -241,6 +242,23 @@ pub struct PendingMove {
     timestamp: Instant,
 }
 
+/// A non-existent path being watched via its nearest existing ancestor.
+///
+/// When a configured watch path does not exist at registration time, the
+/// watcher places an inotify watch on the nearest ancestor directory and
+/// records a `ProxyTarget`. When a CREATE/MOVED_TO event matches the
+/// `immediate_child`, the proxy is promoted to a direct watch on the
+/// now-existent path.
+#[derive(Debug, Clone)]
+struct ProxyTarget {
+    /// The original configured path (e.g., /proc/123/root/etc/crontab).
+    configured_path: PathBuf,
+    /// The child name to match under the watched ancestor (e.g., "crontab").
+    immediate_child: OsString,
+    /// The inotify flags to apply when promoted to a direct watch.
+    flags: AddWatchFlags,
+}
+
 /// Tracks IN_MOVED_FROM events and matches them with IN_MOVED_TO events.
 ///
 /// # Cookie-Based Correlation
@@ -385,6 +403,8 @@ pub struct WatchConfig {
     pub ignore_patterns: Vec<String>,
     pub recursive: bool,
     pub max_depth: Option<u32>,
+    /// When true, non-existent paths are skipped instead of using proxy watches.
+    pub skip_if_missing: bool,
 }
 
 /// Watch state for pause/resume support.
@@ -434,6 +454,10 @@ pub struct Watcher {
     metrics: Option<Arc<WatcherMetrics>>,
     /// Original configuration for pause/resume.
     config: Option<WatchConfig>,
+    /// Proxy watches for paths that don't exist at registration time.
+    /// Maps ancestor directory WD → list of non-existent target paths
+    /// being watched through that ancestor.
+    proxy_watches: HashMap<WatchDescriptor, Vec<ProxyTarget>>,
 }
 
 impl Watcher {
@@ -463,6 +487,7 @@ impl Watcher {
             max_watches,
             metrics: None,
             config: None,
+            proxy_watches: HashMap::new(),
         })
     }
 
@@ -516,6 +541,83 @@ impl Watcher {
 
         debug!(path = %path.display(), wd = ?wd, "Added watch");
         Ok(wd)
+    }
+
+    /// Add a watch for a path, falling back to a proxy watch on the nearest
+    /// existing ancestor if the path does not exist.
+    ///
+    /// Returns `Ok(true)` if a direct watch was added, `Ok(false)` if a proxy
+    /// watch was registered on an ancestor directory.
+    fn add_watch_or_proxy(
+        &mut self,
+        path: &Path,
+        flags: AddWatchFlags,
+    ) -> Result<bool, NotifyError> {
+        if path.exists() {
+            self.add_watch(path, flags)?;
+            return Ok(true);
+        }
+
+        // Walk up to find the nearest existing ancestor directory.
+        let mut ancestor = path.parent();
+        while let Some(dir) = ancestor {
+            if dir.exists() && dir.is_dir() {
+                let relative = path
+                    .strip_prefix(dir)
+                    .expect("ancestor is a prefix of path");
+                let immediate_child = relative
+                    .components()
+                    .next()
+                    .expect("path != ancestor")
+                    .as_os_str()
+                    .to_os_string();
+
+                // Watch ancestor with CREATE/MOVED_TO so we can detect
+                // the target appearing. inotify OR's masks if a watch
+                // already exists for this path.
+                let proxy_flags = flags | AddWatchFlags::IN_CREATE | AddWatchFlags::IN_MOVED_TO;
+                let wd = self.add_watch(dir, proxy_flags)?;
+
+                self.proxy_watches.entry(wd).or_default().push(ProxyTarget {
+                    configured_path: path.to_path_buf(),
+                    immediate_child,
+                    flags,
+                });
+
+                info!(
+                    target = %path.display(),
+                    ancestor = %dir.display(),
+                    "Path does not exist, watching ancestor (proxy watch)"
+                );
+                return Ok(false);
+            }
+            ancestor = dir.parent();
+        }
+
+        warn!(path = %path.display(), "No existing ancestor found, cannot watch");
+        Ok(false)
+    }
+
+    /// Add a watch for a path, respecting `skip_if_missing`.
+    ///
+    /// When `skip_if_missing` is true, non-existent paths are silently skipped.
+    /// When false, falls back to a proxy watch on the nearest ancestor.
+    fn add_watch_for_path(
+        &mut self,
+        path: &Path,
+        flags: AddWatchFlags,
+        skip_if_missing: bool,
+    ) -> Result<(), NotifyError> {
+        if skip_if_missing {
+            if path.exists() {
+                self.add_watch(path, flags)?;
+            } else {
+                warn!(path = %path.display(), "Path does not exist, skipping (skipIfMissing)");
+            }
+        } else {
+            self.add_watch_or_proxy(path, flags)?;
+        }
+        Ok(())
     }
 
     /// Remove a watch by descriptor.
@@ -638,22 +740,13 @@ impl Watcher {
 
         let mut added = 0;
 
-        // Add watches for all paths
+        // Add watches for all paths (with proxy fallback for non-existent paths
+        // unless skip_if_missing is set)
         for path in &config.paths {
-            if !path.exists() {
-                warn!(path = %path.display(), "Path does not exist, skipping");
-                continue;
-            }
-
-            debug!(
-                path = %path.display(),
-                flags = ?flags,
-                "Adding inotify watch (synchronous)"
-            );
-            self.add_watch(path, flags)?;
+            self.add_watch_for_path(path, flags, config.skip_if_missing)?;
             added += 1;
 
-            // Add recursive watches if enabled
+            // Add recursive watches if enabled and path exists as a directory
             if config.recursive && path.is_dir() {
                 let before = self.watches.len();
                 self.add_recursive_watches(path, flags, config.max_depth.unwrap_or(0), 0)?;
@@ -712,21 +805,12 @@ impl Watcher {
         // Store config for pause/resume
         self.config = Some(config.clone());
 
-        // Add watches for all paths
+        // Add watches for all paths (with proxy fallback for non-existent paths
+        // unless skip_if_missing is set)
         for path in &config.paths {
-            if !path.exists() {
-                warn!(path = %path.display(), "Path does not exist, skipping");
-                continue;
-            }
+            self.add_watch_for_path(path, flags, config.skip_if_missing)?;
 
-            debug!(
-                path = %path.display(),
-                flags = ?flags,
-                "Adding inotify watch"
-            );
-            self.add_watch(path, flags)?;
-
-            // Add recursive watches if enabled
+            // Add recursive watches if enabled and path exists as a directory
             if config.recursive && path.is_dir() {
                 self.add_recursive_watches(path, flags, config.max_depth.unwrap_or(0), 0)?;
             }
@@ -847,6 +931,9 @@ impl Watcher {
             return Ok(true);
         }
 
+        // Check if this event promotes any proxy watches to direct watches
+        self.check_proxy_promotion(event);
+
         // Process regular events
         if let Some(file_events) = self.process_event(event) {
             for file_event in file_events {
@@ -890,6 +977,7 @@ impl Watcher {
         self.watches.clear();
         self.path_to_wd.clear();
         self.move_tracker.clear();
+        self.proxy_watches.clear();
 
         self.state = WatchState::Paused;
 
@@ -1072,6 +1160,124 @@ impl Watcher {
         }
     }
 
+    /// Check if a CREATE/MOVED_TO event promotes a proxy watch to a direct watch.
+    ///
+    /// When a proxy target's `immediate_child` appears in a watched ancestor
+    /// directory, this method either:
+    /// - Promotes the proxy to a direct watch if the configured path now exists
+    /// - Advances the proxy to the newly created intermediate directory for
+    ///   multi-level paths (e.g., `/root/.ssh/authorized_keys`)
+    fn check_proxy_promotion(&mut self, event: &nix::sys::inotify::InotifyEvent) {
+        if !event.mask.contains(AddWatchFlags::IN_CREATE)
+            && !event.mask.contains(AddWatchFlags::IN_MOVED_TO)
+        {
+            return;
+        }
+
+        let event_name = match event.name.as_ref() {
+            Some(name) => name,
+            None => return,
+        };
+
+        let proxies = match self.proxy_watches.get_mut(&event.wd) {
+            Some(p) => p,
+            None => return,
+        };
+
+        // Collect promotions to process after releasing the borrow on proxy_watches.
+        let mut promotions: Vec<ProxyTarget> = Vec::new();
+        let mut i = 0;
+        while i < proxies.len() {
+            if proxies[i].immediate_child == *event_name {
+                promotions.push(proxies.remove(i));
+            } else {
+                i += 1;
+            }
+        }
+
+        if promotions.is_empty() {
+            return;
+        }
+
+        // Clean up empty proxy entry for this wd
+        if let Some(remaining) = self.proxy_watches.get(&event.wd) {
+            if remaining.is_empty() {
+                self.proxy_watches.remove(&event.wd);
+            }
+        }
+
+        // Get the ancestor directory path for building child paths
+        let ancestor_path = self.watches.get(&event.wd).cloned();
+
+        for proxy in promotions {
+            let target = &proxy.configured_path;
+
+            if target.exists() {
+                // Target now exists — promote to direct watch
+                match self.add_watch(target, proxy.flags) {
+                    Ok(_) => {
+                        info!(path = %target.display(), "Proxy promoted to direct watch");
+
+                        // If the target is a directory and the original config
+                        // was recursive, add recursive watches too. We check
+                        // against the stored config.
+                        if target.is_dir() {
+                            if let Some(ref config) = self.config {
+                                if config.recursive {
+                                    let _ = self.add_recursive_watches(
+                                        target,
+                                        proxy.flags,
+                                        config.max_depth.unwrap_or(0),
+                                        0,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!(path = %target.display(), error = %e, "Failed to promote proxy");
+                    }
+                }
+            } else if let Some(ref anc) = ancestor_path {
+                // Multi-level case: the immediate child was created but the
+                // full target path still doesn't exist. Advance the proxy
+                // to the newly created intermediate directory.
+                let child_path = anc.join(event_name.to_str().unwrap_or_default());
+                if child_path.is_dir() {
+                    if let Ok(relative) = target.strip_prefix(&child_path) {
+                        if let Some(next) = relative.components().next() {
+                            let next_child = next.as_os_str().to_os_string();
+                            let proxy_flags =
+                                proxy.flags | AddWatchFlags::IN_CREATE | AddWatchFlags::IN_MOVED_TO;
+                            match self.add_watch(&child_path, proxy_flags) {
+                                Ok(new_wd) => {
+                                    self.proxy_watches.entry(new_wd).or_default().push(
+                                        ProxyTarget {
+                                            configured_path: proxy.configured_path,
+                                            immediate_child: next_child,
+                                            flags: proxy.flags,
+                                        },
+                                    );
+                                    info!(
+                                        path = %child_path.display(),
+                                        "Advanced proxy to closer ancestor"
+                                    );
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        path = %child_path.display(),
+                                        error = %e,
+                                        "Failed to advance proxy"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Handle queue overflow by reinitializing.
     ///
     /// This re-adds all watches from the stored config after the overflow.
@@ -1087,19 +1293,18 @@ impl Watcher {
         self.watches.clear();
         self.path_to_wd.clear();
         self.move_tracker.clear();
+        self.proxy_watches.clear();
 
-        // Re-add all watches
+        // Re-add all watches (with proxy fallback for non-existent paths
+        // unless skip_if_missing is set)
         let flags = events_to_flags(&config.events);
         for path in &config.paths {
-            if path.exists() {
-                if let Err(e) = self.add_watch(path, flags) {
-                    warn!(path = %path.display(), error = %e, "Failed to re-add watch after overflow");
-                }
+            if let Err(e) = self.add_watch_for_path(path, flags, config.skip_if_missing) {
+                warn!(path = %path.display(), error = %e, "Failed to re-add watch after overflow");
+            }
 
-                if config.recursive && path.is_dir() {
-                    let _ =
-                        self.add_recursive_watches(path, flags, config.max_depth.unwrap_or(0), 0);
-                }
+            if config.recursive && path.is_dir() {
+                let _ = self.add_recursive_watches(path, flags, config.max_depth.unwrap_or(0), 0);
             }
         }
 
@@ -1505,6 +1710,7 @@ mod tests {
                 ignore_patterns: vec![],
                 recursive: false,
                 max_depth: None,
+                skip_if_missing: false,
             };
 
             assert_eq!(config.paths.len(), 1);
@@ -1519,6 +1725,7 @@ mod tests {
                 ignore_patterns: vec!["*.tmp".to_string()],
                 recursive: true,
                 max_depth: Some(5),
+                skip_if_missing: false,
             };
 
             assert!(config.recursive);
@@ -1633,6 +1840,181 @@ mod tests {
             let state = WatchState::Paused;
             let debug_str = format!("{:?}", state);
             assert!(debug_str.contains("Paused"));
+        }
+    }
+
+    // ==================== Proxy Watch Tests ====================
+
+    mod proxy_watches {
+        use super::*;
+        use std::fs;
+        use tempfile::TempDir;
+
+        #[test]
+        fn test_add_watch_or_proxy_existing_path() {
+            let dir = TempDir::new().unwrap();
+            let mut watcher = Watcher::new(64).unwrap();
+            let flags = AddWatchFlags::IN_CREATE | AddWatchFlags::IN_MODIFY;
+
+            // Watching an existing directory should add a direct watch
+            let result = watcher.add_watch_or_proxy(dir.path(), flags);
+            assert!(result.is_ok());
+            assert!(result.unwrap()); // true = direct watch
+            assert_eq!(watcher.watches.len(), 1);
+            assert!(watcher.proxy_watches.is_empty());
+        }
+
+        #[test]
+        fn test_add_watch_or_proxy_existing_file() {
+            let dir = TempDir::new().unwrap();
+            let file = dir.path().join("existing.txt");
+            fs::write(&file, "hello").unwrap();
+
+            let mut watcher = Watcher::new(64).unwrap();
+            let flags = AddWatchFlags::IN_MODIFY;
+
+            let result = watcher.add_watch_or_proxy(&file, flags);
+            assert!(result.is_ok());
+            assert!(result.unwrap()); // true = direct watch
+            assert_eq!(watcher.watches.len(), 1);
+            assert!(watcher.proxy_watches.is_empty());
+        }
+
+        #[test]
+        fn test_add_watch_or_proxy_nonexistent_file() {
+            let dir = TempDir::new().unwrap();
+            let nonexistent = dir.path().join("does_not_exist.txt");
+
+            let mut watcher = Watcher::new(64).unwrap();
+            let flags = AddWatchFlags::IN_MODIFY;
+
+            let result = watcher.add_watch_or_proxy(&nonexistent, flags);
+            assert!(result.is_ok());
+            assert!(!result.unwrap()); // false = proxy watch
+
+            // Should have a watch on the parent directory
+            assert_eq!(watcher.watches.len(), 1);
+            let (wd, watched_path) = watcher.watches.iter().next().unwrap();
+            assert_eq!(watched_path, &dir.path().canonicalize().unwrap());
+
+            // Should have a proxy target
+            assert_eq!(watcher.proxy_watches.len(), 1);
+            let proxies = watcher.proxy_watches.get(wd).unwrap();
+            assert_eq!(proxies.len(), 1);
+            assert_eq!(proxies[0].immediate_child, "does_not_exist.txt");
+            assert_eq!(proxies[0].configured_path, nonexistent);
+        }
+
+        #[test]
+        fn test_add_watch_or_proxy_nonexistent_nested() {
+            let dir = TempDir::new().unwrap();
+            // Neither "subdir" nor "file.txt" exist
+            let nested = dir.path().join("subdir").join("file.txt");
+
+            let mut watcher = Watcher::new(64).unwrap();
+            let flags = AddWatchFlags::IN_MODIFY;
+
+            let result = watcher.add_watch_or_proxy(&nested, flags);
+            assert!(result.is_ok());
+            assert!(!result.unwrap()); // false = proxy watch
+
+            // Should watch the temp dir (nearest existing ancestor)
+            assert_eq!(watcher.watches.len(), 1);
+
+            // The immediate child should be "subdir" (first missing component)
+            let (wd, _) = watcher.watches.iter().next().unwrap();
+            let proxies = watcher.proxy_watches.get(wd).unwrap();
+            assert_eq!(proxies[0].immediate_child, "subdir");
+            assert_eq!(proxies[0].configured_path, nested);
+        }
+
+        #[test]
+        fn test_multiple_proxies_on_same_ancestor() {
+            let dir = TempDir::new().unwrap();
+            let file_a = dir.path().join("a.txt");
+            let file_b = dir.path().join("b.txt");
+
+            let mut watcher = Watcher::new(64).unwrap();
+            let flags = AddWatchFlags::IN_MODIFY;
+
+            watcher.add_watch_or_proxy(&file_a, flags).unwrap();
+            watcher.add_watch_or_proxy(&file_b, flags).unwrap();
+
+            // Both should proxy through the same ancestor watch
+            assert_eq!(watcher.watches.len(), 1);
+            let (wd, _) = watcher.watches.iter().next().unwrap();
+            let proxies = watcher.proxy_watches.get(wd).unwrap();
+            assert_eq!(proxies.len(), 2);
+        }
+
+        #[test]
+        fn test_proxy_watches_cleared_on_pause() {
+            let dir = TempDir::new().unwrap();
+            let nonexistent = dir.path().join("ghost.txt");
+
+            let mut watcher = Watcher::new(64).unwrap();
+
+            // Set up a proxy watch
+            let config = WatchConfig {
+                paths: vec![nonexistent],
+                events: vec!["modify".to_string()],
+                ignore_patterns: vec![],
+                recursive: false,
+                max_depth: None,
+                skip_if_missing: false,
+            };
+            watcher.add_watches(&config).unwrap();
+            assert!(!watcher.proxy_watches.is_empty());
+
+            // Pause should clear proxy watches
+            let _ = watcher.pause();
+            assert!(watcher.proxy_watches.is_empty());
+            assert!(watcher.watches.is_empty());
+        }
+
+        #[test]
+        fn test_skip_if_missing_skips_nonexistent() {
+            let dir = TempDir::new().unwrap();
+            let nonexistent = dir.path().join("ghost.txt");
+
+            let mut watcher = Watcher::new(64).unwrap();
+
+            let config = WatchConfig {
+                paths: vec![nonexistent],
+                events: vec!["modify".to_string()],
+                ignore_patterns: vec![],
+                recursive: false,
+                max_depth: None,
+                skip_if_missing: true,
+            };
+            watcher.add_watches(&config).unwrap();
+
+            // With skip_if_missing, no watches or proxies should be created
+            assert!(watcher.watches.is_empty());
+            assert!(watcher.proxy_watches.is_empty());
+        }
+
+        #[test]
+        fn test_skip_if_missing_watches_existing() {
+            let dir = TempDir::new().unwrap();
+            let file = dir.path().join("exists.txt");
+            fs::write(&file, "data").unwrap();
+
+            let mut watcher = Watcher::new(64).unwrap();
+
+            let config = WatchConfig {
+                paths: vec![file],
+                events: vec!["modify".to_string()],
+                ignore_patterns: vec![],
+                recursive: false,
+                max_depth: None,
+                skip_if_missing: true,
+            };
+            watcher.add_watches(&config).unwrap();
+
+            // Existing path should still get a direct watch
+            assert_eq!(watcher.watches.len(), 1);
+            assert!(watcher.proxy_watches.is_empty());
         }
     }
 }

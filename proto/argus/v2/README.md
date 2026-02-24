@@ -78,6 +78,7 @@ message WatchSubject {
   bool only_dir = 6;             // Only watch directories
   bool follow_move = 7;          // Track moved files by inode
   map<string, string> tags = 8;  // Custom metadata
+  bool skip_if_missing = 9;      // Skip non-existent paths (default: false = proxy watch)
 }
 ```
 

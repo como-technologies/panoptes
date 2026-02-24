@@ -131,6 +131,13 @@ type ArgusWatcherSubject struct {
 	// +optional
 	// +kubebuilder:validation:MaxProperties=20
 	Tags map[string]string `json:"tags,omitempty"`
+
+	// skipIfMissing disables automatic proxy watching for paths that do not
+	// exist at watch creation time. When false (default), the daemon watches
+	// the nearest ancestor directory and promotes to a direct watch when the
+	// target appears. When true, non-existent paths are silently skipped.
+	// +optional
+	SkipIfMissing bool `json:"skipIfMissing,omitempty"`
 }
 
 // ArgusWatcherSpec defines the desired state of ArgusWatcher.

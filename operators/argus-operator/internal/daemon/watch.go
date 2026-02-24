@@ -118,14 +118,15 @@ func (m *WatchManager) CreateWatch(ctx context.Context, config *WatchConfig) (*W
 		}
 
 		protoSubjects[i] = &arguspb.WatchSubject{
-			Paths:      subject.Paths,
-			Events:     events,
-			Ignore:     subject.Ignore,
-			Recursive:  subject.Recursive,
-			MaxDepth:   maxDepth,
-			OnlyDir:    subject.OnlyDir,
-			FollowMove: subject.FollowMove,
-			Tags:       subject.Tags,
+			Paths:         subject.Paths,
+			Events:        events,
+			Ignore:        subject.Ignore,
+			Recursive:     subject.Recursive,
+			MaxDepth:      maxDepth,
+			OnlyDir:       subject.OnlyDir,
+			FollowMove:    subject.FollowMove,
+			Tags:          subject.Tags,
+			SkipIfMissing: subject.SkipIfMissing,
 		}
 	}
 

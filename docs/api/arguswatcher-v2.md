@@ -58,6 +58,7 @@ spec:
 | `maxDepth` | int32 | No | `0` (unlimited) | Maximum recursion depth when recursive is true. |
 | `onlyDir` | bool | No | `false` | Only watch directories, not individual files. |
 | `tags` | map[string]string | No | - | Custom metadata attached to events (max 20 keys). |
+| `skipIfMissing` | bool | No | `false` | Skip paths that don't exist instead of using proxy watches. When false, the daemon watches the nearest ancestor directory and promotes to a direct watch when the target appears. |
 
 ### ArgusEvent
 

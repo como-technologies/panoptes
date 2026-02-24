@@ -158,6 +158,12 @@ message WatchSubject {
 
   // tags are custom key-value metadata for this watch.
   map<string, string> tags = 8;
+
+  // skip_if_missing disables automatic proxy watching for paths that do
+  // not exist at watch creation time. When false (default), the daemon
+  // watches the nearest ancestor directory and promotes to a direct watch
+  // when the target appears. When true, non-existent paths are skipped.
+  bool skip_if_missing = 9;
 }
 
 // InotifyEvent represents supported inotify event types.
