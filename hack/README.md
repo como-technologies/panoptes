@@ -24,6 +24,57 @@ This directory contains deployment scripts and configurations for running Panopt
 
 ---
 
+## Dev Container (Recommended)
+
+The root `.devcontainer/` provides every tool pre-installed (Go, Rust, Node,
+Docker, kind, kubectl, helm, buf, kubebuilder, and more). The only host
+requirement is **Docker or Podman**.
+
+### Getting Started
+
+```bash
+# VS Code
+# Open the repo, then: Ctrl+Shift+P → "Dev Containers: Reopen in Container"
+
+# JetBrains (Gateway)
+# File → Remote Development → Dev Containers → select the repo
+
+# CLI
+devcontainer up --workspace-folder .
+devcontainer exec --workspace-folder . bash
+```
+
+### Running Inside the Container
+
+```bash
+# Full deployment — same as native, no extra setup needed
+./hack/local-deploy.sh all
+
+# Step by step
+./hack/local-deploy.sh cluster
+./hack/local-deploy.sh build
+./hack/local-deploy.sh deploy
+```
+
+### eBPF Toolchain
+
+The eBPF toolchain (Rust nightly, bpf-linker, LLVM/clang) is installed by
+default. To skip it and speed up container creation:
+
+```jsonc
+// In .devcontainer/devcontainer.json, add to containerEnv:
+"containerEnv": { "SKIP_EBPF": "1" }
+```
+
+### Rebuild / Cleanup
+
+```bash
+# Rebuild from scratch (removes existing container, re-runs lifecycle scripts)
+devcontainer up --remove-existing-container
+```
+
+---
+
 ## Local Development (Native Linux)
 
 For native Linux environments with full feature support.

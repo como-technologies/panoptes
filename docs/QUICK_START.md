@@ -45,6 +45,29 @@ kubectl port-forward -n panoptes-system svc/panoptes-eye 3000:3000
 
 ## 2. Prerequisites
 
+### Option A: Dev Container (Recommended)
+
+The dev container ships every tool pre-installed. The only host requirement is a
+container runtime — **Docker or Podman** (either works).
+
+```bash
+# 1. Clone the repo
+git clone https://github.com/como-technologies/panoptes.git
+cd panoptes
+
+# 2. Open in your IDE (VS Code, JetBrains, or CLI)
+#    VS Code:  "Dev Containers: Reopen in Container" from the command palette
+#    CLI:      devcontainer up --workspace-folder .
+
+# 3. Once inside the container, all tools are on PATH — skip to step 3 below.
+```
+
+Works on Linux, macOS, Windows/WSL2, and GitHub Codespaces.
+
+### Option B: Native Install
+
+If you prefer not to use the dev container, install these on your host:
+
 ```bash
 # Docker
 docker --version  # 20.10+
@@ -63,7 +86,8 @@ Install kind: https://kind.sigs.k8s.io/docs/user/quick-start/#installation
 ## 3. One-Command Setup
 
 ```bash
-# Clone the repo
+# If you used the dev container, you're already in the repo.
+# Otherwise, clone first:
 git clone https://github.com/como-technologies/panoptes.git
 cd panoptes
 
@@ -71,7 +95,7 @@ cd panoptes
 ./hack/local-deploy.sh all
 ```
 
-**For WSL2 users:** Use `./hack/local-wsl-deploy.sh all` instead.
+**For WSL2 users (native install only):** Use `./hack/local-wsl-deploy.sh all` instead.
 
 This command:
 1. Creates a Kind cluster named `panoptes-dev`

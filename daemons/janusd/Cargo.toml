@@ -2,7 +2,7 @@
 name = "janusd"
 version = "2.0.0"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.93"
 authors = ["Como Technologies, LTD <info@spectrocloud.com>"]
 description = "Janus File Access Auditing Daemon (Rust implementation)"
 license = "Apache-2.0"

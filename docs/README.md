@@ -11,6 +11,7 @@ Panoptes is a Kubernetes-native file integrity monitoring (FIM) and file access 
 
 Start here if you're new to Panoptes.
 
+- [**Dev Container Setup**](../hack/README.md#dev-container-recommended) - One-click dev environment (Docker or Podman)
 - [**Quick Start: Local Testing**](QUICK_START.md) - Deploy Panoptes on a local Kind cluster
 - [**Quick Start: Spectro Cloud**](SPECTRO_QUICK_START.md) - Deploy via Spectro Cloud Palette packs
 - [**Webhook Setup**](WEBHOOK_DEPLOYMENT.md) - Configure conversion webhooks for CRD versioning
