@@ -1,6 +1,11 @@
 # ArgusWatcher for container breakout indicator detection
 # Monitors paths commonly used during container escape attempts.
 # Each subject is tagged with the corresponding MITRE ATT&CK technique ID.
+#
+# Proxy watches: Paths like /root/.ssh and /etc/ld.so.preload don't exist in
+# most container images. With skipIfMissing omitted (default: false), the daemon
+# watches the nearest ancestor directory and automatically promotes to a direct
+# watch when the target appears. See the README for a trace-by-trace walkthrough.
 apiVersion: argus.como-technologies.io/v2
 kind: ArgusWatcher
 metadata:
@@ -32,6 +37,7 @@ spec:
       ignore:
         - "*.sock"
         - "*.pid"
+      skipIfMissing: true  # /tmp and /dev/shm always exist
       tags:
         attack: "T1074"
         severity: high
@@ -49,6 +55,7 @@ spec:
         - delete
       recursive: true
       maxDepth: 2
+      skipIfMissing: true  # cron paths always exist in images that have cron
       tags:
         attack: "T1053.003"
         severity: critical
@@ -58,6 +65,10 @@ spec:
     # Injecting SSH keys provides persistent backdoor access. Even in
     # containers, this is a strong breakout indicator because the attacker
     # may be targeting the host SSH service.
+    #
+    # Proxy watch: /root/.ssh doesn't exist in most container images.
+    # The daemon watches /root (nearest ancestor) and promotes to a
+    # direct watch when the attacker runs `mkdir -p /root/.ssh`.
     - paths:
         - /root/.ssh
       events:
@@ -66,6 +77,7 @@ spec:
         - delete
         - attrib
       recursive: true
+      # skipIfMissing defaults to false: proxy watch catches directory creation
       tags:
         attack: "T1098.004"
         severity: critical
@@ -74,11 +86,15 @@ spec:
     # ── T1574.006: Hijack Execution Flow / LD_PRELOAD ────────────────
     # Modifying ld.so.preload causes every dynamically linked process to
     # load the attacker's shared library. This is a rootkit-level technique.
+    #
+    # Proxy watch: /etc/ld.so.preload doesn't exist in most container
+    # images. The daemon watches /etc and promotes when the file is created.
     - paths:
         - /etc/ld.so.preload
       events:
         - create
         - modify
+      # skipIfMissing defaults to false: proxy watch catches file creation
       tags:
         attack: "T1574.006"
         severity: critical
@@ -93,6 +109,7 @@ spec:
       events:
         - modify
         - attrib
+      skipIfMissing: true  # /etc/passwd and /etc/shadow always exist
       tags:
         attack: "T1136.001"
         severity: critical

@@ -66,15 +66,50 @@ ok "Modified /etc/crontab"
 
 sleep 1
 
+# ── Attack 4: SSH Key Injection (proxy watch lifecycle demo) ─────────
+# This attack demonstrates proxy watches. /root/.ssh doesn't exist at
+# container startup, so the daemon watches /root (nearest ancestor).
+# We split this into phases to show the proxy → promotion → detection
+# lifecycle trace-by-trace.
+
+echo ""
 info "Attack 4: Injecting SSH authorized key (MITRE T1098.004 - SSH Keys)"
-kubectl exec "${POD}" -n "${NAMESPACE}" -- bash -c "mkdir -p /root/.ssh && echo 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ... attacker@evil.com' > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
+echo -e "         ${YELLOW}This attack demonstrates the proxy watch lifecycle.${NC}"
+echo -e "         ${YELLOW}/root/.ssh doesn't exist -- the daemon watches /root instead.${NC}"
+echo ""
+
+info "Attack 4a: Verifying /root/.ssh does not exist"
+kubectl exec "${POD}" -n "${NAMESPACE}" -- ls /root/.ssh 2>&1 || true
+info "The daemon is using a proxy watch on /root (nearest ancestor)"
+echo ""
+panoptes_show_node_logs --tail 15 argusd "${POD}" "${NAMESPACE}"
+
+sleep 2
+
+info "Attack 4b: Creating /root/.ssh directory (triggers proxy promotion)"
+kubectl exec "${POD}" -n "${NAMESPACE}" -- mkdir -p /root/.ssh
+sleep 2
+info "Daemon detects .ssh creation under /root and promotes the proxy:"
+echo ""
+panoptes_show_node_logs --tail 15 argusd "${POD}" "${NAMESPACE}"
+
+sleep 1
+
+info "Attack 4c: Injecting SSH key (caught by the promoted direct watch)"
+kubectl exec "${POD}" -n "${NAMESPACE}" -- bash -c "echo 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ... attacker@evil.com' > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
 ok "Injected /root/.ssh/authorized_keys"
 
 sleep 1
 
+# ── Attack 5: LD_PRELOAD (also uses proxy watch) ────────────────────
+# /etc/ld.so.preload doesn't exist in most containers. The daemon
+# watches /etc via a proxy and promotes + fires the event in one step.
+
+echo ""
 info "Attack 5: Modifying ld.so.preload (MITRE T1574.006 - LD_PRELOAD)"
+echo -e "         ${YELLOW}/etc/ld.so.preload doesn't exist -- proxy watch on /etc promotes on create.${NC}"
 kubectl exec "${POD}" -n "${NAMESPACE}" -- bash -c "echo '/tmp/libevil.so' > /etc/ld.so.preload"
-ok "Modified /etc/ld.so.preload"
+ok "Created /etc/ld.so.preload (proxy promoted + event in one step)"
 
 sleep 1
 
@@ -100,9 +135,14 @@ ${GREEN}Breakout indicators detected:${NC}
 
   ${RED}T1074${NC}     Data Staged         /tmp/linpeas.sh, /dev/shm/payload.bin
   ${RED}T1053.003${NC} Cron Persistence    /etc/crontab modified
-  ${RED}T1098.004${NC} SSH Key Injection   /root/.ssh/authorized_keys created
-  ${RED}T1574.006${NC} LD_PRELOAD Hijack   /etc/ld.so.preload modified
+  ${RED}T1098.004${NC} SSH Key Injection   /root/.ssh/authorized_keys created ${YELLOW}(proxy watch)${NC}
+  ${RED}T1574.006${NC} LD_PRELOAD Hijack   /etc/ld.so.preload created ${YELLOW}(proxy watch)${NC}
   ${RED}T1136.001${NC} Backdoor Account    /etc/passwd modified
+
+${GREEN}Proxy watch lifecycle (attack 4):${NC}
+  1. /root/.ssh doesn't exist     -> daemon watches /root (proxy)
+  2. attacker creates /root/.ssh  -> proxy promoted to direct watch
+  3. attacker writes auth keys    -> event caught by direct watch
 
 ${GREEN}In production, each of these events should trigger:${NC}
   1. Immediate alert to the security team

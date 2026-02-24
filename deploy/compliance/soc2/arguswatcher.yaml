@@ -30,6 +30,7 @@ spec:
         - "*.gz"
         - "*.old"
         - "*.[0-9]"
+      skipIfMissing: true  # /var/log always exists in containers
       tags:
         criteria: "CC7.2"
         severity: high
@@ -47,6 +48,7 @@ spec:
         - delete
         - create
         - attrib
+      skipIfMissing: true  # core user/group files always exist in containers
       tags:
         criteria: "CC6.1"
         severity: critical
@@ -60,6 +62,7 @@ spec:
       events:
         - all
       recursive: true
+      skipIfMissing: true  # access control dirs always exist in containers
       tags:
         criteria: "CC6.2"
         severity: critical
@@ -76,12 +79,13 @@ spec:
         - modify
         - create
         - delete
+      skipIfMissing: true  # system binary dirs always exist in containers
       tags:
         criteria: "CC7.1"
         severity: high
         category: system-binaries
 
-    # SSH and remote access
+    # SSH and remote access (proxy watch: /root/.ssh and /home/*/.ssh may not exist)
     - paths:
         - /etc/ssh
         - /root/.ssh
@@ -89,6 +93,7 @@ spec:
       events:
         - all
       recursive: true
+      # skipIfMissing defaults to false: /root/.ssh and /home/*/.ssh may not exist; proxy watch creates them on first access
       tags:
         criteria: "CC6.1"
         severity: critical
@@ -105,12 +110,13 @@ spec:
         - all
       recursive: true
       maxDepth: 3
+      skipIfMissing: true  # system service dirs always exist in containers
       tags:
         criteria: "CC7.1"
         severity: high
         category: system-services
 
-    # Application configuration
+    # Application configuration (proxy watch: app-specific paths may not exist)
     - paths:
         - /app/config
         - /etc/app
@@ -121,6 +127,7 @@ spec:
         - delete
       recursive: true
       maxDepth: 3
+      # skipIfMissing defaults to false: /app/config, /etc/app, /opt/app may not exist in all containers
       tags:
         criteria: "CC7.2"
         severity: medium
@@ -134,6 +141,7 @@ spec:
       events:
         - all
       recursive: true
+      skipIfMissing: true  # system SSL dirs always exist in containers
       tags:
         criteria: "CC6.1"
         severity: critical
@@ -159,6 +167,7 @@ spec:
         - "pulse-*"
         - "ssh-*"
         - ".X*-lock"
+      skipIfMissing: true  # temp dirs always exist
       tags:
         criteria: "CC7.2"
         severity: high
@@ -167,7 +176,7 @@ spec:
 
     # =================================================================
     # LIBRARY INJECTION DETECTION (SOC 2 CC7.1 - System Operations)
-    # Detect LD_PRELOAD and library hijacking attacks
+    # Detect LD_PRELOAD and library hijacking attacks (proxy watch)
     # =================================================================
     - paths:
         - /usr/lib          # prevents malicious library injection
@@ -187,6 +196,7 @@ spec:
         - "*.pyc"
         - "__pycache__"
         - "*.cache"
+      # skipIfMissing defaults to false: /etc/ld.so.preload may not exist
       tags:
         criteria: "CC7.1"
         severity: critical
@@ -195,7 +205,7 @@ spec:
 
     # =================================================================
     # SHELL CONFIGURATION MONITORING (SOC 2 CC6.1 - Access Security)
-    # Detect shell backdoors for persistence
+    # Detect shell backdoors for persistence (proxy watch)
     # =================================================================
     - paths:
         - /etc/profile      # prevents system-wide shell backdoor
@@ -208,6 +218,7 @@ spec:
         - create
       recursive: true
       maxDepth: 1
+      # skipIfMissing defaults to false: root dotfiles may not exist
       tags:
         criteria: "CC6.1"
         severity: high

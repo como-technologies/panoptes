@@ -178,7 +178,7 @@ type ArgusWatcherSpec struct {
 	// Use this during planned maintenance windows to avoid false alerts.
 	// Set back to false to resume monitoring.
 	// +optional
-	Paused bool `json:"paused,omitempty"`
+	Paused bool `json:"paused"`
 }
 
 // WatchedPodStatus represents the watch status for a single pod
@@ -197,7 +197,7 @@ type WatchedPodStatus struct {
 
 	// watchesReady indicates watches are active for this pod.
 	// +optional
-	WatchesReady bool `json:"watchesReady,omitempty"`
+	WatchesReady bool `json:"watchesReady"`
 
 	// readyAt is when watches became ready for this pod.
 	// +optional
@@ -232,7 +232,7 @@ type ArgusWatcherStatus struct {
 
 	// watchesReady indicates all inotify watches are registered and active.
 	// +optional
-	WatchesReady bool `json:"watchesReady,omitempty"`
+	WatchesReady bool `json:"watchesReady"`
 
 	// readyAt is when the watcher became fully ready (all watches registered).
 	// +optional

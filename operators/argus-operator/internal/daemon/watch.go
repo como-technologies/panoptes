@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -53,6 +54,7 @@ type WatchConfig struct {
 type WatchResult struct {
 	WatchID          string
 	WatchDescriptors int32
+	WatchesReady     bool
 	Success          bool
 	Error            error
 }
@@ -66,6 +68,8 @@ type WatchState struct {
 	PIDs         []int32
 	WatchedPaths int32
 	Paused       bool
+	WatchesReady bool
+	ReadyAt      *time.Time
 	// For config comparison
 	Subjects  []WatchSubjectState
 	LogFormat string
@@ -167,6 +171,7 @@ func (m *WatchManager) CreateWatch(ctx context.Context, config *WatchConfig) (*W
 	return &WatchResult{
 		WatchID:          resp.WatchId,
 		WatchDescriptors: resp.WatchedPaths,
+		WatchesReady:     resp.WatchesReady,
 		Success:          true,
 	}, nil
 }
@@ -258,6 +263,12 @@ func (m *WatchManager) GetWatchState(ctx context.Context, nodeIP, watcherName, n
 			}
 		}
 
+		var readyAt *time.Time
+		if state.ReadyAt != nil {
+			t := state.ReadyAt.AsTime()
+			readyAt = &t
+		}
+
 		watches = append(watches, WatchState{
 			WatcherName:  state.WatcherName,
 			Namespace:    state.Namespace,
@@ -266,6 +277,8 @@ func (m *WatchManager) GetWatchState(ctx context.Context, nodeIP, watcherName, n
 			PIDs:         state.Pids,
 			WatchedPaths: state.WatchDescriptors,
 			Paused:       state.Paused,
+			WatchesReady: state.WatchesReady,
+			ReadyAt:      readyAt,
 			Subjects:     subjects,
 			LogFormat:    state.LogFormat,
 		})
@@ -391,4 +404,51 @@ func (m *WatchManager) UpdateWatch(ctx context.Context, nodeIP, watcherNamespace
 		Paused:       resp.Paused,
 		WatchedPaths: resp.WatchedPaths,
 	}, nil
+}
+
+// MetricsResult contains per-watcher metrics from a daemon node.
+type MetricsResult struct {
+	WatcherName    string
+	Namespace      string
+	EventCounts    map[string]int64
+	QueueOverflows int64
+}
+
+// GetMetrics retrieves per-watcher event metrics from a daemon node.
+func (m *WatchManager) GetMetrics(ctx context.Context, nodeIP, watcherName string) ([]MetricsResult, error) {
+	logger := log.FromContext(ctx).WithValues(
+		"watcher", watcherName,
+		"nodeIP", nodeIP,
+	)
+
+	conn, err := m.client.GetConnection(ctx, nodeIP)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connection: %w", err)
+	}
+
+	client := arguspb.NewArgusdServiceClient(conn)
+	req := &arguspb.GetMetricsRequest{
+		WatcherName: watcherName,
+	}
+
+	reqCtx, cancel := requestTimeout(ctx)
+	defer cancel()
+
+	resp, err := client.GetMetrics(reqCtx, req)
+	if err != nil {
+		return nil, fmt.Errorf("gRPC GetMetrics failed: %w", err)
+	}
+
+	results := make([]MetricsResult, 0, len(resp.WatchMetrics))
+	for _, wm := range resp.WatchMetrics {
+		results = append(results, MetricsResult{
+			WatcherName:    wm.WatcherName,
+			Namespace:      wm.Namespace,
+			EventCounts:    wm.EventCounts,
+			QueueOverflows: wm.QueueOverflows,
+		})
+	}
+
+	logger.V(1).Info("Retrieved metrics", "watchMetrics", len(results))
+	return results, nil
 }

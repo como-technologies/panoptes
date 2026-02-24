@@ -403,8 +403,10 @@ pub struct WatchConfig {
     pub ignore_patterns: Vec<String>,
     pub recursive: bool,
     pub max_depth: Option<u32>,
-    /// When true, non-existent paths are skipped instead of using proxy watches.
-    pub skip_if_missing: bool,
+    /// Per-path skip_if_missing flags, parallel to `paths`.
+    /// When true for a path, non-existent paths are silently skipped.
+    /// When false, falls back to a proxy watch on the nearest ancestor.
+    pub skip_if_missing: Vec<bool>,
 }
 
 /// Watch state for pause/resume support.
@@ -741,9 +743,9 @@ impl Watcher {
         let mut added = 0;
 
         // Add watches for all paths (with proxy fallback for non-existent paths
-        // unless skip_if_missing is set)
-        for path in &config.paths {
-            self.add_watch_for_path(path, flags, config.skip_if_missing)?;
+        // unless skip_if_missing is set for that path)
+        for (path, &skip) in config.paths.iter().zip(config.skip_if_missing.iter()) {
+            self.add_watch_for_path(path, flags, skip)?;
             added += 1;
 
             // Add recursive watches if enabled and path exists as a directory
@@ -806,9 +808,9 @@ impl Watcher {
         self.config = Some(config.clone());
 
         // Add watches for all paths (with proxy fallback for non-existent paths
-        // unless skip_if_missing is set)
-        for path in &config.paths {
-            self.add_watch_for_path(path, flags, config.skip_if_missing)?;
+        // unless skip_if_missing is set for that path)
+        for (path, &skip) in config.paths.iter().zip(config.skip_if_missing.iter()) {
+            self.add_watch_for_path(path, flags, skip)?;
 
             // Add recursive watches if enabled and path exists as a directory
             if config.recursive && path.is_dir() {
@@ -1296,10 +1298,10 @@ impl Watcher {
         self.proxy_watches.clear();
 
         // Re-add all watches (with proxy fallback for non-existent paths
-        // unless skip_if_missing is set)
+        // unless skip_if_missing is set for that path)
         let flags = events_to_flags(&config.events);
-        for path in &config.paths {
-            if let Err(e) = self.add_watch_for_path(path, flags, config.skip_if_missing) {
+        for (path, &skip) in config.paths.iter().zip(config.skip_if_missing.iter()) {
+            if let Err(e) = self.add_watch_for_path(path, flags, skip) {
                 warn!(path = %path.display(), error = %e, "Failed to re-add watch after overflow");
             }
 
@@ -1710,7 +1712,7 @@ mod tests {
                 ignore_patterns: vec![],
                 recursive: false,
                 max_depth: None,
-                skip_if_missing: false,
+                skip_if_missing: vec![false],
             };
 
             assert_eq!(config.paths.len(), 1);
@@ -1725,7 +1727,7 @@ mod tests {
                 ignore_patterns: vec!["*.tmp".to_string()],
                 recursive: true,
                 max_depth: Some(5),
-                skip_if_missing: false,
+                skip_if_missing: vec![false],
             };
 
             assert!(config.recursive);
@@ -1961,7 +1963,7 @@ mod tests {
                 ignore_patterns: vec![],
                 recursive: false,
                 max_depth: None,
-                skip_if_missing: false,
+                skip_if_missing: vec![false],
             };
             watcher.add_watches(&config).unwrap();
             assert!(!watcher.proxy_watches.is_empty());
@@ -1985,7 +1987,7 @@ mod tests {
                 ignore_patterns: vec![],
                 recursive: false,
                 max_depth: None,
-                skip_if_missing: true,
+                skip_if_missing: vec![true],
             };
             watcher.add_watches(&config).unwrap();
 
@@ -2008,7 +2010,7 @@ mod tests {
                 ignore_patterns: vec![],
                 recursive: false,
                 max_depth: None,
-                skip_if_missing: true,
+                skip_if_missing: vec![true],
             };
             watcher.add_watches(&config).unwrap();
 

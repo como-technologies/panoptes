@@ -19,6 +19,7 @@ spec:
 
   subjects:
     # 4.1.1-4.1.10 - Worker node configuration files
+    # Proxy watch: kubelet config paths may not exist on all nodes.
     - paths:
         - /etc/kubernetes/kubelet.conf
         - /var/lib/kubelet/config.yaml
@@ -27,12 +28,14 @@ spec:
         - modify
         - delete
         - attrib
+      # skipIfMissing defaults to false: kubelet config may not exist
       tags:
         benchmark: "CIS 4.1"
         severity: critical
         category: kubelet-config
 
     # 4.2.x - Kubelet service configuration
+    # Proxy watch: systemd unit paths vary by distro and install method.
     - paths:
         - /etc/systemd/system/kubelet.service
         - /etc/systemd/system/kubelet.service.d
@@ -42,12 +45,14 @@ spec:
         - create
         - delete
       recursive: true
+      # skipIfMissing defaults to false: kubelet service paths vary by setup
       tags:
         benchmark: "CIS 4.2"
         severity: critical
         category: kubelet-service
 
     # CNI configuration
+    # Proxy watch: CNI paths depend on the network plugin installed.
     - paths:
         - /etc/cni/net.d
         - /opt/cni/bin
@@ -56,12 +61,15 @@ spec:
         - create
         - delete
       recursive: true
+      # skipIfMissing defaults to false: CNI paths depend on network plugin
       tags:
         benchmark: "CIS 4.1"
         severity: high
         category: cni-config
 
     # Kubelet PKI
+    # Proxy watch: kubelet PKI directory may not exist until certificates
+    # are provisioned.
     - paths:
         - /var/lib/kubelet/pki  # prevents kubelet certificate tampering
       events:
@@ -70,6 +78,7 @@ spec:
         - delete
         - attrib
       recursive: true
+      # skipIfMissing defaults to false: PKI dir created during cert provisioning
       tags:
         benchmark: "CIS 4.1"
         severity: critical
@@ -95,6 +104,7 @@ spec:
         - "pulse-*"
         - "ssh-*"
         - ".X*-lock"
+      skipIfMissing: true  # temp dirs always exist
       tags:
         benchmark: "CIS 5.7"
         severity: high
@@ -104,6 +114,8 @@ spec:
     # =================================================================
     # LIBRARY INJECTION DETECTION (CIS 5.7 - General Policies)
     # Detect LD_PRELOAD attacks in containers
+    # Proxy watch: /etc/ld.so.preload may not exist in container images.
+    # The daemon watches /etc and promotes when the file is created.
     # =================================================================
     - paths:
         - /usr/lib          # prevents malicious library injection
@@ -123,6 +135,7 @@ spec:
         - "*.pyc"
         - "__pycache__"
         - "*.cache"
+      # skipIfMissing defaults to false: /etc/ld.so.preload may not exist
       tags:
         benchmark: "CIS 5.7"
         severity: critical
@@ -132,6 +145,8 @@ spec:
     # =================================================================
     # SHELL CONFIGURATION MONITORING (CIS 5.7 - General Policies)
     # Detect shell backdoors for persistence
+    # Proxy watch: /root/.bashrc and /root/.bash_profile may not exist
+    # in minimal container images. The daemon watches /root and promotes.
     # =================================================================
     - paths:
         - /etc/profile      # prevents system-wide shell backdoor
@@ -144,6 +159,7 @@ spec:
         - create
       recursive: true
       maxDepth: 1
+      # skipIfMissing defaults to false: root dotfiles may not exist
       tags:
         benchmark: "CIS 5.7"
         severity: high

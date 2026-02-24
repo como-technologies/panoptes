@@ -149,7 +149,7 @@ func (r *ArgusWatcherReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	watcher.Status.ObservablePods = int32(len(matchingPods))
 
 	// Sync watches with daemon (daemon handles idempotency)
-	watchedCount, watchDescriptors, podStatuses, err := r.syncWatches(ctx, &watcher, matchingPods)
+	watchedCount, watchDescriptors, podStatuses, eventsDetected, err := r.syncWatches(ctx, &watcher, matchingPods)
 	if err != nil {
 		logger.Error(err, "Failed to sync watches")
 		r.setCondition(&watcher, ConditionTypeDegraded, metav1.ConditionTrue, "SyncError", err.Error())
@@ -163,8 +163,25 @@ func (r *ArgusWatcherReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	watcher.Status.TotalWatchDescriptors = watchDescriptors
 	watcher.Status.PodStatuses = podStatuses
 	watcher.Status.ObservedGeneration = watcher.Generation
+	watcher.Status.EventsDetected = eventsDetected
 	now := metav1.Now()
 	watcher.Status.LastReconcileTime = &now
+
+	// Determine aggregate watch readiness
+	allReady := watchedCount > 0 && watchedCount == watcher.Status.ObservablePods
+	for _, ps := range podStatuses {
+		if !ps.WatchesReady {
+			allReady = false
+			break
+		}
+	}
+	watcher.Status.WatchesReady = allReady
+	if allReady && watcher.Status.ReadyAt == nil {
+		watcher.Status.ReadyAt = &now
+	}
+	if !allReady {
+		watcher.Status.ReadyAt = nil
+	}
 
 	// Set available condition based on watched pods
 	if watchedCount == watcher.Status.ObservablePods && watchedCount > 0 {
@@ -191,6 +208,10 @@ func (r *ArgusWatcherReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Update status
 	if err := r.Status().Update(ctx, &watcher); err != nil {
+		if apierrors.IsConflict(err) {
+			logger.V(1).Info("Status update conflict, will retry", "error", err)
+			return ctrl.Result{Requeue: true}, nil
+		}
 		logger.Error(err, "Failed to update status")
 		return ctrl.Result{}, err
 	}
@@ -282,11 +303,12 @@ func (r *ArgusWatcherReconciler) findMatchingPods(ctx context.Context, watcher *
 // syncWatches uses the query-first pattern to reconcile watches.
 // It queries the daemon for actual state, compares with desired state,
 // and only makes changes when needed.
-func (r *ArgusWatcherReconciler) syncWatches(ctx context.Context, watcher *argusv2.ArgusWatcher, pods []corev1.Pod) (int32, int32, []argusv2.WatchedPodStatus, error) {
+func (r *ArgusWatcherReconciler) syncWatches(ctx context.Context, watcher *argusv2.ArgusWatcher, pods []corev1.Pod) (int32, int32, []argusv2.WatchedPodStatus, int64, error) {
 	logger := logf.FromContext(ctx)
 
 	var watchedCount int32
 	var totalWatchDescriptors int32
+	var totalEventsDetected int64
 	var podStatuses []argusv2.WatchedPodStatus
 	var lastErr error
 
@@ -364,12 +386,18 @@ func (r *ArgusWatcherReconciler) syncWatches(ctx context.Context, watcher *argus
 				)
 				watchedCount++
 				totalWatchDescriptors += actual.WatchedPaths
-				podStatuses = append(podStatuses, argusv2.WatchedPodStatus{
+				ps := argusv2.WatchedPodStatus{
 					Name:             pod.Name,
 					Namespace:        pod.Namespace,
 					NodeName:         nodeName,
 					WatchDescriptors: actual.WatchedPaths,
-				})
+					WatchesReady:     actual.WatchesReady,
+				}
+				if actual.ReadyAt != nil {
+					t := metav1.NewTime(*actual.ReadyAt)
+					ps.ReadyAt = &t
+				}
+				podStatuses = append(podStatuses, ps)
 				continue
 			}
 
@@ -395,6 +423,7 @@ func (r *ArgusWatcherReconciler) syncWatches(ctx context.Context, watcher *argus
 					Namespace:        pod.Namespace,
 					NodeName:         nodeName,
 					WatchDescriptors: result.WatchDescriptors,
+					WatchesReady:     result.WatchesReady,
 				})
 			}
 		}
@@ -409,9 +438,21 @@ func (r *ArgusWatcherReconciler) syncWatches(ctx context.Context, watcher *argus
 				}
 			}
 		}
+
+		// 4. Best-effort: fetch event metrics from this node
+		metricsResults, metricsErr := r.WatchManager.GetMetrics(ctx, nodeIP, watcher.Name)
+		if metricsErr != nil {
+			logger.V(1).Info("Failed to get metrics (best-effort)", "node", nodeName, "error", metricsErr)
+		} else {
+			for _, m := range metricsResults {
+				for _, count := range m.EventCounts {
+					totalEventsDetected += count
+				}
+			}
+		}
 	}
 
-	return watchedCount, totalWatchDescriptors, podStatuses, lastErr
+	return watchedCount, totalWatchDescriptors, podStatuses, totalEventsDetected, lastErr
 }
 
 // watchConfigMatches checks if the daemon's actual watch config matches the desired spec.

@@ -19,6 +19,7 @@ spec:
 
   subjects:
     # 1.1.1-1.1.21 - Control plane configuration files
+    # Proxy watch: /etc/kubernetes may not exist on non-control-plane nodes.
     - paths:
         - /etc/kubernetes/manifests
         - /etc/kubernetes/pki
@@ -28,12 +29,14 @@ spec:
         - delete
         - attrib
       recursive: true
+      # skipIfMissing defaults to false: control-plane paths may not exist
       tags:
         benchmark: "CIS 1.1"
         severity: critical
         category: control-plane-manifests
 
     # API server and controller configuration
+    # Proxy watch: these kubeconfig files only exist on control-plane nodes.
     - paths:
         - /etc/kubernetes/admin.conf
         - /etc/kubernetes/controller-manager.conf
@@ -42,12 +45,14 @@ spec:
         - modify
         - delete
         - attrib
+      # skipIfMissing defaults to false: kubeconfig files may not exist
       tags:
         benchmark: "CIS 1.1"
         severity: critical
         category: kubeconfig
 
     # etcd data directory
+    # Proxy watch: /var/lib/etcd only exists on nodes running etcd.
     - paths:
         - /var/lib/etcd
       events:
@@ -59,12 +64,14 @@ spec:
       ignore:
         - "*.snap"
         - "*.wal"
+      # skipIfMissing defaults to false: etcd data dir may not exist
       tags:
         benchmark: "CIS 1.1"
         severity: critical
         category: etcd-data
 
     # Container runtime configuration
+    # Proxy watch: only one runtime is typically installed; others won't exist.
     - paths:
         - /etc/containerd
         - /etc/crio
@@ -74,6 +81,7 @@ spec:
         - create
         - delete
       recursive: true
+      # skipIfMissing defaults to false: only one runtime typically installed
       tags:
         benchmark: "CIS 1.2"
         severity: high

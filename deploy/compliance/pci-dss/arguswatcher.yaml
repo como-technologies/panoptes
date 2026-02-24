@@ -32,6 +32,7 @@ spec:
         - "*.gz"
         - "*.old"
         - "*.[0-9]"
+      skipIfMissing: true  # /var/log always exists in containers
       tags:
         requirement: "10.5.5"
         severity: high
@@ -48,6 +49,7 @@ spec:
         - modify
         - delete
         - attrib
+      skipIfMissing: true  # these files always exist in containers
       tags:
         requirement: "11.5"
         severity: critical
@@ -62,18 +64,20 @@ spec:
         - all
       recursive: true
       maxDepth: 2
+      skipIfMissing: true  # these directories always exist in containers
       tags:
         requirement: "11.5"
         severity: critical
         category: authentication
 
-    # SSH configuration
+    # SSH configuration (proxy watch: /root/.ssh may not exist in container images)
     - paths:
         - /etc/ssh
         - /root/.ssh
       events:
         - all
       recursive: true
+      # skipIfMissing defaults to false: /root/.ssh may not exist in container images
       tags:
         requirement: "11.5"
         severity: critical
@@ -89,6 +93,7 @@ spec:
         - modify
         - create
         - delete
+      skipIfMissing: true  # these directories always exist in containers
       tags:
         requirement: "11.5"
         severity: high
@@ -104,6 +109,7 @@ spec:
         - all
       recursive: true
       maxDepth: 3
+      skipIfMissing: true  # these directories always exist in containers
       tags:
         requirement: "11.5"
         severity: high
@@ -126,13 +132,14 @@ spec:
         - "pulse-*"
         - "ssh-*"
         - ".X*-lock"
+      skipIfMissing: true  # temp dirs always exist
       tags:
         requirement: "11.5"
         severity: high
         category: staging-detection
         attack: "T1074"
 
-    # Library injection detection
+    # Library injection detection (proxy watch: /etc/ld.so.preload may not exist)
     - paths:
         - /usr/lib          # prevents malicious library injection
         - /lib              # prevents system library tampering
@@ -151,13 +158,14 @@ spec:
         - "*.pyc"
         - "__pycache__"
         - "*.cache"
+      # skipIfMissing defaults to false: /etc/ld.so.preload may not exist
       tags:
         requirement: "11.5"
         severity: critical
         category: library-integrity
         attack: "T1574.006"
 
-    # Shell configuration monitoring
+    # Shell configuration monitoring (proxy watch: root dotfiles may not exist)
     - paths:
         - /etc/profile      # prevents system-wide shell backdoor
         - /etc/profile.d    # prevents profile.d script injection
@@ -169,6 +177,7 @@ spec:
         - create
       recursive: true
       maxDepth: 1
+      # skipIfMissing defaults to false: root dotfiles may not exist
       tags:
         requirement: "11.5"
         severity: high

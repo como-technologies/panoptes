@@ -214,7 +214,7 @@ impl ArgusdServiceImpl {
         let mut ignore_patterns = Vec::new();
         let mut recursive = false;
         let mut max_depth = None;
-        let mut skip_if_missing = false;
+        let mut skip_if_missing = Vec::new();
 
         for subject in subjects {
             for path in &subject.paths {
@@ -225,6 +225,7 @@ impl ArgusdServiceImpl {
                     container_root.join(path)
                 };
                 paths.push(full_path);
+                skip_if_missing.push(subject.skip_if_missing);
             }
 
             for event in &subject.events {
@@ -242,10 +243,6 @@ impl ArgusdServiceImpl {
 
             if subject.max_depth > 0 {
                 max_depth = Some(subject.max_depth as u32);
-            }
-
-            if subject.skip_if_missing {
-                skip_if_missing = true;
             }
         }
 

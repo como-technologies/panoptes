@@ -50,7 +50,7 @@ spec:
       panoptes.como-technologies.io/monitored: "true"
 
   subjects:
-    # System credential files
+    # System credential files (always exist in Linux containers)
     - paths:
         - /etc/shadow
         - /etc/passwd
@@ -59,11 +59,15 @@ spec:
         - modify
         - delete
         - attrib
+      skipIfMissing: true
       tags:
         severity: critical
         category: credential-modification
 
     # SSH key files
+    # Proxy watch: /root/.ssh doesn't exist in most container images.
+    # The daemon watches /root and promotes to a direct watch when the
+    # attacker creates the .ssh directory.
     - paths:
         - /root/.ssh
       events:
@@ -72,6 +76,7 @@ spec:
         - delete
         - attrib
       recursive: true
+      # skipIfMissing defaults to false: proxy watch catches directory creation
       tags:
         severity: critical
         category: ssh-keys
@@ -83,11 +88,15 @@ spec:
         - modify
         - delete
       recursive: true
+      skipIfMissing: true  # always mounted by kubelet
       tags:
         severity: critical
         category: k8s-secrets
 
     # Cloud provider credential files
+    # Proxy watch: these directories rarely exist in container images.
+    # The daemon watches /root and /root/.config (nearest ancestors) and
+    # promotes when an attacker injects cloud credentials.
     - paths:
         - /root/.aws
         - /root/.azure
@@ -99,6 +108,7 @@ spec:
         - delete
       recursive: true
       maxDepth: 2
+      # skipIfMissing defaults to false: proxy watch catches credential injection
       tags:
         severity: critical
         category: cloud-credentials

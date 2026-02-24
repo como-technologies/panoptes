@@ -102,3 +102,26 @@ panoptes_show_logs() {
             || warn "Could not retrieve ${daemon} logs"
     done
 }
+
+# ─── Show daemon logs from a specific pod's node ────────────────────────
+# Usage: panoptes_show_node_logs [--tail N] DAEMON POD [NAMESPACE]
+# Shows logs only from the daemon pod running on the same node as POD.
+panoptes_show_node_logs() {
+    local tail=30
+    if [[ "${1:-}" == "--tail" ]]; then tail="$2"; shift 2; fi
+    local daemon="$1" pod="$2" ns="${3:-$NAMESPACE}"
+
+    local node
+    node=$(kubectl get pod "$pod" -n "$ns" -o jsonpath='{.spec.nodeName}')
+    local daemon_pod
+    daemon_pod=$(kubectl get pods -n "${PANOPTES_NS}" \
+        -l "app.kubernetes.io/name=${daemon}" \
+        --field-selector "spec.nodeName=${node}" \
+        -o jsonpath='{.items[0].metadata.name}')
+
+    echo ""
+    info "${daemon} logs from ${node} (last ${tail} lines):"
+    kubectl logs -n "${PANOPTES_NS}" "${daemon_pod}" \
+        --tail="${tail}" 2>/dev/null \
+        || warn "Could not retrieve ${daemon} logs from ${node}"
+}

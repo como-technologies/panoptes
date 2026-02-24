@@ -29,6 +29,7 @@ spec:
       ignore:
         - "*.gz"
         - "*.old"
+      skipIfMissing: true  # /var/log always exists in containers
       tags:
         requirement: "164.312(c)(1)"
         severity: high
@@ -44,6 +45,7 @@ spec:
         - modify
         - delete
         - attrib
+      skipIfMissing: true  # core system user files always exist in containers
       tags:
         requirement: "164.312(d)"
         severity: critical
@@ -57,12 +59,14 @@ spec:
       events:
         - all
       recursive: true
+      skipIfMissing: true  # base auth config paths always exist in containers
       tags:
         requirement: "164.312(d)"
         severity: critical
         category: authentication
 
     # Application configuration
+    # Proxy watch: application config paths may not exist in all container images.
     - paths:
         - /app/config
         - /etc/app
@@ -73,12 +77,14 @@ spec:
         - delete
       recursive: true
       maxDepth: 3
+      # skipIfMissing defaults to false: application config paths may not exist in all container images
       tags:
         requirement: "164.308(a)(1)"
         severity: high
         category: app-config
 
     # SSL/TLS certificates
+    # Proxy watch: /app/certs may not exist in all container images.
     - paths:
         - /etc/ssl
         - /etc/pki
@@ -86,12 +92,14 @@ spec:
       events:
         - all
       recursive: true
+      # skipIfMissing defaults to false: /app/certs may not exist in all container images
       tags:
         requirement: "164.312(e)(1)"
         severity: critical
         category: encryption
 
     # Database configuration files
+    # Proxy watch: database-specific paths may not exist in non-database containers.
     - paths:
         - /var/lib/postgresql  # prevents ePHI database tampering
         - /var/lib/mysql       # prevents ePHI database tampering
@@ -106,6 +114,7 @@ spec:
       ignore:
         - "*.pid"
         - "*.sock"
+      # skipIfMissing defaults to false: database-specific paths may not exist in non-database containers
       tags:
         requirement: "164.312(c)(1)"
         severity: high
@@ -131,6 +140,7 @@ spec:
         - "pulse-*"
         - "ssh-*"
         - ".X*-lock"
+      skipIfMissing: true  # temp dirs always exist
       tags:
         requirement: "164.312(c)(1)"
         severity: high
@@ -140,6 +150,7 @@ spec:
     # =================================================================
     # LIBRARY INJECTION DETECTION (HIPAA 164.312(c)(1) - Integrity)
     # Detect LD_PRELOAD attacks that could intercept ePHI
+    # Proxy watch: /etc/ld.so.preload may not exist in all container images
     # =================================================================
     - paths:
         - /usr/lib          # prevents malicious library injection
@@ -159,6 +170,7 @@ spec:
         - "*.pyc"
         - "__pycache__"
         - "*.cache"
+      # skipIfMissing defaults to false: /etc/ld.so.preload may not exist in all container images
       tags:
         requirement: "164.312(c)(1)"
         severity: critical
@@ -168,6 +180,7 @@ spec:
     # =================================================================
     # SHELL CONFIGURATION MONITORING (HIPAA 164.312(d) - Auth)
     # Detect shell backdoors for persistence
+    # Proxy watch: root dotfiles may not exist in all container images
     # =================================================================
     - paths:
         - /etc/profile      # prevents system-wide shell backdoor
@@ -180,6 +193,7 @@ spec:
         - create
       recursive: true
       maxDepth: 1
+      # skipIfMissing defaults to false: root dotfiles may not exist in all container images
       tags:
         requirement: "164.312(d)"
         severity: high

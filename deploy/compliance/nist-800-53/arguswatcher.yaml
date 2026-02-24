@@ -31,6 +31,7 @@ spec:
       ignore:
         - "*.pyc"
         - "__pycache__"
+      skipIfMissing: true  # system binaries always exist in containers
       tags:
         control: "SI-7"
         severity: critical
@@ -47,6 +48,7 @@ spec:
         - modify
         - delete
         - attrib
+      skipIfMissing: true  # user account files always exist in containers
       tags:
         control: "SI-7(1)"
         severity: critical
@@ -61,6 +63,7 @@ spec:
       events:
         - all
       recursive: true
+      skipIfMissing: true  # auth config paths always exist in containers
       tags:
         control: "SI-7"
         severity: critical
@@ -79,6 +82,7 @@ spec:
         - "*.gz"
         - "*.old"
         - "*.[0-9]"
+      skipIfMissing: true  # /var/log always exists in containers
       tags:
         control: "AU-2"
         severity: high
@@ -98,6 +102,7 @@ spec:
       ignore:
         - "*.pyc"
         - "*.cache"
+      skipIfMissing: true  # system library dirs always exist in containers
       tags:
         control: "SI-7"
         severity: high
@@ -114,6 +119,7 @@ spec:
         - delete
       recursive: true
       maxDepth: 2
+      skipIfMissing: true  # standard system paths present in containers
       tags:
         control: "SI-7"
         severity: critical
@@ -139,6 +145,7 @@ spec:
         - "pulse-*"
         - "ssh-*"
         - ".X*-lock"
+      skipIfMissing: true  # temp dirs always exist in containers
       tags:
         control: "SI-7"
         severity: high
@@ -149,6 +156,7 @@ spec:
     # LIBRARY INJECTION DETECTION (NIST SI-7 - Software Integrity)
     # Detect LD_PRELOAD attacks - NIST already has library monitoring
     # Adding linker config files for complete coverage
+    # Proxy watch: includes /etc/ld.so.preload which may not exist
     # =================================================================
     - paths:
         - /etc/ld.so.conf   # prevents linker config hijacking
@@ -159,6 +167,7 @@ spec:
         - modify
         - delete
       recursive: true
+      # skipIfMissing defaults to false: /etc/ld.so.preload may not exist
       tags:
         control: "SI-7"
         severity: critical
@@ -168,6 +177,7 @@ spec:
     # =================================================================
     # SHELL CONFIGURATION MONITORING (NIST AC-6 - Least Privilege)
     # Detect shell backdoors for persistence
+    # Proxy watch: includes root dotfiles which may not exist
     # =================================================================
     - paths:
         - /etc/profile      # prevents system-wide shell backdoor
@@ -180,6 +190,7 @@ spec:
         - create
       recursive: true
       maxDepth: 1
+      # skipIfMissing defaults to false: root dotfiles may not exist
       tags:
         control: "AC-6"
         severity: high

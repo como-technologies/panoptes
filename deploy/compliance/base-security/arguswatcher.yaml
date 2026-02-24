@@ -27,6 +27,7 @@ spec:
         - delete
         - create
         - attrib
+      skipIfMissing: true  # standard system files, always exist
       tags:
         severity: critical
         category: user-accounts
@@ -37,6 +38,7 @@ spec:
       events:
         - all
       recursive: true
+      skipIfMissing: true
       tags:
         severity: critical
         category: sudo-config
@@ -49,16 +51,20 @@ spec:
         - create
         - delete
       recursive: true
+      skipIfMissing: true  # /etc/ssh always exists
       tags:
         severity: critical
         category: ssh-config
 
     # Root SSH keys
+    # Proxy watch: /root/.ssh typically doesn't exist in container images.
+    # The daemon watches /root and promotes when .ssh is created.
     - paths:
         - /root/.ssh
       events:
         - all
       recursive: true
+      # skipIfMissing defaults to false: proxy watch catches directory creation
       tags:
         severity: critical
         category: ssh-keys
@@ -78,6 +84,7 @@ spec:
         - "lastlog"
         - "wtmp"
         - "btmp"
+      skipIfMissing: true
       tags:
         severity: high
         category: audit-logs
@@ -90,6 +97,7 @@ spec:
         - create
         - delete
       recursive: true
+      skipIfMissing: true
       tags:
         severity: critical
         category: authentication
@@ -102,6 +110,7 @@ spec:
       events:
         - all
       recursive: true
+      skipIfMissing: true
       tags:
         severity: high
         category: scheduled-tasks
@@ -116,6 +125,7 @@ spec:
         - delete
       recursive: true
       maxDepth: 2
+      skipIfMissing: true
       tags:
         severity: high
         category: system-services
@@ -139,6 +149,7 @@ spec:
         - "pulse-*"
         - "ssh-*"
         - ".X*-lock"
+      skipIfMissing: true  # temp dirs always exist
       tags:
         severity: high
         category: staging-detection
@@ -146,6 +157,8 @@ spec:
 
     # =================================================================
     # LIBRARY INJECTION DETECTION - Detect LD_PRELOAD attacks
+    # Proxy watch: /etc/ld.so.preload may not exist in container images.
+    # The daemon watches /etc and promotes when the file is created.
     # =================================================================
     - paths:
         - /usr/lib          # prevents malicious library injection
@@ -165,6 +178,7 @@ spec:
         - "*.pyc"
         - "__pycache__"
         - "*.cache"
+      # skipIfMissing defaults to false: /etc/ld.so.preload may not exist
       tags:
         severity: critical
         category: library-integrity
@@ -172,6 +186,8 @@ spec:
 
     # =================================================================
     # SHELL CONFIGURATION MONITORING - Detect shell backdoors
+    # Proxy watch: /root/.bashrc and /root/.bash_profile may not exist
+    # in minimal container images. The daemon watches /root and promotes.
     # =================================================================
     - paths:
         - /etc/profile      # prevents system-wide shell backdoor
@@ -186,6 +202,7 @@ spec:
         - create
       recursive: true
       maxDepth: 1
+      # skipIfMissing defaults to false: root dotfiles may not exist
       tags:
         severity: high
         category: shell-persistence
