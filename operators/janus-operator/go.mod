@@ -1,6 +1,6 @@
 module github.com/como-technologies/panoptes/operators/janus-operator
 
-go 1.24.6
+go 1.26.0
 
 require (
 	github.com/como-technologies/panoptes/gen/go v0.0.0

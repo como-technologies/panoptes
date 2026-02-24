@@ -4,6 +4,9 @@
 # Unified Dockerfile for janusd (Rust) - File Access Auditing daemon
 # Uses multi-stage build with musl for static linking and scratch base
 #
+# Cross-compilation: All build stages run on $BUILDPLATFORM (no QEMU).
+# tonistiigi/xx provides cross-compilation sysroots and linker config.
+#
 # Build Args:
 #   FEATURES=""       -> Slim build (~5-6 MB): traditional fanotify mode only
 #   FEATURES="ebpf"   -> Full build (~6-8 MB): eBPF + fanotify with auto-detection
@@ -13,11 +16,16 @@
 #   docker build -f daemons/janusd/Dockerfile --build-arg FEATURES=ebpf -t janusd:latest .
 
 # ============================================================================
+# Stage 0: Pull cargo-chef binary for the build platform
+# ============================================================================
+FROM --platform=$BUILDPLATFORM lukemathwalker/cargo-chef:latest-rust-1.93.1-alpine AS cargo-chef
+
+# ============================================================================
 # Stage 1: Chef planner (generates recipe.json for dependency caching)
 # ============================================================================
-FROM rust:1.93-alpine AS planner
+FROM --platform=$BUILDPLATFORM rust:1.93-alpine AS planner
 
-COPY --from=lukemathwalker/cargo-chef:latest-rust-1.93.1-alpine /usr/local/cargo/bin/cargo-chef /usr/local/cargo/bin/cargo-chef
+COPY --from=cargo-chef /usr/local/cargo/bin/cargo-chef /usr/local/cargo/bin/cargo-chef
 RUN apk add --no-cache musl-dev
 
 WORKDIR /build
@@ -39,17 +47,20 @@ RUN cargo chef prepare --recipe-path recipe.json
 # ============================================================================
 # Stage 2: Chef cook (builds and caches dependencies)
 # ============================================================================
-FROM rust:1.93-alpine AS cacher
+FROM --platform=$BUILDPLATFORM rust:1.93-alpine AS cacher
 
 ARG TARGETARCH
 
-COPY --from=lukemathwalker/cargo-chef:latest-rust-1.93.1-alpine /usr/local/cargo/bin/cargo-chef /usr/local/cargo/bin/cargo-chef
-RUN apk add --no-cache musl-dev protobuf-dev && \
-    if [ "$TARGETARCH" = "arm64" ]; then \
-      rustup target add aarch64-unknown-linux-musl; \
-    else \
-      rustup target add x86_64-unknown-linux-musl; \
-    fi
+# Cross-compilation toolchain: xx provides sysroots and linker config
+COPY --from=tonistiigi/xx / /
+COPY --from=cargo-chef /usr/local/cargo/bin/cargo-chef /usr/local/cargo/bin/cargo-chef
+
+# Host tools: clang cross-compiles natively (no QEMU needed)
+# Target sysroot: xx-apk installs musl-dev + gcc for TARGETARCH
+RUN apk add --no-cache clang lld protobuf-dev && \
+    xx-apk add --no-cache musl-dev gcc && \
+    RUST_TARGET=$(if [ "$TARGETARCH" = "arm64" ]; then echo "aarch64-unknown-linux-musl"; else echo "x86_64-unknown-linux-musl"; fi) && \
+    rustup target add $RUST_TARGET
 
 WORKDIR /build
 
@@ -73,18 +84,19 @@ RUN mkdir -p daemons/janusd/src daemons/janusd/benches && \
 ARG FEATURES=""
 
 # Cook dependencies (this layer is cached if dependencies don't change)
+# xx-cargo auto-configures the cross-linker for TARGETARCH
 RUN RUST_TARGET=$(if [ "$TARGETARCH" = "arm64" ]; then echo "aarch64-unknown-linux-musl"; else echo "x86_64-unknown-linux-musl"; fi) && \
     cd daemons/janusd && \
     if [ -n "$FEATURES" ]; then \
-      cargo chef cook --release --target $RUST_TARGET --features "$FEATURES" --recipe-path recipe.json; \
+      xx-cargo chef cook --release --target $RUST_TARGET --features "$FEATURES" --recipe-path recipe.json; \
     else \
-      cargo chef cook --release --target $RUST_TARGET --recipe-path recipe.json; \
+      xx-cargo chef cook --release --target $RUST_TARGET --recipe-path recipe.json; \
     fi
 
 # ============================================================================
 # Stage 3: eBPF bytecode builder (only used when FEATURES contains "ebpf")
 # ============================================================================
-FROM rust:1.93-bookworm AS ebpf-builder
+FROM --platform=$BUILDPLATFORM rust:1.93-bookworm AS ebpf-builder
 
 ARG FEATURES=""
 
@@ -118,20 +130,21 @@ RUN if echo "$FEATURES" | grep -q "ebpf"; then \
 # ============================================================================
 # Stage 4: Userspace binary builder (uses cached dependencies)
 # ============================================================================
-FROM rust:1.93-alpine AS builder
+FROM --platform=$BUILDPLATFORM rust:1.93-alpine AS builder
 
-# Docker provides TARGETARCH (amd64, arm64)
 ARG TARGETARCH
 
-# Install build dependencies and add appropriate musl target
+# Cross-compilation toolchain (same as cacher stage)
+COPY --from=tonistiigi/xx / /
+
+# Host tools + target sysroot
 RUN apk add --no-cache \
-    musl-dev \
+    clang \
+    lld \
     protobuf-dev \
-    && if [ "$TARGETARCH" = "arm64" ]; then \
-         rustup target add aarch64-unknown-linux-musl; \
-       else \
-         rustup target add x86_64-unknown-linux-musl; \
-       fi
+    && xx-apk add --no-cache musl-dev gcc \
+    && RUST_TARGET=$(if [ "$TARGETARCH" = "arm64" ]; then echo "aarch64-unknown-linux-musl"; else echo "x86_64-unknown-linux-musl"; fi) \
+    && rustup target add $RUST_TARGET
 
 WORKDIR /build
 
@@ -150,13 +163,13 @@ COPY daemons/janusd/ ./daemons/janusd/
 
 ARG FEATURES=""
 
-# Build static binary with musl (architecture-aware) - deps are cached
+# Build static binary — xx-cargo handles cross-linker config, deps are cached
 RUN RUST_TARGET=$(if [ "$TARGETARCH" = "arm64" ]; then echo "aarch64-unknown-linux-musl"; else echo "x86_64-unknown-linux-musl"; fi) && \
     cd daemons/janusd && \
     if [ -n "$FEATURES" ]; then \
-      cargo build --release --target $RUST_TARGET --features "$FEATURES"; \
+      xx-cargo build --release --target $RUST_TARGET --features "$FEATURES"; \
     else \
-      cargo build --release --target $RUST_TARGET; \
+      xx-cargo build --release --target $RUST_TARGET; \
     fi
 
 # ============================================================================

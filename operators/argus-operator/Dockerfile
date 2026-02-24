@@ -1,12 +1,13 @@
 # Build the manager binary
 # NOTE: Build context must be the repository root (not the operator directory)
 # Usage: docker build -f operators/argus-operator/Dockerfile -t argus-operator .
-FROM golang:1.24 AS builder
+FROM --platform=$BUILDPLATFORM bufbuild/buf:1.66.0 AS buf
+FROM --platform=$BUILDPLATFORM golang:1.26 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
 # Install buf for proto generation (pinned version, multi-arch)
-COPY --from=bufbuild/buf:1.50.0 /usr/local/bin/buf /usr/local/bin/buf
+COPY --from=buf /usr/local/bin/buf /usr/local/bin/buf
 
 WORKDIR /workspace
 

@@ -22,16 +22,7 @@ jobs:
         operator: [argus, janus]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.24'
-          cache-dependency-path: operators/${{ matrix.operator }}-operator/go.sum
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -48,7 +39,7 @@ jobs:
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Build and push operator
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: operators/${{ matrix.operator }}-operator/Dockerfile
@@ -68,10 +59,7 @@ jobs:
         daemon: [argusd, janusd]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -88,7 +76,7 @@ jobs:
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Build and push daemon
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: daemons/${{ matrix.daemon }}/Dockerfile
@@ -105,7 +93,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -125,7 +113,7 @@ jobs:
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Build and push dashboard
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ui/panoptes-eye/Dockerfile
@@ -143,12 +131,12 @@ jobs:
     needs: [release-operators, release-daemons, release-dashboard]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Helm
         uses: azure/setup-helm@v4
         with:
-          version: v3.14.0
+          version: v4.1.1
 
       - name: Login to GHCR for Helm OCI
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -183,7 +171,7 @@ jobs:
     needs: [release-operators, release-daemons, release-dashboard, release-helm]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download Helm charts
         uses: actions/download-artifact@v4
@@ -196,7 +184,7 @@ jobs:
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           name: Release ${{ steps.version.outputs.VERSION }}
           draft: false
