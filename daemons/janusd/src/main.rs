@@ -369,7 +369,7 @@ async fn main() -> Result<()> {
     );
 
     // Create health reporter
-    let (mut health_reporter, health_service) = health_reporter();
+    let (health_reporter, health_service) = health_reporter();
 
     // Start appropriate service based on runtime mode
     #[cfg(feature = "ebpf")]

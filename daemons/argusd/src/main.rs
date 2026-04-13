@@ -351,7 +351,7 @@ async fn main() -> Result<()> {
     log_startup_info(&config, listen_addr, mode_str);
 
     // Create health reporter
-    let (mut health_reporter, health_service) = health_reporter();
+    let (health_reporter, health_service) = health_reporter();
 
     // Start appropriate service based on runtime mode
     #[cfg(feature = "ebpf")]
