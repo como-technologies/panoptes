@@ -1,7 +1,7 @@
 [package]
 name = "janusd-ebpf"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "Janus eBPF programs for file access auditing with permission control"
 license = "Apache-2.0"
 
