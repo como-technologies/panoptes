@@ -13,8 +13,8 @@
 //! Snapshots are collected on-demand for reporting without blocking updates.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::sync::RwLock;
 

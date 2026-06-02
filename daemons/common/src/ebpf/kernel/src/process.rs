@@ -45,11 +45,14 @@ macro_rules! define_process_tracepoints {
         }
 
         #[inline(always)]
-        fn try_handle_exec(
-            ctx: &::aya_ebpf::programs::TracePointContext,
-        ) -> Result<(), ()> {
-            use ::aya_ebpf::helpers::{bpf_get_current_pid_tgid, bpf_get_current_uid_gid, bpf_ktime_get_ns, bpf_get_current_comm};
-            use $crate::{extract_ppid, extract_cwd, extract_cmdline, MAX_COMM_LEN, ProcessCacheEntry};
+        fn try_handle_exec(ctx: &::aya_ebpf::programs::TracePointContext) -> Result<(), ()> {
+            use ::aya_ebpf::helpers::{
+                bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_get_current_uid_gid,
+                bpf_ktime_get_ns,
+            };
+            use $crate::{
+                MAX_COMM_LEN, ProcessCacheEntry, extract_cmdline, extract_cwd, extract_ppid,
+            };
 
             // Get per-CPU scratch space
             let entry = PROCESS_CACHE_SCRATCH.get_ptr_mut(0).ok_or(())?;

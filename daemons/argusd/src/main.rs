@@ -10,10 +10,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use clap::Parser;
 use panoptes_common::{
-    // Resource limit checking
-    check_fd_limit,
-    missing_capabilities_message,
-    read_inotify_limits,
+    ARGUSD_REQUIRED_CAPS,
     // Capability checking
     CapabilityChecker,
     // Environment abstraction
@@ -24,13 +21,16 @@ use panoptes_common::{
     LinuxEnvironmentDetector,
     ResourceLimitsInfo,
     WarningSeverity,
-    ARGUSD_REQUIRED_CAPS,
+    // Resource limit checking
+    check_fd_limit,
+    missing_capabilities_message,
+    read_inotify_limits,
 };
 #[cfg(feature = "ebpf")]
-use panoptes_common::{is_bpf_lsm_enabled, is_ebpf_supported, ARGUSD_REQUIRED_CAPS_EBPF};
+use panoptes_common::{ARGUSD_REQUIRED_CAPS_EBPF, is_bpf_lsm_enabled, is_ebpf_supported};
 use tonic::transport::Server;
 use tonic_health::server::health_reporter;
-use tracing::{error, info, warn, Level};
+use tracing::{Level, error, info, warn};
 use tracing_subscriber::prelude::*;
 
 mod metrics;

@@ -33,8 +33,8 @@ pub mod proto {
     tonic::include_proto!("janus.v1");
 }
 
-use proto::janusd_service_client::JanusdServiceClient;
 use proto::GetGuardStateRequest;
+use proto::janusd_service_client::JanusdServiceClient;
 
 /// Init container that waits for JanusGuard readiness
 #[derive(Parser, Debug)]
@@ -55,7 +55,11 @@ struct Args {
     pod_name: String,
 
     /// Address of janusd gRPC service
-    #[arg(long, env = "JANUSD_ADDRESS", default_value = "http://janusd.panoptes-system:50052")]
+    #[arg(
+        long,
+        env = "JANUSD_ADDRESS",
+        default_value = "http://janusd.panoptes-system:50052"
+    )]
     janusd_address: String,
 
     /// Maximum wait time in seconds
@@ -160,9 +164,7 @@ async fn wait_for_guard(args: &Args) -> Result<i32, Box<dyn std::error::Error>> 
 }
 
 /// Query janusd for guard state, returns (marks_registered, mount_count) if found
-async fn query_guard_state(
-    args: &Args,
-) -> Result<Option<(bool, i32)>, Box<dyn std::error::Error>> {
+async fn query_guard_state(args: &Args) -> Result<Option<(bool, i32)>, Box<dyn std::error::Error>> {
     // Connect to janusd
     let channel = Channel::from_shared(args.janusd_address.clone())?
         .connect_timeout(Duration::from_secs(5))

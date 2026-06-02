@@ -53,8 +53,8 @@ pub mod proto {
     tonic::include_proto!("argus.v1");
 }
 
-use proto::argusd_service_client::ArgusdServiceClient;
 use proto::GetWatchStateRequest;
+use proto::argusd_service_client::ArgusdServiceClient;
 
 /// Init container that waits for ArgusWatcher readiness
 #[derive(Parser, Debug)]
@@ -75,7 +75,11 @@ struct Args {
     pod_name: String,
 
     /// Address of argusd gRPC service
-    #[arg(long, env = "ARGUSD_ADDRESS", default_value = "http://argusd.panoptes-system:50051")]
+    #[arg(
+        long,
+        env = "ARGUSD_ADDRESS",
+        default_value = "http://argusd.panoptes-system:50051"
+    )]
     argusd_address: String,
 
     /// Maximum wait time in seconds
@@ -180,9 +184,7 @@ async fn wait_for_watcher(args: &Args) -> Result<i32, Box<dyn std::error::Error>
 }
 
 /// Query argusd for watch state, returns (watches_ready, active_watch_descriptors) if found
-async fn query_watch_state(
-    args: &Args,
-) -> Result<Option<(bool, i32)>, Box<dyn std::error::Error>> {
+async fn query_watch_state(args: &Args) -> Result<Option<(bool, i32)>, Box<dyn std::error::Error>> {
     // Connect to argusd
     let channel = Channel::from_shared(args.argusd_address.clone())?
         .connect_timeout(Duration::from_secs(5))

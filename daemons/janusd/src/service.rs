@@ -23,17 +23,17 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
 use panoptes_common::proc::{ProcessResolver, ProcfsProcessResolver};
 use panoptes_common::{
-    detect_runtime, new_session_map, ContainerRuntime, DaemonMetrics, EventBroadcaster, Filterable,
-    MetricsAggregator, Session, SessionManager, SessionMap, SessionState,
+    ContainerRuntime, DaemonMetrics, EventBroadcaster, Filterable, MetricsAggregator, Session,
+    SessionManager, SessionMap, SessionState, detect_runtime, new_session_map,
 };
 use prost_types::Timestamp;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, warn};
@@ -1058,14 +1058,14 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
         // Update the subjects with new patterns
         // This stores the new patterns in the session state
         // The guard will use these patterns after being recreated
-        if !req.deny_patterns.is_empty() || !req.allow_patterns.is_empty() {
-            if let Some(subject) = session.state.subjects.first_mut() {
-                if !req.deny_patterns.is_empty() {
-                    subject.deny = req.deny_patterns.clone();
-                }
-                if !req.allow_patterns.is_empty() {
-                    subject.allow = req.allow_patterns.clone();
-                }
+        if (!req.deny_patterns.is_empty() || !req.allow_patterns.is_empty())
+            && let Some(subject) = session.state.subjects.first_mut()
+        {
+            if !req.deny_patterns.is_empty() {
+                subject.deny = req.deny_patterns.clone();
+            }
+            if !req.allow_patterns.is_empty() {
+                subject.allow = req.allow_patterns.clone();
             }
         }
 

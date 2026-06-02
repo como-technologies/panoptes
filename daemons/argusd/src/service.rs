@@ -17,17 +17,11 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use panoptes_common::{
-    detect_runtime,
-    // gRPC streaming helpers
-    filtered_broadcast_stream,
-    new_session_map,
-    runtime_for_container,
-    stream_from_iter,
     ContainerRuntime,
     // Metrics
     DaemonMetrics,
@@ -41,9 +35,15 @@ use panoptes_common::{
     SessionMap,
     SessionState,
     StreamFilter,
+    detect_runtime,
+    // gRPC streaming helpers
+    filtered_broadcast_stream,
+    new_session_map,
+    runtime_for_container,
+    stream_from_iter,
 };
 use prost_types::Timestamp;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, warn};
 

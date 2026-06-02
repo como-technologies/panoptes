@@ -140,9 +140,7 @@ pub fn extract_path_from_dentry(dentry: *const Dentry, out: &mut [u8; MAX_PATH_L
             if idx >= MAX_PATH_LEN {
                 break;
             }
-            let b: u8 = unsafe {
-                bpf_probe_read_kernel(name_ptr.add(ci as usize)).unwrap_or(0)
-            };
+            let b: u8 = unsafe { bpf_probe_read_kernel(name_ptr.add(ci as usize)).unwrap_or(0) };
             out[idx] = b;
             ci += 1;
         }

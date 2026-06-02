@@ -17,8 +17,8 @@
 //! - Independent locking of individual sessions for modification
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
 use tokio::sync::{Mutex, RwLock};

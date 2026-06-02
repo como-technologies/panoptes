@@ -17,9 +17,9 @@ use aya_ebpf::maps::HashMap;
 use aya_ebpf::programs::LsmContext;
 
 use panoptes_ebpf_kernel::{
-    define_filter_maps, define_process_cache_maps, define_process_tracepoints,
-    extract_path_from_file, populate_process_info, submit_event_filtered,
-    File, FileEvent, FileEventType,
+    File, FileEvent, FileEventType, define_filter_maps, define_process_cache_maps,
+    define_process_tracepoints, extract_path_from_file, populate_process_info,
+    submit_event_filtered,
 };
 
 // Define maps including EVENT_SCRATCH per-CPU array

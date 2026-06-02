@@ -67,8 +67,8 @@
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify, WatchDescriptor};
@@ -1202,10 +1202,10 @@ impl Watcher {
         }
 
         // Clean up empty proxy entry for this wd
-        if let Some(remaining) = self.proxy_watches.get(&event.wd) {
-            if remaining.is_empty() {
-                self.proxy_watches.remove(&event.wd);
-            }
+        if let Some(remaining) = self.proxy_watches.get(&event.wd)
+            && remaining.is_empty()
+        {
+            self.proxy_watches.remove(&event.wd);
         }
 
         // Get the ancestor directory path for building child paths
@@ -1223,17 +1223,16 @@ impl Watcher {
                         // If the target is a directory and the original config
                         // was recursive, add recursive watches too. We check
                         // against the stored config.
-                        if target.is_dir() {
-                            if let Some(ref config) = self.config {
-                                if config.recursive {
-                                    let _ = self.add_recursive_watches(
-                                        target,
-                                        proxy.flags,
-                                        config.max_depth.unwrap_or(0),
-                                        0,
-                                    );
-                                }
-                            }
+                        if target.is_dir()
+                            && let Some(ref config) = self.config
+                            && config.recursive
+                        {
+                            let _ = self.add_recursive_watches(
+                                target,
+                                proxy.flags,
+                                config.max_depth.unwrap_or(0),
+                                0,
+                            );
                         }
                     }
                     Err(e) => {
@@ -1245,34 +1244,34 @@ impl Watcher {
                 // full target path still doesn't exist. Advance the proxy
                 // to the newly created intermediate directory.
                 let child_path = anc.join(event_name.to_str().unwrap_or_default());
-                if child_path.is_dir() {
-                    if let Ok(relative) = target.strip_prefix(&child_path) {
-                        if let Some(next) = relative.components().next() {
-                            let next_child = next.as_os_str().to_os_string();
-                            let proxy_flags =
-                                proxy.flags | AddWatchFlags::IN_CREATE | AddWatchFlags::IN_MOVED_TO;
-                            match self.add_watch(&child_path, proxy_flags) {
-                                Ok(new_wd) => {
-                                    self.proxy_watches.entry(new_wd).or_default().push(
-                                        ProxyTarget {
-                                            configured_path: proxy.configured_path,
-                                            immediate_child: next_child,
-                                            flags: proxy.flags,
-                                        },
-                                    );
-                                    info!(
-                                        path = %child_path.display(),
-                                        "Advanced proxy to closer ancestor"
-                                    );
-                                }
-                                Err(e) => {
-                                    warn!(
-                                        path = %child_path.display(),
-                                        error = %e,
-                                        "Failed to advance proxy"
-                                    );
-                                }
-                            }
+                if child_path.is_dir()
+                    && let Ok(relative) = target.strip_prefix(&child_path)
+                    && let Some(next) = relative.components().next()
+                {
+                    let next_child = next.as_os_str().to_os_string();
+                    let proxy_flags =
+                        proxy.flags | AddWatchFlags::IN_CREATE | AddWatchFlags::IN_MOVED_TO;
+                    match self.add_watch(&child_path, proxy_flags) {
+                        Ok(new_wd) => {
+                            self.proxy_watches
+                                .entry(new_wd)
+                                .or_default()
+                                .push(ProxyTarget {
+                                    configured_path: proxy.configured_path,
+                                    immediate_child: next_child,
+                                    flags: proxy.flags,
+                                });
+                            info!(
+                                path = %child_path.display(),
+                                "Advanced proxy to closer ancestor"
+                            );
+                        }
+                        Err(e) => {
+                            warn!(
+                                path = %child_path.display(),
+                                error = %e,
+                                "Failed to advance proxy"
+                            );
                         }
                     }
                 }

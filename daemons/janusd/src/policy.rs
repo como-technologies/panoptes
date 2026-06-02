@@ -186,23 +186,22 @@ impl PolicyEvaluator {
     pub fn evaluate(&self, path: &Path, pid: Option<i32>) -> AccessResponse {
         // Check cache first
         let cache_key = CacheKey::new(path, pid);
-        if let Some(ref cache) = self.cache {
-            if let Ok(cache) = cache.read() {
-                if let Some(&cached) = cache.peek(&cache_key) {
-                    debug!(path = %path.display(), pid = ?pid, decision = ?cached, "Cache hit");
-                    return cached;
-                }
-            }
+        if let Some(ref cache) = self.cache
+            && let Ok(cache) = cache.read()
+            && let Some(&cached) = cache.peek(&cache_key)
+        {
+            debug!(path = %path.display(), pid = ?pid, decision = ?cached, "Cache hit");
+            return cached;
         }
 
         // Evaluate policy
         let decision = self.evaluate_uncached(path, pid);
 
         // Update cache
-        if let Some(ref cache) = self.cache {
-            if let Ok(mut cache) = cache.write() {
-                cache.put(cache_key, decision);
-            }
+        if let Some(ref cache) = self.cache
+            && let Ok(mut cache) = cache.write()
+        {
+            cache.put(cache_key, decision);
         }
 
         decision
@@ -235,17 +234,16 @@ impl PolicyEvaluator {
         }
 
         // 3. Check auto_allow_owner
-        if self.auto_allow_owner {
-            if let (Some(access_pid), Some(owner_pid)) = (pid, self.owner_pid) {
-                if access_pid == owner_pid {
-                    debug!(
-                        path = %path.display(),
-                        pid = access_pid,
-                        "Auto-allowed owner"
-                    );
-                    return AccessResponse::Allow;
-                }
-            }
+        if self.auto_allow_owner
+            && let (Some(access_pid), Some(owner_pid)) = (pid, self.owner_pid)
+            && access_pid == owner_pid
+        {
+            debug!(
+                path = %path.display(),
+                pid = access_pid,
+                "Auto-allowed owner"
+            );
+            return AccessResponse::Allow;
         }
 
         // 4. Apply default response
@@ -304,10 +302,10 @@ impl PolicyEvaluator {
     /// Clear the decision cache.
     #[allow(dead_code)]
     pub fn clear_cache(&self) {
-        if let Some(ref cache) = self.cache {
-            if let Ok(mut cache) = cache.write() {
-                cache.clear();
-            }
+        if let Some(ref cache) = self.cache
+            && let Ok(mut cache) = cache.write()
+        {
+            cache.clear();
         }
     }
 

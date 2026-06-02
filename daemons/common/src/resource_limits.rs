@@ -123,7 +123,7 @@ pub enum ResourceLimitError {
 /// This check follows the principle of failing early with clear messages
 /// rather than silently degrading or producing cryptic errors later.
 pub fn check_fd_limit(required_fds: u64, safety_margin: u64) -> Result<u64, ResourceLimitError> {
-    use nix::sys::resource::{getrlimit, Resource};
+    use nix::sys::resource::{Resource, getrlimit};
 
     let (soft, _hard) = getrlimit(Resource::RLIMIT_NOFILE)?;
     let total_required = required_fds.saturating_add(safety_margin);
@@ -232,7 +232,7 @@ impl ResourceLimitsInfo {
     ///
     /// This is useful for startup logging and diagnostics.
     pub fn collect() -> Self {
-        use nix::sys::resource::{getrlimit, Resource};
+        use nix::sys::resource::{Resource, getrlimit};
 
         let (fd_soft, fd_hard) = getrlimit(Resource::RLIMIT_NOFILE).unwrap_or((0, 0));
 

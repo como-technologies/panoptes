@@ -17,19 +17,11 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use panoptes_common::{
-    detect_runtime,
-    // eBPF loader
-    ebpf::{EbpfError, EbpfEventReceiver, EbpfLoader},
-    // gRPC streaming helpers
-    filtered_broadcast_stream,
-    new_session_map,
-    runtime_for_container,
-    stream_from_iter,
     ContainerRuntime,
     // Metrics
     DaemonMetrics,
@@ -42,6 +34,14 @@ use panoptes_common::{
     SessionMap,
     SessionState,
     StreamFilter,
+    detect_runtime,
+    // eBPF loader
+    ebpf::{EbpfError, EbpfEventReceiver, EbpfLoader},
+    // gRPC streaming helpers
+    filtered_broadcast_stream,
+    new_session_map,
+    runtime_for_container,
+    stream_from_iter,
 };
 use prost_types::Timestamp;
 use tokio::sync::Mutex;
@@ -592,13 +592,12 @@ impl argusd_service_server::ArgusdService for ArgusdServiceImpl {
             let session = session.lock().await;
 
             // Remove eBPF filters
-            if !session.state.active_prefixes.is_empty() {
-                if let Err(e) = self
+            if !session.state.active_prefixes.is_empty()
+                && let Err(e) = self
                     .remove_watched_prefixes(&session.state.active_prefixes)
                     .await
-                {
-                    warn!(error = %e, "Failed to remove eBPF filters");
-                }
+            {
+                warn!(error = %e, "Failed to remove eBPF filters");
             }
 
             // Unregister metrics

@@ -97,9 +97,9 @@ pub mod grpc;
 
 // Re-export environment abstraction types
 pub use capabilities::{
-    missing_capabilities_message, CapabilityChecker, CapabilityError, LinuxCapabilityChecker,
-    RequiredCapability, ARGUSD_REQUIRED_CAPS, ARGUSD_REQUIRED_CAPS_EBPF, JANUSD_OPTIONAL_CAPS,
-    JANUSD_REQUIRED_CAPS, JANUSD_REQUIRED_CAPS_EBPF,
+    ARGUSD_REQUIRED_CAPS, ARGUSD_REQUIRED_CAPS_EBPF, CapabilityChecker, CapabilityError,
+    JANUSD_OPTIONAL_CAPS, JANUSD_REQUIRED_CAPS, JANUSD_REQUIRED_CAPS_EBPF, LinuxCapabilityChecker,
+    RequiredCapability, missing_capabilities_message,
 };
 pub use environment::{
     DeploymentEnvironment, EnvironmentDetector, EnvironmentError, EnvironmentWarning, Feature,
@@ -109,8 +109,8 @@ pub use paths::{LinuxPathProvider, PathProvider, RuntimeType as PathRuntimeType}
 
 // Re-export commonly used types from core modules
 pub use container_runtime::{
-    detect_runtime, detect_runtime_type, runtime_for_container, ContainerRuntime,
-    ContainerdRuntime, CriORuntime, RuntimeType,
+    ContainerRuntime, ContainerdRuntime, CriORuntime, RuntimeType, detect_runtime,
+    detect_runtime_type, runtime_for_container,
 };
 pub use error::{CommonError, ProcError, RuntimeError, SecurityError};
 pub use glog::GlogLayer;
@@ -122,21 +122,21 @@ pub use metrics::{
     AggregateTotals, BasicMetrics, DaemonMetrics, MetricsAggregator, MetricsSnapshot,
 };
 pub use session::{
-    new_session_map, Session, SessionError, SessionManager, SessionMap, SessionState,
+    Session, SessionError, SessionManager, SessionMap, SessionState, new_session_map,
 };
 
 // Re-export gRPC helpers (when feature enabled)
 #[cfg(feature = "grpc")]
-pub use grpc::{broadcast_stream, filtered_broadcast_stream, stream_from_iter, GrpcStream};
+pub use grpc::{GrpcStream, broadcast_stream, filtered_broadcast_stream, stream_from_iter};
 
 // Always export basic stream helpers
-pub use grpc::{basic_filtered_broadcast_stream, basic_stream_from_iter, BasicStream};
+pub use grpc::{BasicStream, basic_filtered_broadcast_stream, basic_stream_from_iter};
 
 // Re-export eBPF support detection (for runtime mode selection)
 pub use ebpf_support::{is_bpf_lsm_enabled, is_ebpf_supported};
 
 // Re-export resource limit checking utilities
 pub use resource_limits::{
-    check_fd_limit, read_fanotify_limits, read_inotify_limits, ResourceLimitError,
-    ResourceLimitsInfo,
+    ResourceLimitError, ResourceLimitsInfo, check_fd_limit, read_fanotify_limits,
+    read_inotify_limits,
 };

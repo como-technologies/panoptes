@@ -18,10 +18,10 @@ use aya_ebpf::helpers::{bpf_get_current_task, bpf_probe_read_kernel};
 use panoptes_ebpf_types::{MAX_CMDLINE_LEN, MAX_CWD_LEN, MAX_EXE_LEN};
 
 use crate::offsets::{
-    FS_PWD_OFFSET, MM_ARG_END_OFFSET, MM_ARG_START_OFFSET, PATH_DENTRY_OFFSET,
-    TASK_FS_OFFSET, TASK_MM_OFFSET, TASK_REAL_PARENT_OFFSET, TASK_TGID_OFFSET,
+    FS_PWD_OFFSET, MM_ARG_END_OFFSET, MM_ARG_START_OFFSET, PATH_DENTRY_OFFSET, TASK_FS_OFFSET,
+    TASK_MM_OFFSET, TASK_REAL_PARENT_OFFSET, TASK_TGID_OFFSET,
 };
-use crate::path::{extract_path_from_dentry, Dentry};
+use crate::path::{Dentry, extract_path_from_dentry};
 
 /// Maximum command line bytes to read
 const MAX_CMDLINE_READ: usize = 128;

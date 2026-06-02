@@ -75,8 +75,8 @@ mod task;
 pub use filtering::should_emit_event;
 pub use helpers::{populate_process_info, submit_event, submit_event_filtered};
 pub use path::{
-    extract_path_from_dentry, extract_path_from_file, extract_path_with_name,
-    Dentry, File, Path, QStr,
+    Dentry, File, Path, QStr, extract_path_from_dentry, extract_path_from_file,
+    extract_path_with_name,
 };
 pub use task::{extract_cmdline, extract_cwd, extract_exe_from_bprm, extract_ppid};
 // Note: define_filter_maps and define_process_cache_maps are #[macro_export] macros,
@@ -84,6 +84,6 @@ pub use task::{extract_cmdline, extract_cwd, extract_exe_from_bprm, extract_ppid
 
 // Re-export types for convenience
 pub use panoptes_ebpf_types::{
-    FileEvent, FileEventType, ProcessCacheEntry,
-    MAX_CMDLINE_LEN, MAX_COMM_LEN, MAX_CWD_LEN, MAX_EXE_LEN, MAX_PATH_LEN,
+    FileEvent, FileEventType, MAX_CMDLINE_LEN, MAX_COMM_LEN, MAX_CWD_LEN, MAX_EXE_LEN,
+    MAX_PATH_LEN, ProcessCacheEntry,
 };

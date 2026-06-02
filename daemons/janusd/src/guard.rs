@@ -107,14 +107,14 @@
 
 use std::os::fd::{AsFd, AsRawFd};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use nix::sys::fanotify::{
     EventFFlags, Fanotify, FanotifyResponse, InitFlags, MarkFlags, MaskFlags, Response,
 };
 use thiserror::Error;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, error, info, warn};
 
 use crate::dedupe::DedupeCache;
@@ -745,7 +745,9 @@ mod tests {
     #[test]
     fn test_strip_container_prefix_non_proc_path() {
         assert_eq!(
-            Guard::strip_container_prefix("/var/lib/containerd/io.containerd.snapshotter/overlayfs/snapshots/123/fs/etc/shadow"),
+            Guard::strip_container_prefix(
+                "/var/lib/containerd/io.containerd.snapshotter/overlayfs/snapshots/123/fs/etc/shadow"
+            ),
             "/var/lib/containerd/io.containerd.snapshotter/overlayfs/snapshots/123/fs/etc/shadow"
         );
     }

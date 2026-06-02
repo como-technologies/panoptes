@@ -61,12 +61,11 @@ mod policy_evaluation_tests {
             let path_str = path.to_string_lossy();
 
             // Check auto_allow_owner first
-            if self.auto_allow_owner {
-                if let (Some(owner), Some(accessor)) = (self.owner_pid, pid) {
-                    if owner == accessor {
-                        return AccessResponse::Allow;
-                    }
-                }
+            if self.auto_allow_owner
+                && let (Some(owner), Some(accessor)) = (self.owner_pid, pid)
+                && owner == accessor
+            {
+                return AccessResponse::Allow;
             }
 
             // Check deny patterns (highest priority)

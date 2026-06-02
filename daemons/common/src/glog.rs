@@ -34,10 +34,10 @@ use std::thread;
 
 use chrono::Local;
 use tracing::{Event, Level, Subscriber};
+use tracing_subscriber::Layer;
 use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::Layer;
 
 /// A `tracing_subscriber` layer that formats logs in glog style.
 ///

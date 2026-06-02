@@ -18,7 +18,9 @@
 //! ```
 
 use aya_ebpf::{
-    helpers::{bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_get_current_uid_gid, bpf_ktime_get_ns},
+    helpers::{
+        bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_get_current_uid_gid, bpf_ktime_get_ns,
+    },
     maps::{HashMap, LruHashMap, RingBuf},
 };
 use panoptes_ebpf_types::{FileEvent, MAX_COMM_LEN};
@@ -159,7 +161,9 @@ pub fn submit_event_filtered(
 ) {
     // Apply in-kernel filtering if path is populated
     // If path is empty (not yet extracted), we still emit to avoid losing events
-    if event.path[0] != 0 && !should_emit_event(&event.path, prefix_map, ignored_map, filter_enabled_map) {
+    if event.path[0] != 0
+        && !should_emit_event(&event.path, prefix_map, ignored_map, filter_enabled_map)
+    {
         return; // Event filtered out in kernel
     }
 

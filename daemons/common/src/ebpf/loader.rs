@@ -4,9 +4,9 @@
 //! Handles loading bytecode, attaching LSM hooks, and reading from ring buffers.
 
 use aya::{
+    Btf, Ebpf, EbpfLoader as AyaEbpfLoader,
     maps::{HashMap, RingBuf},
     programs::{Lsm, TracePoint},
-    Btf, Ebpf, EbpfLoader as AyaEbpfLoader,
 };
 use aya_log::EbpfLogger;
 use thiserror::Error;

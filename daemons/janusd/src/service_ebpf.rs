@@ -18,18 +18,18 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use panoptes_common::{
-    detect_runtime,
+    ContainerRuntime, DaemonMetrics, EventBroadcaster, MetricsAggregator, Session, SessionManager,
+    SessionMap, SessionState, detect_runtime,
     ebpf::{EbpfError, EbpfEventReceiver, EbpfLoader},
-    new_session_map, ContainerRuntime, DaemonMetrics, EventBroadcaster, MetricsAggregator, Session,
-    SessionManager, SessionMap, SessionState,
+    new_session_map,
 };
 use prost_types::Timestamp;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, warn};
@@ -637,10 +637,11 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
             }
 
             // Add deny paths if enforcing
-            if req.enforcing && !deny_paths.is_empty() {
-                if let Err(e) = self.add_deny_paths(&deny_paths).await {
-                    warn!(error = %e, "Failed to configure deny paths");
-                }
+            if req.enforcing
+                && !deny_paths.is_empty()
+                && let Err(e) = self.add_deny_paths(&deny_paths).await
+            {
+                warn!(error = %e, "Failed to configure deny paths");
             }
 
             // Mark as ready
@@ -690,21 +691,19 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
             let session = session.lock().await;
 
             // Remove eBPF filters
-            if !session.state.active_prefixes.is_empty() {
-                if let Err(e) = self
+            if !session.state.active_prefixes.is_empty()
+                && let Err(e) = self
                     .remove_guarded_prefixes(&session.state.active_prefixes)
                     .await
-                {
-                    warn!(error = %e, "Failed to remove eBPF prefixes");
-                }
+            {
+                warn!(error = %e, "Failed to remove eBPF prefixes");
             }
-            if !session.state.active_deny_paths.is_empty() {
-                if let Err(e) = self
+            if !session.state.active_deny_paths.is_empty()
+                && let Err(e) = self
                     .remove_deny_paths(&session.state.active_deny_paths)
                     .await
-                {
-                    warn!(error = %e, "Failed to remove deny paths");
-                }
+            {
+                warn!(error = %e, "Failed to remove deny paths");
             }
 
             self.metrics.unregister(&key).await;
@@ -991,10 +990,10 @@ impl janusd_service_server::JanusdService for JanusdServiceImpl {
             }
         }
 
-        if !req.allow_patterns.is_empty() {
-            if let Some(subject) = session.state.subjects.first_mut() {
-                subject.allow = req.allow_patterns;
-            }
+        if !req.allow_patterns.is_empty()
+            && let Some(subject) = session.state.subjects.first_mut()
+        {
+            subject.allow = req.allow_patterns;
         }
 
         let deny_count = session

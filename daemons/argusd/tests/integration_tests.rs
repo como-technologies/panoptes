@@ -386,8 +386,8 @@ mod event_processing_tests {
 
 #[cfg(test)]
 mod metrics_tests {
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     /// Test concurrent metric updates are thread-safe.
     #[test]

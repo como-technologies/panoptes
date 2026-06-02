@@ -6,7 +6,7 @@
 //! Benchmarks for measuring the performance of policy evaluation
 //! and deduplication in the janusd daemon.
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
@@ -108,12 +108,11 @@ impl PolicyEvaluator {
         let path_str = path.to_string_lossy();
 
         // Auto-allow owner check
-        if self.auto_allow_owner {
-            if let (Some(owner), Some(accessor)) = (self.owner_pid, pid) {
-                if owner == accessor {
-                    return AccessResponse::Allow;
-                }
-            }
+        if self.auto_allow_owner
+            && let (Some(owner), Some(accessor)) = (self.owner_pid, pid)
+            && owner == accessor
+        {
+            return AccessResponse::Allow;
         }
 
         // Check deny patterns

@@ -42,7 +42,7 @@ use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use nix::sys::socket::{bind, sendto, MsgFlags, NetlinkAddr};
+use nix::sys::socket::{MsgFlags, NetlinkAddr, bind, sendto};
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
@@ -218,11 +218,11 @@ impl NetlinkAuditLogger {
     /// Returns `AuditError::MissingCapability` if CAP_AUDIT_WRITE is not available.
     pub fn new() -> Result<Self, AuditError> {
         // Check for CAP_AUDIT_WRITE capability
-        if let Ok(caps) = caps::read(None, caps::CapSet::Effective) {
-            if !caps.contains(&caps::Capability::CAP_AUDIT_WRITE) {
-                warn!("CAP_AUDIT_WRITE not available, audit logging will be disabled");
-                return Err(AuditError::MissingCapability);
-            }
+        if let Ok(caps) = caps::read(None, caps::CapSet::Effective)
+            && !caps.contains(&caps::Capability::CAP_AUDIT_WRITE)
+        {
+            warn!("CAP_AUDIT_WRITE not available, audit logging will be disabled");
+            return Err(AuditError::MissingCapability);
         }
 
         // Create netlink socket.
