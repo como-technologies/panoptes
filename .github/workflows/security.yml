@@ -7,14 +7,14 @@ on:
       - 'daemons/**'
       - '**/Cargo.toml'
       - '**/Cargo.lock'
-      - 'deny.toml'
+      - '**/deny.toml'
   pull_request:
     branches: [main]
     paths:
       - 'daemons/**'
       - '**/Cargo.toml'
       - '**/Cargo.lock'
-      - 'deny.toml'
+      - '**/deny.toml'
   schedule:
     # Run weekly on Monday at 00:00 UTC
     - cron: '0 0 * * 1'
@@ -28,6 +28,9 @@ jobs:
     name: Security Audit
     runs-on: ubuntu-latest
     strategy:
+      # Report every crate's advisories in one run instead of canceling
+      # siblings on the first failure.
+      fail-fast: false
       matrix:
         crate: [argusd, janusd]
     steps:
@@ -49,6 +52,7 @@ jobs:
     name: Cargo Deny
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         crate: [argusd, janusd]
     steps:

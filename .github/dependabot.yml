@@ -1,0 +1,32 @@
+version: 2
+
+updates:
+  # Rust crates. There is no cargo workspace under daemons/ or tools/ — each
+  # crate carries its own Cargo.lock — so every manifest directory is listed.
+  #
+  # Keeping these lockfiles current is what stops the weekly Security cron
+  # (.github/workflows/security.yml) from tripping over RustSec advisories
+  # filed against stale transitive dependencies.
+  - package-ecosystem: cargo
+    directories:
+      - /daemons/argusd
+      - /daemons/common
+      - /daemons/janusd
+      - /tools/guard-wait
+      - /tools/watcher-wait
+    schedule:
+      interval: weekly
+      # Land bumps ahead of the Monday 00:00 UTC security scan.
+      day: sunday
+    # Most advisories are resolvable without touching a manifest, since the
+    # manifests already use loose version requirements.
+    versioning-strategy: lockfile-only
+    # One rollup PR per crate per week rather than one per dependency.
+    groups:
+      cargo:
+        patterns:
+          - '*'
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: build
+      include: scope
